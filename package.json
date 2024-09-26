@@ -1,7 +1,7 @@
 {
     "author": "ICJR",
     "dependencies": {
-        "@esportsplus/typescript": "^0.4.9"
+        "@esportsplus/typescript": "^0.4.10"
     },
     "main": "build/index.js",
     "name": "@esportsplus/crypto",
