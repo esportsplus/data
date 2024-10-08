@@ -15,6 +15,6 @@
     "types": "build/index.d.ts",
     "version": "0.0.12",
     "devDependencies": {
-        "@types/node": "^20.14.10"
+        "@types/node": "^22.7.5"
     }
 }
