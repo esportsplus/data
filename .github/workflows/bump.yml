@@ -1,0 +1,9 @@
+name: bump version
+
+on:
+  push:
+    branches: '**' # only trigger on branches, not on tags
+
+jobs:
+  bump:
+    uses: esportsplus/typescript/.github/workflows/bump.yml@main
