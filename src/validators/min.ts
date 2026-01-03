@@ -1,21 +1,26 @@
 import type { ValidatorFunction } from '~/types';
 
 
-export default (number: number, error?: string): ValidatorFunction<unknown> => {
+const min = (number: number, error?: string): ValidatorFunction<unknown> => {
+    // Pre-compute error messages to avoid template literal allocation in hot path
+    let arrayError = error || `must be at least ${number} items`,
+        numberError = error || `must be at least ${number}`,
+        stringError = error || `must be at least ${number} characters`;
+
     return (value, errors) => {
         if (typeof value === 'number') {
             if (value < number) {
-                errors.push(error || `must be at least ${number}`);
+                errors.push(numberError);
             }
         }
         else if (typeof value === 'string') {
             if (value.length < number) {
-                errors.push(error || `must be at least ${number} characters`);
+                errors.push(stringError);
             }
         }
         else if (Array.isArray(value)) {
             if (value.length < number) {
-                errors.push(error || `must be at least ${number} items`);
+                errors.push(arrayError);
             }
         }
         else {
@@ -23,3 +28,6 @@ export default (number: number, error?: string): ValidatorFunction<unknown> => {
         }
     };
 };
+
+
+export default min;

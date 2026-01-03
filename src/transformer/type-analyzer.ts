@@ -46,7 +46,8 @@ interface AnalyzedType {
 }
 
 
-let visited = new Set<ts.Type>();
+let typeAnalysisCache = new WeakMap<ts.TypeNode, AnalyzedType>(),
+    visited = new Set<ts.Type>();
 
 
 function analyzeArrayType(
@@ -293,40 +294,105 @@ function analyzeUnionType(
     optional: boolean,
     typeChecker: ts.TypeChecker
 ): AnalyzedProperty {
+    let unionTypes = type.types,
+        n = unionTypes.length;
+
+    // Fast-path: T | null (2 types, one is null)
+    if (n === 2) {
+        let t0 = unionTypes[0],
+            t1 = unionTypes[1];
+
+        if (t0.flags & ts.TypeFlags.Null) {
+            let result = analyzePropertyType(t1, name, optional, typeChecker);
+
+            result.nullable = true;
+
+            return result;
+        }
+
+        if (t1.flags & ts.TypeFlags.Null) {
+            let result = analyzePropertyType(t0, name, optional, typeChecker);
+
+            result.nullable = true;
+
+            return result;
+        }
+
+        if (t0.flags & ts.TypeFlags.Undefined) {
+            let result = analyzePropertyType(t1, name, true, typeChecker);
+
+            return result;
+        }
+
+        if (t1.flags & ts.TypeFlags.Undefined) {
+            let result = analyzePropertyType(t0, name, true, typeChecker);
+
+            return result;
+        }
+    }
+
+    // Fast-path: T | null | undefined (3 types)
+    if (n === 3) {
+        let hasNull = false,
+            hasUndefined = false,
+            mainType: ts.Type | null = null;
+
+        for (let i = 0; i < 3; i++) {
+            let t = unionTypes[i];
+
+            if (t.flags & ts.TypeFlags.Null) {
+                hasNull = true;
+            }
+            else if (t.flags & ts.TypeFlags.Undefined) {
+                hasUndefined = true;
+            }
+            else {
+                mainType = t;
+            }
+        }
+
+        if (hasNull && hasUndefined && mainType) {
+            let result = analyzePropertyType(mainType, name, true, typeChecker);
+
+            result.nullable = true;
+
+            return result;
+        }
+    }
+
+    // General case
     let hasNull = false,
         hasUndefined = false,
         literals: LiteralValue[] = [],
         types: AnalyzedProperty[] = [];
 
-    for (let i = 0, n = type.types.length; i < n; i++) {
-        let t = type.types[i];
+    for (let i = 0; i < n; i++) {
+        let t = unionTypes[i],
+            flags = t.flags;
 
-        // Check for null
-        if (t.flags & ts.TypeFlags.Null) {
+        // Check for null/undefined first (most common modifiers)
+        if (flags & ts.TypeFlags.Null) {
             hasNull = true;
             continue;
         }
 
-        // Check for undefined
-        if (t.flags & ts.TypeFlags.Undefined) {
+        if (flags & ts.TypeFlags.Undefined) {
             hasUndefined = true;
             continue;
         }
 
-        // Check for string literal
+        // Check for literals
         if (t.isStringLiteral()) {
             literals.push({ type: 'string', value: t.value });
             continue;
         }
 
-        // Check for number literal
         if (t.isNumberLiteral()) {
             literals.push({ type: 'number', value: t.value });
             continue;
         }
 
-        // Check for boolean literal
-        if (t.flags & ts.TypeFlags.BooleanLiteral) {
+        if (flags & ts.TypeFlags.BooleanLiteral) {
             let value = (t as any).intrinsicName === 'true';
 
             literals.push({ type: 'boolean', value });
@@ -393,8 +459,8 @@ function extractProperties(
         );
     }
 
-    // Sort alphabetically by property name
-    result.sort((a, b) => a.name.localeCompare(b.name));
+    // Sort alphabetically by property name (faster than localeCompare)
+    result.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 
     return result;
 }
@@ -404,16 +470,29 @@ const analyzeType = (
     typeNode: ts.TypeNode,
     typeChecker: ts.TypeChecker
 ): AnalyzedType => {
+    let cached = typeAnalysisCache.get(typeNode);
+
+    if (cached) {
+        return cached;
+    }
+
     visited.clear();
 
-    let type = typeChecker.getTypeAtLocation(typeNode);
+    let type = typeChecker.getTypeAtLocation(typeNode),
+        result: AnalyzedType = {
+            name: typeChecker.typeToString(type),
+            properties: extractProperties(type, typeChecker)
+        };
 
-    return {
-        name: typeChecker.typeToString(type),
-        properties: extractProperties(type, typeChecker)
-    };
+    typeAnalysisCache.set(typeNode, result);
+
+    return result;
+};
+
+const clearTypeAnalysisCache = (): void => {
+    typeAnalysisCache = new WeakMap();
 };
 
 
-export { analyzeType };
+export { analyzeType, clearTypeAnalysisCache };
 export type { AnalyzedProperty, AnalyzedType, LiteralValue, PropertyType };

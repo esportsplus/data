@@ -1,9 +1,13 @@
-import ts from 'typescript';
+import { applyReplacementsReverse, type Replacement } from '@esportsplus/typescript/transformer';
 import { clearValidatorCache, getValidatorsForSource, type BrandedValidator } from './config-parser';
-import { detectCalls, mightNeedTransform, type DetectedCall } from './detector';
-import { transformCodec } from './proto';
-import { transformValidatorBuild } from './validator';
+import { clearImportMapCache, detectCalls, mightNeedTransform, type DetectedCall } from './detector';
+import { clearTypeAnalysisCache } from './type-analyzer';
+import { transformCodec } from './transforms/proto';
+import { transformValidatorBuild } from './transforms';
+import ts from 'typescript';
 
+
+type DetectedCallsCache = WeakMap<ts.SourceFile, DetectedCall[]>;
 
 interface TransformResult {
     code: string;
@@ -12,37 +16,69 @@ interface TransformResult {
 }
 
 
-function createTransformer(
+let detectedCallsCache: DetectedCallsCache = new WeakMap();
+
+
+function getCachedDetectedCalls(
+    sourceFile: ts.SourceFile,
     program: ts.Program
-): ts.TransformerFactory<ts.SourceFile> {
+): DetectedCall[] {
+    let cached = detectedCallsCache.get(sourceFile);
+
+    if (cached) {
+        return cached;
+    }
+
+    let calls = detectCalls(sourceFile, program);
+
+    detectedCallsCache.set(sourceFile, calls);
+
+    return calls;
+}
+
+
+function visitTransformNode(
+    node: ts.Node,
+    context: ts.TransformationContext,
+    detectedCalls: DetectedCall[],
+    program: ts.Program,
+    typeChecker: ts.TypeChecker
+): ts.Node {
+    // Check if this node is one of our detected calls
+    if (ts.isCallExpression(node)) {
+        for (let i = 0, n = detectedCalls.length; i < n; i++) {
+            let call = detectedCalls[i];
+
+            if (call.node === node) {
+                let brandValidators = getValidatorsForSource(call.importSource, program);
+
+                return transformCall(call, typeChecker, brandValidators);
+            }
+        }
+    }
+
+    return ts.visitEachChild(
+        node,
+        (child) => visitTransformNode(child, context, detectedCalls, program, typeChecker),
+        context
+    );
+}
+
+function createTransformer(program: ts.Program): ts.TransformerFactory<ts.SourceFile> {
     let typeChecker = program.getTypeChecker();
 
     return (context: ts.TransformationContext) => {
         return (sourceFile: ts.SourceFile): ts.SourceFile => {
-            let detectedCalls = detectCalls(sourceFile, program);
+            let detectedCalls = getCachedDetectedCalls(sourceFile, program);
 
             if (detectedCalls.length === 0) {
                 return sourceFile;
             }
 
-            function visit(node: ts.Node): ts.Node {
-                // Check if this node is one of our detected calls
-                if (ts.isCallExpression(node)) {
-                    for (let i = 0, n = detectedCalls.length; i < n; i++) {
-                        let call = detectedCalls[i];
-
-                        if (call.node === node) {
-                            let brandValidators = getValidatorsForSource(call.importSource, program);
-
-                            return transformCall(call, typeChecker, brandValidators);
-                        }
-                    }
-                }
-
-                return ts.visitEachChild(node, visit, context);
-            }
-
-            return ts.visitNode(sourceFile, visit) as ts.SourceFile;
+            return ts.visitNode(
+                sourceFile,
+                (node) => visitTransformNode(node, context, detectedCalls, program, typeChecker)
+            ) as ts.SourceFile;
         };
     };
 }
@@ -106,21 +142,17 @@ const transform = (
         return { code, sourceFile, transformed: false };
     }
 
-    let detectedCalls = detectCalls(sourceFile, program);
+    let detectedCalls = getCachedDetectedCalls(sourceFile, program);
 
     if (detectedCalls.length === 0) {
         return { code, sourceFile, transformed: false };
     }
 
-    let typeChecker = program.getTypeChecker();
+    let replacements: Replacement[] = [],
+        typeChecker = program.getTypeChecker();
 
-    // Sort calls in reverse order by position to avoid offset issues
-    let sortedCalls = [...detectedCalls].sort((a, b) => b.node.pos - a.node.pos);
-
-    let transformedCode = code;
-
-    for (let i = 0, n = sortedCalls.length; i < n; i++) {
-        let call = sortedCalls[i],
+    for (let i = 0, n = detectedCalls.length; i < n; i++) {
+        let call = detectedCalls[i],
             generatedCode: string;
 
         try {
@@ -145,15 +177,22 @@ const transform = (
                     continue;
             }
 
-            transformedCode =
-                transformedCode.substring(0, call.node.pos) +
-                generatedCode +
-                transformedCode.substring(call.node.end);
+            replacements.push({
+                end: call.node.end,
+                newText: generatedCode,
+                start: call.node.pos
+            });
         }
         catch (error) {
             console.error(`@esportsplus/data: transform error:`, error);
         }
     }
+
+    if (replacements.length === 0) {
+        return { code, sourceFile, transformed: false };
+    }
+
+    let transformedCode = applyReplacementsReverse(code, replacements);
 
     // Create new source file from transformed code
     let transformedSourceFile = ts.createSourceFile(
@@ -171,5 +210,13 @@ const transform = (
 };
 
 
-export { clearValidatorCache, createTransformer, mightNeedTransform, transform };
+const clearCaches = (): void => {
+    clearImportMapCache();
+    clearTypeAnalysisCache();
+    clearValidatorCache();
+    detectedCallsCache = new WeakMap();
+};
+
+
 export type { TransformResult };
+export { clearCaches, clearValidatorCache, createTransformer, mightNeedTransform, transform };

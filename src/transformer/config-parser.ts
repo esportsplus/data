@@ -1,3 +1,4 @@
+import { ERRORS_VARIABLE } from '~/transformer/constants';
 import ts from 'typescript';
 
 
@@ -6,6 +7,11 @@ interface BrandedValidator {
     body: string;
     brand: string;
 }
+
+
+const ERRORS_PUSH_REGEX = /errors\.push\((['"`])(.+?)\1\)/g;
+
+const VALUE_WORD_REGEX = /\bvalue\b/g;
 
 
 function containsAwait(node: ts.Node): boolean {
@@ -62,13 +68,13 @@ function inlineValidatorBody(
 
     // Replace 'value' parameter with actual variable
     // Use word boundary to avoid replacing 'value' in 'valueOf' etc.
-    code = code.replace(/\bvalue\b/g, variable);
+    code = code.replace(VALUE_WORD_REGEX, variable);
 
-    // Replace errors.push('msg') with (_error ??= []).push({ message: 'msg', path: ... })
+    // Replace errors.push('msg') with (ERRORS_VARIABLE ??= []).push({ message: 'msg', path: ... })
     // Handle single quotes, double quotes, and backticks
     code = code.replace(
-        /errors\.push\((['"`])(.+?)\1\)/g,
-        `(_error ??= []).push({ message: $1$2$1, path: ${path} })`
+        ERRORS_PUSH_REGEX,
+        `(${ERRORS_VARIABLE} ??= []).push({ message: $1$2$1, path: ${path} })`
     );
 
     return code;
@@ -140,25 +146,29 @@ function parseValidatorSetCall(
 let validatorCache = new Map<string, Map<string, BrandedValidator>>();
 
 
+function visitValidatorSetCall(
+    node: ts.Node,
+    brandValidators: Map<string, BrandedValidator>,
+    typeChecker: ts.TypeChecker
+): void {
+    if (ts.isCallExpression(node)) {
+        let result = parseValidatorSetCall(node, typeChecker);
+
+        if (result) {
+            brandValidators.set(result.brand, result);
+        }
+    }
+
+    ts.forEachChild(node, (child) => visitValidatorSetCall(child, brandValidators, typeChecker));
+}
+
 function parseValidatorFile(
     sourceFile: ts.SourceFile,
     typeChecker: ts.TypeChecker
 ): Map<string, BrandedValidator> {
     let brandValidators = new Map<string, BrandedValidator>();
 
-    function visit(node: ts.Node): void {
-        if (ts.isCallExpression(node)) {
-            let result = parseValidatorSetCall(node, typeChecker);
-
-            if (result) {
-                brandValidators.set(result.brand, result);
-            }
-        }
-
-        ts.forEachChild(node, visit);
-    }
-
-    visit(sourceFile);
+    visitValidatorSetCall(sourceFile, brandValidators, typeChecker);
 
     return brandValidators;
 }

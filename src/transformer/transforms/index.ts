@@ -1,7 +1,14 @@
-import ts from 'typescript';
+import { analyzeType } from '~/transformer/type-analyzer';
+import { generateValidator } from './validator';
 import type { BrandedValidator } from '../config-parser';
-import { analyzeType } from '../type-analyzer';
-import { generateValidator, type GeneratorContext } from './generator';
+import ts from 'typescript';
+
+
+const ASYNC_ARROW_REGEX = /^\(?async\s/;
+
+const ASYNC_FUNCTION_REGEX = /^async\s/;
+
+const AWAIT_KEYWORD_REGEX = /\bawait\b/;
 
 
 function extractMessages(
@@ -33,17 +40,17 @@ function isAsyncValidator(source: string): boolean {
     let trimmed = source.trim();
 
     // Check for async function declaration
-    if (/^async\s/.test(trimmed)) {
+    if (ASYNC_FUNCTION_REGEX.test(trimmed)) {
         return true;
     }
 
     // Check for async arrow function
-    if (/^\(?async\s/.test(trimmed)) {
+    if (ASYNC_ARROW_REGEX.test(trimmed)) {
         return true;
     }
 
     // Check for await usage in function body
-    if (/\bawait\b/.test(source)) {
+    if (AWAIT_KEYWORD_REGEX.test(source)) {
         return true;
     }
 
@@ -57,9 +64,7 @@ function parseErrorMessages(typeNode: ts.TypeNode | undefined, typeChecker: ts.T
         return messages;
     }
 
-    let type = typeChecker.getTypeAtLocation(typeNode);
-
-    extractMessages(type, [], messages, typeChecker);
+    extractMessages(typeChecker.getTypeAtLocation(typeNode), [], messages, typeChecker);
 
     return messages;
 }
@@ -72,17 +77,15 @@ const transformValidatorBuild = (
     brandValidators: Map<string, BrandedValidator>,
     customValidatorSource?: string
 ): string => {
-    let analyzed = analyzeType(typeArg, typeChecker),
-        customMessages = parseErrorMessages(errorMessagesType, typeChecker),
-        hasAsync = customValidatorSource ? isAsyncValidator(customValidatorSource) : false;
-
-    let context: GeneratorContext = {
-        brandValidators,
-        customMessages,
-        hasAsync
-    };
-
-    return generateValidator(analyzed, context, customValidatorSource);
+    return generateValidator(
+        analyzeType(typeArg, typeChecker),
+        {
+            brandValidators,
+            customMessages: parseErrorMessages(errorMessagesType, typeChecker),
+            hasAsync: customValidatorSource ? isAsyncValidator(customValidatorSource) : false
+        },
+        customValidatorSource
+    );
 };
 
 

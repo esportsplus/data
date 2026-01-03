@@ -1,4 +1,4 @@
-import type { AnalyzedProperty, AnalyzedType } from '../type-analyzer';
+import type { AnalyzedProperty, AnalyzedType } from '~/transformer/type-analyzer';
 import { mapFields, type MappedField } from './field-mapper';
 import {
     getProtoFieldInfo,
@@ -9,8 +9,8 @@ import {
 } from './type-mapper';
 
 
-let nestedDecoders: string[] = [];
-let decoderCount = 0;
+let decoderCount = 0,
+    nestedDecoders: string[] = [];
 
 
 function generateArrayDecode(
@@ -75,35 +75,43 @@ function generateArrayDecode(
                 `;
 
             case WIRE_TYPE_32BIT:
+                // Pre-allocate exact count (4 bytes per float)
                 return `
                     let [_len, _newOff] = _readVarint(_buffer, _offset);
 
                     _offset = _newOff;
 
-                    let _end = _offset + _len;
+                    let _count = _len >>> 2,
+                        _arr = new Array(_count);
 
-                    while (_offset < _end) {
+                    for (let _i = 0; _i < _count; _i++) {
                         let [_v, _o] = _readFloat(_buffer, _offset);
 
-                        ${resultVar}.push(_v);
+                        _arr[_i] = _v;
                         _offset = _o;
                     }
+
+                    ${resultVar} = _arr;
                 `;
 
             case WIRE_TYPE_64BIT:
+                // Pre-allocate exact count (8 bytes per double)
                 return `
                     let [_len, _newOff] = _readVarint(_buffer, _offset);
 
                     _offset = _newOff;
 
-                    let _end = _offset + _len;
+                    let _count = _len >>> 3,
+                        _arr = new Array(_count);
 
-                    while (_offset < _end) {
+                    for (let _i = 0; _i < _count; _i++) {
                         let [_v, _o] = _readDouble(_buffer, _offset);
 
-                        ${resultVar}.push(_v);
+                        _arr[_i] = _v;
                         _offset = _o;
                     }
+
+                    ${resultVar} = _arr;
                 `;
         }
     }

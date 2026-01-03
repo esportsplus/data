@@ -26,10 +26,7 @@ function getBaseType(type: ts.Type): BaseType {
 }
 
 
-const resolveBrandedType = (
-    type: ts.Type,
-    typeChecker: ts.TypeChecker
-): BrandedTypeInfo => {
+const resolveBrandedType = (type: ts.Type, typeChecker: ts.TypeChecker): BrandedTypeInfo => {
     if (!type.isIntersection()) {
         return { base: getBaseType(type) };
     }

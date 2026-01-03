@@ -1,7 +1,8 @@
-import type { AnalyzedProperty } from '../type-analyzer';
+import type { AnalyzedProperty } from '~/transformer/type-analyzer';
 
 
 type ProtobufType = 'bool' | 'bytes' | 'double' | 'float' | 'int32' | 'int64' | 'message' | 'string';
+
 type WireType = 0 | 1 | 2 | 5;
 
 interface ProtoFieldInfo {
@@ -17,10 +18,13 @@ interface ProtoFieldInfo {
 // 2 = Length-delimited (string, bytes, embedded messages, packed repeated)
 // 5 = 32-bit (fixed32, float)
 
-const WIRE_TYPE_VARINT: WireType = 0;
-const WIRE_TYPE_64BIT: WireType = 1;
-const WIRE_TYPE_LENGTH_DELIMITED: WireType = 2;
 const WIRE_TYPE_32BIT: WireType = 5;
+
+const WIRE_TYPE_64BIT: WireType = 1;
+
+const WIRE_TYPE_LENGTH_DELIMITED: WireType = 2;
+
+const WIRE_TYPE_VARINT: WireType = 0;
 
 
 function getProtoFieldInfo(prop: AnalyzedProperty): ProtoFieldInfo {
@@ -106,12 +110,5 @@ const getFieldTag = (fieldNumber: number, wireType: WireType): number => {
 };
 
 
-export {
-    getFieldTag,
-    getProtoFieldInfo,
-    WIRE_TYPE_32BIT,
-    WIRE_TYPE_64BIT,
-    WIRE_TYPE_LENGTH_DELIMITED,
-    WIRE_TYPE_VARINT
-};
+export { getFieldTag, getProtoFieldInfo, WIRE_TYPE_32BIT, WIRE_TYPE_64BIT, WIRE_TYPE_LENGTH_DELIMITED, WIRE_TYPE_VARINT };
 export type { ProtoFieldInfo, ProtobufType, WireType };

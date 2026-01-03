@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import { transform, mightNeedTransform } from '../src/transformer/core/index';
+import { transform, mightNeedTransform } from '../src/transformer/index';
 
 
 let compilerOptions: ts.CompilerOptions = {

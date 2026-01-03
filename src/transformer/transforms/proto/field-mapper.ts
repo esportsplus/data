@@ -1,4 +1,4 @@
-import type { AnalyzedProperty } from '../type-analyzer';
+import type { AnalyzedProperty } from '~/transformer/type-analyzer';
 import { getFieldTag, getProtoFieldInfo, type WireType } from './type-mapper';
 
 

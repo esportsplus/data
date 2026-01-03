@@ -1,45 +1,32 @@
+import { program, TRANSFORM_PATTERN } from '@esportsplus/typescript/transformer';
+import { clearValidatorCache, mightNeedTransform, transform } from '~/transformer';
 import type { Plugin, ResolvedConfig } from 'vite';
 import ts from 'typescript';
-import { clearValidatorCache, mightNeedTransform, transform } from '~/transformer/core';
-import { createProgramFromTsConfig } from '~/transformer/core/program';
 
 
-interface PluginOptions {
-    root?: string;
-}
-
-
-let TRANSFORM_PATTERN = /\.[tj]sx?$/;
-
-
-const plugin = (options?: PluginOptions): Plugin => {
-    let program: ts.Program | null = null,
-        root: string;
-
-    function getProgram(): ts.Program {
-        if (!program) {
-            program = createProgramFromTsConfig(root);
-        }
-
-        return program;
-    }
+export default (options?: { root?: string; }): Plugin => {
+    let root: string;
 
     return {
         enforce: 'pre',
-        name: 'validation-transform',
+        name: '@esportsplus/data/plugin-vite',
 
         configResolved(config: ResolvedConfig) {
             root = options?.root ?? config.root;
         },
 
         transform(code: string, id: string) {
-            if (!TRANSFORM_PATTERN.test(id) || !mightNeedTransform(code)) {
+            if (!TRANSFORM_PATTERN.test(id) || id.includes('node_modules')) {
+                return null;
+            }
+
+            if (!mightNeedTransform(code)) {
                 return null;
             }
 
             try {
                 let sourceFile = ts.createSourceFile(id, code, ts.ScriptTarget.Latest, true),
-                    result = transform(sourceFile, getProgram());
+                    result = transform(sourceFile, program.get(root));
 
                 if (!result.transformed) {
                     return null;
@@ -56,13 +43,9 @@ const plugin = (options?: PluginOptions): Plugin => {
         watchChange(id: string) {
             // Invalidate caches when files change
             if (TRANSFORM_PATTERN.test(id)) {
-                program = null;
                 clearValidatorCache();
+                program.delete(root);
             }
         }
     };
 };
-
-
-export { plugin };
-export type { PluginOptions };

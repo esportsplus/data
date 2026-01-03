@@ -1,16 +1,11 @@
-import type { AnalyzedProperty, AnalyzedType } from '../type-analyzer';
-import { mapFields, type MappedField } from './field-mapper';
-import {
-    getProtoFieldInfo,
-    WIRE_TYPE_32BIT,
-    WIRE_TYPE_64BIT,
-    WIRE_TYPE_LENGTH_DELIMITED,
-    WIRE_TYPE_VARINT
-} from './type-mapper';
+import { getProtoFieldInfo, WIRE_TYPE_32BIT, WIRE_TYPE_64BIT, WIRE_TYPE_LENGTH_DELIMITED, WIRE_TYPE_VARINT } from './type-mapper';
+import { mapFields } from './field-mapper';
+import type { AnalyzedProperty, AnalyzedType } from '~/transformer/type-analyzer';
+import type { MappedField } from './field-mapper';
 
 
-let nestedEncoders: string[] = [];
-let encoderCount = 0;
+let encoderCount = 0,
+    nestedEncoders: string[] = [];
 
 
 function generateArraySizeCalc(
@@ -79,11 +74,15 @@ function generateArraySizeCalc(
     // Non-packed repeated field
     switch (itemType.type) {
         case 'string':
+            // Cache encoded strings for reuse in write phase
             return `
                 // field ${field.fieldNumber}: repeated string
+                let _sa${field.fieldNumber} = new Array(${accessor}.length);
+
                 for (let _i = 0, _n = ${accessor}.length; _i < _n; _i++) {
                     let _s = _textEncoder.encode(${accessor}[_i]);
 
+                    _sa${field.fieldNumber}[_i] = _s;
                     _size += 1 + _varintSize(_s.length) + _s.length;
                 }
             `;
@@ -198,11 +197,16 @@ function generateArrayWrite(
     // Non-packed repeated field
     switch (itemType.type) {
         case 'string':
+            // Reuse cached encoded strings from size calculation phase
             return `
                 // field ${field.fieldNumber}: repeated string
-                for (let _i = 0, _n = ${accessor}.length; _i < _n; _i++) {
+                for (let _i = 0, _n = _sa${field.fieldNumber}.length; _i < _n; _i++) {
+                    let _s = _sa${field.fieldNumber}[_i];
+
                     _buffer[_offset++] = ${field.tag};
-                    _offset = _writeString(_buffer, _offset, ${accessor}[_i]);
+                    _offset = _writeVarint(_buffer, _offset, _s.length);
+                    _buffer.set(_s, _offset);
+                    _offset += _s.length;
                 }
             `;
 
@@ -351,10 +355,13 @@ function generateFieldWrite(
 
         case WIRE_TYPE_LENGTH_DELIMITED:
             if (prop.type === 'string') {
+                // Reuse cached encoded bytes from size calculation phase
                 return `
                     // field ${field.fieldNumber}: string
                     _buffer[_offset++] = ${field.tag};
-                    _offset = _writeString(_buffer, _offset, ${accessor});
+                    _offset = _writeVarint(_buffer, _offset, _s${field.fieldNumber}.length);
+                    _buffer.set(_s${field.fieldNumber}, _offset);
+                    _offset += _s${field.fieldNumber}.length;
                 `;
             }
 

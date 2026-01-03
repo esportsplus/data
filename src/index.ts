@@ -1,7 +1,6 @@
 import type { Validator } from './types';
 
 
-// Compile-time only - throws if plugin not configured
 const validator: Validator = {
     build: () => {
         throw new Error(

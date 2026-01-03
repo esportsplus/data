@@ -1,5 +1,7 @@
+import { uid } from '@esportsplus/typescript/transformer';
+import { ERRORS_VARIABLE } from '~/transformer/constants';
+import type { AnalyzedProperty, AnalyzedType } from '~/transformer/type-analyzer';
 import { inlineValidatorBody, type BrandedValidator } from '../config-parser';
-import type { AnalyzedProperty, AnalyzedType } from '../type-analyzer';
 
 
 interface GeneratorContext {
@@ -9,19 +11,21 @@ interface GeneratorContext {
 }
 
 
-let RESERVED_WORDS = new Set([
-        'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
-        'default', 'delete', 'do', 'else', 'export', 'extends', 'finally',
-        'for', 'function', 'if', 'import', 'in', 'instanceof', 'new',
-        'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof',
-        'var', 'void', 'while', 'with', 'yield'
-    ]),
-    VALID_IDENTIFIER = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/,
-    counter = 0;
+const RESERVED_WORDS = new Set([
+    'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
+    'default', 'delete', 'do', 'else', 'export', 'extends', 'finally',
+    'for', 'function', 'if', 'import', 'in', 'instanceof', 'new',
+    'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof',
+    'var', 'void', 'while', 'with', 'yield'
+]);
+
+const SINGLE_QUOTE_REGEX = /'/g;
+
+const VALID_IDENTIFIER = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
 
 
 function escape(str: string): string {
-    return str.replace(/'/g, "\\'");
+    return str.replace(SINGLE_QUOTE_REGEX, "\\'");
 }
 
 function booleanCoercionTemplate(variable: string, errorMessage: string, path: string): string {
@@ -43,7 +47,7 @@ function booleanCoercionTemplate(variable: string, errorMessage: string, path: s
                     ${variable} = false;
                 }
                 else {
-                    (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+                    (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
                 }
             }
         }
@@ -56,20 +60,20 @@ function generateArrayValidation(
     pathParts: string[],
     context: GeneratorContext
 ): string {
-    let e = `_e${counter++}`,
+    let e = uid('e'),
         errorMessage = context.customMessages.get(pathParts.join('.')) || 'must be an array',
-        i = `_i${counter++}`,
+        i = uid('i'),
         itemType = prop.itemType || { name: 'item', optional: false, type: 'unknown' },
-        n = `_n${counter++}`,
+        n = uid('n'),
         nullCheck = prop.nullable ? `${variable} !== null && ` : '',
         path = generatePath(pathParts);
 
     return `
         if (${nullCheck}!Array.isArray(${variable})) {
-            (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
         else if (${variable} !== null) {
-            let ${e} = _error?.length ?? 0;
+            let ${e} = ${ERRORS_VARIABLE}?.length ?? 0;
 
             for (let ${i} = 0, ${n} = ${variable}.length; ${i} < ${n}; ${i}++) {
                 ${generateItemValidation(
@@ -80,7 +84,7 @@ function generateArrayValidation(
                     context
                 )}
 
-                if ((_error?.length ?? 0) > ${e}) {
+                if ((${ERRORS_VARIABLE}?.length ?? 0) > ${e}) {
                     break;
                 }
             }
@@ -100,7 +104,7 @@ function generateBigintValidation(
 
     return `
         if (${nullCheck}typeof ${variable} !== 'bigint') {
-            (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
     `;
 }
@@ -137,7 +141,7 @@ function generateDateValidation(
 
     return `
         if (${nullCheck}(!(${variable} instanceof Date) || isNaN(${variable}.getTime()))) {
-            (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
     `;
 }
@@ -161,7 +165,7 @@ function generateEnumValidation(
 
     return `
         if (${checks.join(' && ')}) {
-            (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
     `;
 }
@@ -184,16 +188,16 @@ function generateItemValidation(
 
         case 'array':
             if (itemType.itemType) {
-                let e = `_e${counter++}`,
-                    i = `_i${counter++}`,
-                    n = `_n${counter++}`;
+                let e = uid('e'),
+                    i = uid('i'),
+                    n = uid('n');
 
                 return `
                     if (!Array.isArray(${variable})) {
-                        (_error ??= []).push({ message: 'must be an array', path: ${dynamicPath} });
+                        (${ERRORS_VARIABLE} ??= []).push({ message: 'must be an array', path: ${dynamicPath} });
                     }
                     else {
-                        let ${e} = _error?.length ?? 0;
+                        let ${e} = ${ERRORS_VARIABLE}?.length ?? 0;
 
                         for (let ${i} = 0, ${n} = ${variable}.length; ${i} < ${n}; ${i}++) {
                             ${generateItemValidation(
@@ -204,7 +208,7 @@ function generateItemValidation(
                                 context
                             )}
 
-                            if ((_error?.length ?? 0) > ${e}) {
+                            if ((${ERRORS_VARIABLE}?.length ?? 0) > ${e}) {
                                 break;
                             }
                         }
@@ -217,7 +221,7 @@ function generateItemValidation(
         case 'bigint':
             return `
                 if (typeof ${variable} !== 'bigint') {
-                    (_error ??= []).push({ message: 'must be a bigint', path: ${dynamicPath} });
+                    (${ERRORS_VARIABLE} ??= []).push({ message: 'must be a bigint', path: ${dynamicPath} });
                 }
             `;
 
@@ -227,7 +231,7 @@ function generateItemValidation(
         case 'date':
             return `
                 if (!(${variable} instanceof Date) || isNaN(${variable}.getTime())) {
-                    (_error ??= []).push({ message: 'invalid date type', path: ${dynamicPath} });
+                    (${ERRORS_VARIABLE} ??= []).push({ message: 'invalid date type', path: ${dynamicPath} });
                 }
             `;
 
@@ -246,7 +250,7 @@ function generateItemValidation(
 
             return `
                 if (${checks.join(' && ')}) {
-                    (_error ??= []).push({ message: '${errorMsg}', path: ${dynamicPath} });
+                    (${ERRORS_VARIABLE} ??= []).push({ message: '${errorMsg}', path: ${dynamicPath} });
                 }
             `;
         }
@@ -254,7 +258,7 @@ function generateItemValidation(
         case 'null':
             return `
                 if (${variable} !== null) {
-                    (_error ??= []).push({ message: 'invalid null type', path: ${dynamicPath} });
+                    (${ERRORS_VARIABLE} ??= []).push({ message: 'invalid null type', path: ${dynamicPath} });
                 }
             `;
 
@@ -262,14 +266,14 @@ function generateItemValidation(
             if (itemType.brand === 'integer') {
                 return `
                     if ((typeof ${variable} !== 'number' && isNaN(${variable} = +${variable})) || ${variable} % 1 !== 0) {
-                        (_error ??= []).push({ message: 'must be an integer', path: ${dynamicPath} });
+                        (${ERRORS_VARIABLE} ??= []).push({ message: 'must be an integer', path: ${dynamicPath} });
                     }
                 `;
             }
 
             return `
                 if (typeof ${variable} !== 'number' && isNaN(${variable} = +${variable})) {
-                    (_error ??= []).push({ message: 'must be a number', path: ${dynamicPath} });
+                    (${ERRORS_VARIABLE} ??= []).push({ message: 'must be a number', path: ${dynamicPath} });
                 }
             `;
 
@@ -285,7 +289,7 @@ function generateItemValidation(
         case 'string':
             return `
                 if (typeof ${variable} !== 'string') {
-                    (_error ??= []).push({ message: 'must be a string', path: ${dynamicPath} });
+                    (${ERRORS_VARIABLE} ??= []).push({ message: 'must be a string', path: ${dynamicPath} });
                 }
             `;
 
@@ -321,7 +325,7 @@ function generateLiteralValidation(
 
     return `
         if (${checks.join(' && ')}) {
-            (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
     `;
 }
@@ -336,7 +340,7 @@ function generateNullValidation(
 
     return `
         if (${variable} !== null) {
-            (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
     `;
 }
@@ -371,7 +375,7 @@ function generateNumberValidation(
     if (inlinedBody) {
         return `
             if (${baseCheck}) {
-                (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+                (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
             }
             else if (${variable} !== null) {
                 ${inlinedBody}
@@ -381,7 +385,7 @@ function generateNumberValidation(
 
     return `
         if (${baseCheck}) {
-            (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
     `;
 }
@@ -429,7 +433,7 @@ function generateObjectValidation(
     if (prop.nullable) {
         return `
             if (${variable} !== null && (typeof ${variable} !== 'object' || Array.isArray(${variable}))) {
-                (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+                (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
             }
             else if (${variable} !== null) {
                 ${codeParts.join('\n')}
@@ -439,7 +443,7 @@ function generateObjectValidation(
 
     return `
         if (${variable} === null || typeof ${variable} !== 'object' || Array.isArray(${variable})) {
-            (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
         else {
             ${codeParts.join('\n')}
@@ -533,13 +537,13 @@ function generateRecordValidation(
 ): string {
     let errorMessage = context.customMessages.get(pathParts.join('.')) || 'invalid record type',
         indexType = prop.indexType,
-        k = `_k${counter++}`,
+        k = uid('k'),
         path = generatePath(pathParts);
 
     if (!indexType) {
         return `
             if (${variable} === null || typeof ${variable} !== 'object' || Array.isArray(${variable})) {
-                (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+                (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
             }
         `;
     }
@@ -572,12 +576,12 @@ function generateRecordValidation(
 
     return `
         if (${variable} === null || typeof ${variable} !== 'object' || Array.isArray(${variable})) {
-            (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
         else {
             for (let ${k} in ${variable}) {
                 if (${valueCheck}) {
-                    (_error ??= []).push({ message: '${valueErrorMsg}', path: ${pathPrefix}${k} });
+                    (${ERRORS_VARIABLE} ??= []).push({ message: '${valueErrorMsg}', path: ${pathPrefix}${k} });
                     break;
                 }
             }
@@ -600,7 +604,7 @@ function generateStringValidation(
 
         return `
             if (${nullCheck}typeof ${variable} !== 'string') {
-                (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+                (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
             }
         `;
     }
@@ -609,7 +613,7 @@ function generateStringValidation(
 
     let baseCheck = `
         if (${nullCheck}typeof ${variable} !== 'string') {
-            (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
     `;
 
@@ -625,7 +629,7 @@ function generateStringValidation(
 
         return `
             if (${nullCheck}typeof ${variable} !== 'string') {
-                (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+                (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
             }
             else if (${variable} !== null) {
                 ${inlinedBody}
@@ -657,7 +661,7 @@ function generateTupleValidation(
 
     return `
         if (!Array.isArray(${variable}) || ${variable}.length !== ${tupleTypes.length}) {
-            (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
         else {
             ${codeParts.join('\n')}
@@ -777,7 +781,7 @@ function generateUnionValidation(
 
     return `
         if (${checks.join(' && ')}) {
-            (_error ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
     `;
 }
@@ -796,10 +800,7 @@ const generateValidator = (
     context: GeneratorContext,
     customValidatorCode?: string
 ): string => {
-    // Reset counter for consistent output
-    counter = 0;
-
-    let code = '',
+    let codeParts: string[] = [],
         properties = type.properties;
 
     for (let i = 0, n = properties.length; i < n; i++) {
@@ -813,46 +814,40 @@ const generateValidator = (
         let variable = propertyAccess(property.name, '_input');
 
         if (property.optional) {
-            code += `
+            codeParts.push(`
                 if (${variable} !== undefined) {
                     ${generateTypeValidation(property, variable, [property.name], context)}
                 }
-            `;
+            `);
         }
         else {
-            code += generateTypeValidation(property, variable, [property.name], context) + '\n';
+            codeParts.push(generateTypeValidation(property, variable, [property.name], context));
         }
     }
 
     if (customValidatorCode) {
-        code += `
-            if (!_error) {
+        codeParts.push(`
+            if (!${ERRORS_VARIABLE}) {
                 ${customValidatorCode}
             }
-        `;
+        `);
     }
 
-    // Generate property extraction for success case
-    let extraction = generatePropertyExtraction(properties, '_input');
-
-    // Determine if async is needed
-    let fnKeyword = context.hasAsync ? 'async ' : '';
-
     return `
-        ${fnKeyword}(_input) => {
-            let _error;
+        ${context.hasAsync ? 'async ' : ''}(_input) => {
+            let ${ERRORS_VARIABLE};
 
-            ${code}
+            ${codeParts.join('\n')}
 
-            if (_error) {
-                return { ok: false, data: _input, errors: _error };
+            if (${ERRORS_VARIABLE}) {
+                return { ok: false, data: _input, errors: ${ERRORS_VARIABLE} };
             }
 
-            return { ok: true, data: ${extraction}, errors: undefined };
+            return { ok: true, data: ${generatePropertyExtraction(properties, '_input')}, errors: undefined };
         }
     `;
 };
 
 
-export { generateValidator, propertyAccess };
 export type { GeneratorContext };
+export { generateValidator, propertyAccess };

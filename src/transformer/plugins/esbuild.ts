@@ -1,32 +1,18 @@
-import type { Plugin } from 'esbuild';
+import { program, TRANSFORM_PATTERN } from '@esportsplus/typescript/transformer';
+import { clearValidatorCache, mightNeedTransform, transform } from '~/transformer';
+import type { OnLoadArgs, Plugin, PluginBuild } from 'esbuild';
 import fs from 'fs';
 import ts from 'typescript';
-import { clearValidatorCache, mightNeedTransform, transform } from '~/transformer/core';
-import { createProgramFromTsConfig } from '~/transformer/core/program';
 
 
-interface PluginOptions {
-    root?: string;
-}
-
-
-const plugin = (options?: PluginOptions): Plugin => {
-    let program: ts.Program | null = null,
-        root = options?.root ?? process.cwd();
-
-    function getProgram(): ts.Program {
-        if (!program) {
-            program = createProgramFromTsConfig(root);
-        }
-
-        return program;
-    }
+export default (options?: { root?: string; }): Plugin => {
+    let root = options?.root ?? process.cwd();
 
     return {
-        name: 'validation-transform',
+        name: '@esportsplus/data/plugin-esbuild',
 
-        setup(build) {
-            build.onLoad({ filter: /\.[tj]sx?$/ }, async (args) => {
+        setup(build: PluginBuild) {
+            build.onLoad({ filter: TRANSFORM_PATTERN }, async (args: OnLoadArgs) => {
                 let code = await fs.promises.readFile(args.path, 'utf8');
 
                 if (!mightNeedTransform(code)) {
@@ -40,7 +26,7 @@ const plugin = (options?: PluginOptions): Plugin => {
                             ts.ScriptTarget.Latest,
                             true
                         ),
-                        result = transform(sourceFile, getProgram());
+                        result = transform(sourceFile, program.get(root));
 
                     if (!result.transformed) {
                         return null;
@@ -58,13 +44,9 @@ const plugin = (options?: PluginOptions): Plugin => {
             });
 
             build.onEnd(() => {
-                program = null;
                 clearValidatorCache();
+                program.delete(root);
             });
         }
     };
 };
-
-
-export { plugin };
-export type { PluginOptions };
