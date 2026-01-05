@@ -4,7 +4,7 @@ import { clearImportMapCache, detectCalls, mightNeedTransform, type DetectedCall
 import { clearTypeAnalysisCache } from './type-analyzer';
 import { transformCodec } from './transforms/proto';
 import { transformValidatorBuild } from './transforms';
-import ts from 'typescript';
+import { ts } from '@esportsplus/typescript';
 
 
 type DetectedCallsCache = WeakMap<ts.SourceFile, DetectedCall[]>;

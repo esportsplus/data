@@ -5,10 +5,8 @@
     },
     "description": "Compile-time data validation utility",
     "devDependencies": {
-        "@esportsplus/typescript": "^0.13.0",
+        "@esportsplus/typescript": "^0.16.0",
         "@types/node": "^25.0.3",
-        "esbuild": "^0.27.2",
-        "typescript": "^5.9.3",
         "vite": "^7.3.0",
         "vitest": "^4.0.16"
     },
@@ -16,10 +14,6 @@
         ".": {
             "import": "./build/index.js",
             "types": "./build/index.d.ts"
-        },
-        "./plugins/esbuild": {
-            "import": "./build/transformer/plugins/esbuild.js",
-            "types": "./build/transformer/plugins/esbuild.d.ts"
         },
         "./plugins/tsc": {
             "import": "./build/transformer/plugins/tsc.js",
@@ -53,7 +47,7 @@
         "url": "https://github.com/esportsplus/validation"
     },
     "scripts": {
-        "build": "tsc && tsc-alias",
+        "build": "tsc",
         "-": "-",
         "prepare": "pnpm build",
         "prepublishOnly": "pnpm build",

@@ -7,7 +7,7 @@ Compile-time TypeScript validation and binary encoding with zero runtime overhea
 - **Zero Runtime Overhead**: Validators and codecs generated at compile time
 - **Type-Safe**: Full TypeScript type inference
 - **No Schema Duplication**: Use your existing TypeScript types
-- **Multiple Build Tools**: Support for Vite, esbuild, and tsc
+- **Multiple Build Tools**: Support for Vite and tsc
 - **Custom Validators**: Add sync/async validation logic
 - **Branded Type Validators**: Register validators for branded types
 - **Binary Codec**: Encode/decode TypeScript types to protobuf-style binary
@@ -57,23 +57,6 @@ import { defineConfig } from 'vite';
 import { plugin } from '@esportsplus/data';
 
 export default defineConfig({
-    plugins: [plugin()]
-});
-```
-
-### esbuild
-
-```typescript
-// build.ts
-import * as esbuild from 'esbuild';
-import { plugin } from '@esportsplus/data/esbuild';
-
-await esbuild.build({
-    entryPoints: ['src/index.ts'],
-    outdir: 'dist',
-    bundle: true,
-    format: 'esm',
-    platform: 'node',
     plugins: [plugin()]
 });
 ```
@@ -542,7 +525,7 @@ function range(min: number, max: number, message?: string): ValidatorFunction<un
 ## Requirements
 
 - TypeScript >= 5.0
-- Build tool with transformer support (Vite, esbuild, or ts-patch)
+- Build tool with transformer support (Vite or ts-patch)
 
 ## License
 

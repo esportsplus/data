@@ -1,5 +1,5 @@
 import { ERRORS_VARIABLE } from '~/transformer/constants';
-import ts from 'typescript';
+import { ts } from '@esportsplus/typescript';
 
 
 interface BrandedValidator {

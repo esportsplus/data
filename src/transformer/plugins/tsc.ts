@@ -1,5 +1,5 @@
 import { createTransformer } from '~/transformer';
-import ts from 'typescript';
+import { ts } from '@esportsplus/typescript';
 
 
 // ts-patch transformer entry point

@@ -1,7 +1,7 @@
 import { program, TRANSFORM_PATTERN } from '@esportsplus/typescript/transformer';
 import { clearValidatorCache, mightNeedTransform, transform } from '~/transformer';
 import type { Plugin, ResolvedConfig } from 'vite';
-import ts from 'typescript';
+import { ts } from '@esportsplus/typescript';
 
 
 export default (options?: { root?: string; }): Plugin => {

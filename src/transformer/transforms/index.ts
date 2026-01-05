@@ -1,7 +1,7 @@
 import { analyzeType } from '~/transformer/type-analyzer';
 import { generateValidator } from './validator';
 import type { BrandedValidator } from '../config-parser';
-import ts from 'typescript';
+import { ts } from '@esportsplus/typescript';
 
 
 const ASYNC_ARROW_REGEX = /^\(?async\s/;

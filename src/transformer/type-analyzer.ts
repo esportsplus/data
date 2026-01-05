@@ -1,4 +1,4 @@
-import ts from 'typescript';
+import { ts } from '@esportsplus/typescript';
 import { resolveBrandedType } from './branded-types';
 
 

@@ -2,7 +2,7 @@ import { analyzeRuntimeNeeds, buildRuntimeHelpers } from './runtime';
 import { analyzeType } from '~/transformer/type-analyzer';
 import { generateDecoder } from './decoder';
 import { generateEncoder } from './encoder';
-import ts from 'typescript';
+import { ts } from '@esportsplus/typescript';
 
 
 const transformCodec = (
