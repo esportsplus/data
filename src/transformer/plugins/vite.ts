@@ -1,5 +1,6 @@
 import { program, TRANSFORM_PATTERN } from '@esportsplus/typescript/transformer';
-import { clearValidatorCache, mightNeedTransform, transform } from '~/transformer';
+import { createTransformer, mightNeedTransform } from '~/transformer';
+import { clearValidatorCache } from '~/transformer/config-parser';
 import type { Plugin, ResolvedConfig } from 'vite';
 import { ts } from '@esportsplus/typescript';
 
@@ -25,14 +26,23 @@ export default (options?: { root?: string; }): Plugin => {
             }
 
             try {
-                let sourceFile = ts.createSourceFile(id, code, ts.ScriptTarget.Latest, true),
-                    result = transform(sourceFile, program.get(root));
+                let p = program.get(root),
+                    printer = ts.createPrinter(),
+                    sourceFile = ts.createSourceFile(id, code, ts.ScriptTarget.Latest, true),
+                    transformer = createTransformer(p),
+                    result = ts.transform(sourceFile, [transformer]),
+                    transformed = result.transformed[0];
 
-                if (!result.transformed) {
+                if (transformed === sourceFile) {
+                    result.dispose();
                     return null;
                 }
 
-                return { code: result.code, map: null };
+                let output = printer.printFile(transformed);
+
+                result.dispose();
+
+                return { code: output, map: null };
             }
             catch (error) {
                 console.error(`@esportsplus/data: Error transforming ${id}:`, error);

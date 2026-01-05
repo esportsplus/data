@@ -329,7 +329,7 @@ describe('Generated Code Quality', () => {
 
         // Should check for string type
         expect(transformed).toContain("typeof");
-        expect(transformed).toContain("'string'");
+        expect(transformed).toContain('"string"');
     });
 });
 

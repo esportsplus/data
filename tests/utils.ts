@@ -1,5 +1,5 @@
+import { createTransformer, mightNeedTransform } from '../src/transformer/index';
 import { ts } from '@esportsplus/typescript';
-import { transform, mightNeedTransform } from '../src/transformer/index';
 
 
 let compilerOptions: ts.CompilerOptions = {
@@ -44,12 +44,18 @@ function createProgram(code: string, fileName: string = 'test.ts'): ts.Program {
 }
 
 function transformCode(code: string): string {
-    let program = createProgram(code),
-        sourceFile = program.getSourceFile('test.ts')!;
+    let printer = ts.createPrinter(),
+        program = createProgram(code),
+        sourceFile = program.getSourceFile('test.ts')!,
+        transformer = createTransformer(program),
+        result = ts.transform(sourceFile, [transformer]),
+        transformed = result.transformed[0];
 
-    let result = transform(sourceFile, program);
+    let output = printer.printFile(transformed);
 
-    return result.code;
+    result.dispose();
+
+    return output;
 }
 
 function createValidator<T>(code: string): (input: unknown) => { ok: boolean; data: unknown; errors?: Array<{ message: string; path: string }> } {
