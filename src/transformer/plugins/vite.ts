@@ -1,7 +1,7 @@
-import { program, TRANSFORM_PATTERN } from '@esportsplus/typescript/transformer';
-import { clearValidatorCache, mightNeedTransform, transform } from '~/transformer';
 import type { Plugin, ResolvedConfig } from 'vite';
 import { ts } from '@esportsplus/typescript';
+import { program, TRANSFORM_PATTERN } from '@esportsplus/typescript/transformer';
+import { clearValidatorCache, transform } from '~/transformer';
 
 
 export default (options?: { root?: string; }): Plugin => {
@@ -15,10 +15,6 @@ export default (options?: { root?: string; }): Plugin => {
         name: '@esportsplus/data/plugin-vite',
         transform(code: string, id: string) {
             if (!TRANSFORM_PATTERN.test(id) || id.includes('node_modules')) {
-                return null;
-            }
-
-            if (!mightNeedTransform(code)) {
                 return null;
             }
 

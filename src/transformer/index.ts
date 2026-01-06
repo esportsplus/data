@@ -1,5 +1,5 @@
 import { clearValidatorCache, getValidatorsForSource, type BrandedValidator } from './config-parser';
-import { detectCalls, mightNeedTransform, type DetectedCall } from './detector';
+import { contains, detectCalls, type DetectedCall } from './detector';
 import { transformCodec } from './transforms/proto';
 import { transformValidatorBuild } from './transforms';
 import { ts } from '@esportsplus/typescript';
@@ -107,40 +107,28 @@ function transformCall(
     return synthesizeNode(expression, ts.factory);
 }
 
-function createVisitor(
-    context: ts.TransformationContext,
-    detectedCalls: Map<ts.CallExpression, DetectedCall>,
-    program: ts.Program,
-    typeChecker: ts.TypeChecker
-): (node: ts.Node) => ts.Node {
-    let visit = (node: ts.Node): ts.Node => {
-        if (ts.isCallExpression(node)) {
-            let call = detectedCalls.get(node);
-
-            if (call) {
-                return transformCall(call, typeChecker, getValidatorsForSource(call.importSource, program));
-            }
-        }
-
-        return ts.visitEachChild(node, visit, context);
-    };
-
-    return visit;
-}
-
-
 const transform = (sourceFile: ts.SourceFile, program: ts.Program): TransformResult => {
     let code = sourceFile.getFullText(),
         detectedCalls = getCachedDetectedCalls(sourceFile, program);
 
-    if (detectedCalls.size === 0) {
+    if (!contains(code) || detectedCalls.size === 0) {
         return { code, sourceFile, transformed: false };
     }
 
     let result = ts.transform(sourceFile, [
             (context: ts.TransformationContext) => {
                 let typeChecker = program.getTypeChecker(),
-                    visit = createVisitor(context, detectedCalls, program, typeChecker);
+                    visit = (node: ts.Node): ts.Node => {
+                        if (ts.isCallExpression(node)) {
+                            let call = detectedCalls.get(node);
+
+                            if (call) {
+                                return transformCall(call, typeChecker, getValidatorsForSource(call.importSource, program));
+                            }
+                        }
+
+                        return ts.visitEachChild(node, visit, context);
+                    };
 
                 return (sf: ts.SourceFile) => ts.visitNode(sf, visit) as ts.SourceFile;
             }
@@ -159,5 +147,5 @@ const transform = (sourceFile: ts.SourceFile, program: ts.Program): TransformRes
 };
 
 
-export { clearValidatorCache, mightNeedTransform, transform };
+export { clearValidatorCache, transform };
 export type { TransformResult };

@@ -499,7 +499,7 @@ function generateRecordValidation(
 ): string {
     let errorMessage = context.customMessages.get(pathParts.join('.')) || 'invalid record type',
         indexType = prop.indexType,
-        k = uid('k'),
+        key = uid('key'),
         path = generatePath(pathParts);
 
     if (!indexType) {
@@ -514,36 +514,37 @@ function generateRecordValidation(
 
     switch (indexType.type) {
         case 'boolean':
-            valueCheck = `typeof ${variable}[${k}] !== 'boolean'`;
+            valueCheck = `typeof ${variable}[${key}] !== 'boolean'`;
             break;
         case 'number':
-            valueCheck = `typeof ${variable}[${k}] !== 'number'`;
+            valueCheck = `typeof ${variable}[${key}] !== 'number'`;
             break;
         case 'string':
-            valueCheck = `typeof ${variable}[${k}] !== 'string'`;
+            valueCheck = `typeof ${variable}[${key}] !== 'string'`;
             break;
         default:
             valueCheck = 'false';
     }
-
-    let valueErrorMsg = indexType.type === 'boolean'
-        ? 'must be a boolean'
-        : indexType.type === 'number'
-            ? 'must be a number'
-            : indexType.type === 'string'
-                ? 'must be a string'
-                : 'invalid value';
-
-    let pathPrefix = pathParts.length ? `'${pathParts.join('.')}.' + ` : '';
 
     return `
         if (${variable} === null || typeof ${variable} !== 'object' || Array.isArray(${variable})) {
             (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
         }
         else {
-            for (let ${k} in ${variable}) {
+            for (let ${key} in ${variable}) {
                 if (${valueCheck}) {
-                    (${ERRORS_VARIABLE} ??= []).push({ message: '${valueErrorMsg}', path: ${pathPrefix}${k} });
+                    (${ERRORS_VARIABLE} ??= []).push({
+                        message: '${
+                            indexType.type === 'boolean'
+                                ? 'must be a boolean'
+                                : indexType.type === 'number'
+                                    ? 'must be a number'
+                                    : indexType.type === 'string'
+                                        ? 'must be a string'
+                                        : 'invalid value'
+                        }',
+                        path: ${pathParts.length ? `'${pathParts.join('.')}.' + ` : ''}${key}
+                    });
                     break;
                 }
             }

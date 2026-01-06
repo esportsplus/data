@@ -1,4 +1,4 @@
-import { mightNeedTransform as checkTransform } from '@esportsplus/typescript/transformer';
+import { code as c } from '@esportsplus/typescript/transformer';
 import { ts } from '@esportsplus/typescript';
 
 
@@ -19,14 +19,11 @@ interface DetectedCall {
 const CHECK_TRANSFORM_PATTERNS = ['codec<', 'codec(', 'validator.build'];
 
 
-let importMapCache = new WeakMap<ts.SourceFile, ImportMap>();
+let cache = new WeakMap<ts.SourceFile, ImportMap>();
 
 
-function buildImportMap(
-    sourceFile: ts.SourceFile,
-    program: ts.Program
-): ImportMap {
-    let cached = importMapCache.get(sourceFile);
+function buildImportMap(sourceFile: ts.SourceFile, program: ts.Program): ImportMap {
+    let cached = cache.get(sourceFile);
 
     if (cached) {
         return cached;
@@ -37,8 +34,8 @@ function buildImportMap(
     for (let i = 0, n = sourceFile.statements.length; i < n; i++) {
         let statement = sourceFile.statements[i];
 
+        // Imports must be at module top; break on first non-import
         if (!ts.isImportDeclaration(statement)) {
-            // Imports must be at module top; break on first non-import
             break;
         }
 
@@ -70,7 +67,7 @@ function buildImportMap(
         }
     }
 
-    importMapCache.set(sourceFile, map);
+    cache.set(sourceFile, map);
 
     return map;
 }
@@ -144,7 +141,6 @@ function resolveValidatorImportSource(node: ts.CallExpression, importMap: Import
     return importMap.get(identifier.text) || null;
 }
 
-
 function visitDetectCall(
     node: ts.Node,
     calls: Map<ts.CallExpression, DetectedCall>,
@@ -192,6 +188,10 @@ function visitDetectCall(
 }
 
 
+const contains = (code: string): boolean => {
+    return c.contains(code, { patterns: CHECK_TRANSFORM_PATTERNS });
+};
+
 const detectCalls = (sourceFile: ts.SourceFile, program?: ts.Program): Map<ts.CallExpression, DetectedCall> => {
     let calls = new Map<ts.CallExpression, DetectedCall>(),
         map: ImportMap = program ? buildImportMap(sourceFile, program) : new Map();
@@ -201,10 +201,5 @@ const detectCalls = (sourceFile: ts.SourceFile, program?: ts.Program): Map<ts.Ca
     return calls;
 };
 
-const mightNeedTransform = (code: string): boolean => {
-    return checkTransform(code, { patterns: CHECK_TRANSFORM_PATTERNS });
-};
-
-
-export { detectCalls, mightNeedTransform };
+export { contains, detectCalls };
 export type { DetectedCall };
