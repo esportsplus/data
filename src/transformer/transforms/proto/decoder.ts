@@ -1,11 +1,11 @@
 import type { AnalyzedProperty, AnalyzedType } from '~/transformer/type-analyzer';
 import { mapFields, type MappedField } from './field-mapper';
 import {
-    getProtoFieldInfo,
     WIRE_TYPE_32BIT,
     WIRE_TYPE_64BIT,
     WIRE_TYPE_LENGTH_DELIMITED,
-    WIRE_TYPE_VARINT
+    WIRE_TYPE_VARINT,
+    getProtoFieldInfo
 } from './type-mapper';
 
 

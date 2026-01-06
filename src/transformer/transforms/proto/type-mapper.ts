@@ -1,15 +1,15 @@
 import type { AnalyzedProperty } from '~/transformer/type-analyzer';
 
 
-type ProtobufType = 'bool' | 'bytes' | 'double' | 'float' | 'int32' | 'int64' | 'message' | 'string';
-
-type WireType = 0 | 1 | 2 | 5;
-
-interface ProtoFieldInfo {
+type ProtoFieldInfo = {
     packed: boolean;
     protoType: ProtobufType;
     wireType: WireType;
-}
+};
+
+type ProtobufType = 'bool' | 'bytes' | 'double' | 'float' | 'int32' | 'int64' | 'message' | 'string';
+
+type WireType = 0 | 1 | 2 | 5;
 
 
 // Wire types:
@@ -27,12 +27,14 @@ const WIRE_TYPE_LENGTH_DELIMITED: WireType = 2;
 const WIRE_TYPE_VARINT: WireType = 0;
 
 
-function getProtoFieldInfo(prop: AnalyzedProperty): ProtoFieldInfo {
-    if (prop.type === 'array' && prop.itemType) {
-        let itemInfo = getProtoFieldInfo(prop.itemType);
+const getFieldTag = (fieldNumber: number, wireType: WireType): number => {
+    return (fieldNumber << 3) | wireType;
+};
 
-        // Packed encoding for primitive types
-        let packed = itemInfo.wireType === WIRE_TYPE_VARINT ||
+const getProtoFieldInfo = (prop: AnalyzedProperty): ProtoFieldInfo => {
+    if (prop.type === 'array' && prop.itemType) {
+        let itemInfo = getProtoFieldInfo(prop.itemType),
+            packed = itemInfo.wireType === WIRE_TYPE_VARINT ||
                      itemInfo.wireType === WIRE_TYPE_32BIT ||
                      itemInfo.wireType === WIRE_TYPE_64BIT;
 
@@ -44,6 +46,13 @@ function getProtoFieldInfo(prop: AnalyzedProperty): ProtoFieldInfo {
     }
 
     switch (prop.type) {
+        case 'bigint':
+            return {
+                packed: false,
+                protoType: 'int64',
+                wireType: WIRE_TYPE_VARINT
+            };
+
         case 'boolean':
             return {
                 packed: false,
@@ -75,24 +84,17 @@ function getProtoFieldInfo(prop: AnalyzedProperty): ProtoFieldInfo {
                 wireType: WIRE_TYPE_64BIT
             };
 
-        case 'bigint':
+        case 'object':
             return {
                 packed: false,
-                protoType: 'int64',
-                wireType: WIRE_TYPE_VARINT
+                protoType: 'message',
+                wireType: WIRE_TYPE_LENGTH_DELIMITED
             };
 
         case 'string':
             return {
                 packed: false,
                 protoType: 'string',
-                wireType: WIRE_TYPE_LENGTH_DELIMITED
-            };
-
-        case 'object':
-            return {
-                packed: false,
-                protoType: 'message',
                 wireType: WIRE_TYPE_LENGTH_DELIMITED
             };
 
@@ -103,12 +105,8 @@ function getProtoFieldInfo(prop: AnalyzedProperty): ProtoFieldInfo {
                 wireType: WIRE_TYPE_LENGTH_DELIMITED
             };
     }
-}
-
-const getFieldTag = (fieldNumber: number, wireType: WireType): number => {
-    return (fieldNumber << 3) | wireType;
 };
 
 
-export { getFieldTag, getProtoFieldInfo, WIRE_TYPE_32BIT, WIRE_TYPE_64BIT, WIRE_TYPE_LENGTH_DELIMITED, WIRE_TYPE_VARINT };
+export { WIRE_TYPE_32BIT, WIRE_TYPE_64BIT, WIRE_TYPE_LENGTH_DELIMITED, WIRE_TYPE_VARINT, getFieldTag, getProtoFieldInfo };
 export type { WireType };

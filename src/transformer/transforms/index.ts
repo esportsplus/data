@@ -1,7 +1,7 @@
-import { analyzeType } from '~/transformer/type-analyzer';
-import { generateValidator } from './validator';
 import type { BrandedValidator } from '../config-parser';
 import { ts } from '@esportsplus/typescript';
+import { analyzeType } from '~/transformer/type-analyzer';
+import { generateValidator } from './validator';
 
 
 const ASYNC_PATTERN = /^\s*\(?async\s|\bawait\b/;
@@ -13,13 +13,11 @@ function extractMessages(
     messages: Map<string, string>,
     typeChecker: ts.TypeChecker
 ): void {
-    // String literal type - this is a message
     if (type.isStringLiteral()) {
         messages.set(pathParts.join('.'), type.value);
         return;
     }
 
-    // Object type - recurse into properties
     if (type.flags & ts.TypeFlags.Object) {
         let props = typeChecker.getPropertiesOfType(type);
 

@@ -37,14 +37,14 @@ const resolveBrandedType = (type: ts.Type, typeChecker: ts.TypeChecker): Branded
     for (let i = 0, n = type.types.length; i < n; i++) {
         let constituent = type.types[i];
 
-        if (constituent.flags & ts.TypeFlags.Number) {
+        if (constituent.flags & ts.TypeFlags.Boolean) {
+            base = 'boolean';
+        }
+        else if (constituent.flags & ts.TypeFlags.Number) {
             base = 'number';
         }
         else if (constituent.flags & ts.TypeFlags.String) {
             base = 'string';
-        }
-        else if (constituent.flags & ts.TypeFlags.Boolean) {
-            base = 'boolean';
         }
         else if (constituent.flags & ts.TypeFlags.Object) {
             let brandProp = typeChecker.getPropertyOfType(constituent, '__brand');

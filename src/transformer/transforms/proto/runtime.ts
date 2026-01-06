@@ -1,13 +1,13 @@
 import type { AnalyzedProperty, AnalyzedType } from '~/transformer/type-analyzer';
 
 
-interface RuntimeNeeds {
+type RuntimeNeeds = {
     bigint: boolean;
     double: boolean;
     float: boolean;
     string: boolean;
     varint: boolean;
-}
+};
 
 
 const HELPER_BIGINT = `
@@ -276,10 +276,7 @@ function scanProperty(prop: AnalyzedProperty, needs: RuntimeNeeds): void {
             if (prop.brand === 'float') {
                 needs.float = true;
             }
-            else if (prop.brand === 'integer') {
-                // Integer uses varint only
-            }
-            else {
+            else if (prop.brand !== 'integer') {
                 // Unbranded number defaults to double
                 needs.double = true;
             }

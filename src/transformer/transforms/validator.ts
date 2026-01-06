@@ -1,14 +1,14 @@
-import { uid } from '@esportsplus/typescript/transformer';
-import { ERRORS_VARIABLE } from '~/transformer/constants';
 import type { AnalyzedProperty, AnalyzedType } from '~/transformer/type-analyzer';
 import { inlineValidatorBody, type BrandedValidator } from '../config-parser';
+import { uid } from '@esportsplus/typescript/transformer';
+import { ERRORS_VARIABLE } from '~/transformer/constants';
 
 
-interface GeneratorContext {
+type GeneratorContext = {
     brandValidators: Map<string, BrandedValidator>;
     customMessages: Map<string, string>;
     hasAsync: boolean;
-}
+};
 
 
 const RESERVED_WORDS = new Set([

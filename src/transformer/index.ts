@@ -1,20 +1,18 @@
 import { clearValidatorCache, getValidatorsForSource, type BrandedValidator } from './config-parser';
 import { contains, detectCalls, type DetectedCall } from './detector';
-import { transformCodec } from './transforms/proto';
 import { transformValidatorBuild } from './transforms';
+import { transformCodec } from './transforms/proto';
 import { ts } from '@esportsplus/typescript';
 
 
-type DetectedCallsCache = WeakMap<ts.SourceFile, Map<ts.CallExpression, DetectedCall>>;
-
 type TransformResult = {
+    changed: boolean;
     code: string;
     sourceFile: ts.SourceFile;
-    transformed: boolean;
 };
 
 
-let detectedCallsCache: DetectedCallsCache = new WeakMap();
+let detectedCallsCache = new WeakMap<ts.SourceFile, Map<ts.CallExpression, DetectedCall>>();
 
 
 function getCachedDetectedCalls(sourceFile: ts.SourceFile, program: ts.Program): Map<ts.CallExpression, DetectedCall> {
@@ -32,22 +30,18 @@ function getCachedDetectedCalls(sourceFile: ts.SourceFile, program: ts.Program):
 }
 
 function synthesizeNode(node: ts.Node, factory: ts.NodeFactory): ts.Node {
-    // For string literals, create a fresh synthesized literal
     if (ts.isStringLiteral(node)) {
         return factory.createStringLiteral(node.text);
     }
 
-    // For numeric literals
     if (ts.isNumericLiteral(node)) {
         return factory.createNumericLiteral(node.text);
     }
 
-    // For identifiers
     if (ts.isIdentifier(node)) {
         return factory.createIdentifier(node.text);
     }
 
-    // For other nodes, use ts.factory to clone with synthesized children
     return ts.visitEachChild(
         node,
         (child) => synthesizeNode(child, factory),
@@ -80,7 +74,6 @@ function transformCall(
             return call.node;
     }
 
-    // Parse the generated code and return the expression
     let expression: ts.Expression | undefined,
         tempSourceFile = ts.createSourceFile(
             'generated.ts',
@@ -103,16 +96,16 @@ function transformCall(
         return call.node;
     }
 
-    // Synthesize all nodes so the printer generates proper output
     return synthesizeNode(expression, ts.factory);
 }
+
 
 const transform = (sourceFile: ts.SourceFile, program: ts.Program): TransformResult => {
     let code = sourceFile.getFullText(),
         detectedCalls = getCachedDetectedCalls(sourceFile, program);
 
     if (!contains(code) || detectedCalls.size === 0) {
-        return { code, sourceFile, transformed: false };
+        return { code, sourceFile, changed: false };
     }
 
     let result = ts.transform(sourceFile, [
@@ -137,13 +130,13 @@ const transform = (sourceFile: ts.SourceFile, program: ts.Program): TransformRes
 
     if (transformed === sourceFile) {
         result.dispose();
-        return { code, sourceFile, transformed: false };
+        return { code, sourceFile, changed: false };
     }
 
     code = ts.createPrinter().printFile(transformed);
     result.dispose();
 
-    return { code, sourceFile: transformed, transformed: true };
+    return { code, sourceFile: transformed, changed: true };
 };
 
 

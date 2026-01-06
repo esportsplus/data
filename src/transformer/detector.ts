@@ -29,12 +29,11 @@ function buildImportMap(sourceFile: ts.SourceFile, program: ts.Program): ImportM
         return cached;
     }
 
-    let map: ImportMap = new Map();
+    let map = new Map<string, string>();
 
     for (let i = 0, n = sourceFile.statements.length; i < n; i++) {
         let statement = sourceFile.statements[i];
 
-        // Imports must be at module top; break on first non-import
         if (!ts.isImportDeclaration(statement)) {
             break;
         }
@@ -72,11 +71,9 @@ function buildImportMap(sourceFile: ts.SourceFile, program: ts.Program): ImportM
     return map;
 }
 
-
 function detectCallType(node: ts.CallExpression): CallType | null {
     let expr = node.expression;
 
-    // Check for codec<T>() - direct function call
     if (ts.isIdentifier(expr) && expr.text === 'codec') {
         return 'codec';
     }
@@ -106,7 +103,6 @@ function resolveModulePath(
     containingFile: string,
     program: ts.Program
 ): string | null {
-    // Skip package imports
     if (!moduleSpecifier.startsWith('.') && !moduleSpecifier.startsWith('/')) {
         return null;
     }
@@ -194,12 +190,13 @@ const contains = (code: string): boolean => {
 
 const detectCalls = (sourceFile: ts.SourceFile, program?: ts.Program): Map<ts.CallExpression, DetectedCall> => {
     let calls = new Map<ts.CallExpression, DetectedCall>(),
-        map: ImportMap = program ? buildImportMap(sourceFile, program) : new Map();
+        map = program ? buildImportMap(sourceFile, program) : new Map<string, string>();
 
     visitDetectCall(sourceFile, calls, sourceFile, program, map);
 
     return calls;
 };
+
 
 export { contains, detectCalls };
 export type { DetectedCall };

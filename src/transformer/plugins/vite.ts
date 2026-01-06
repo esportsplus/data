@@ -1,6 +1,6 @@
-import type { Plugin, ResolvedConfig } from 'vite';
+import { TRANSFORM_PATTERN, program } from '@esportsplus/typescript/transformer';
 import { ts } from '@esportsplus/typescript';
-import { program, TRANSFORM_PATTERN } from '@esportsplus/typescript/transformer';
+import type { Plugin, ResolvedConfig } from 'vite';
 import { clearValidatorCache, transform } from '~/transformer';
 
 
@@ -24,7 +24,7 @@ export default (options?: { root?: string; }): Plugin => {
                         program.get(root)
                     );
 
-                if (!result.transformed) {
+                if (!result.changed) {
                     return null;
                 }
 
