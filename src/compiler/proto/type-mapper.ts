@@ -1,4 +1,4 @@
-import type { AnalyzedProperty } from '~/transformer/type-analyzer';
+import type { AnalyzedProperty } from '~/compiler/type-analyzer';
 
 
 type ProtoFieldInfo = {

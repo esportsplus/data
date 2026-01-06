@@ -1,7 +1,7 @@
 import type { BrandedValidator } from '../config-parser';
 import { ts } from '@esportsplus/typescript';
-import { analyzeType } from '~/transformer/type-analyzer';
-import { generateValidator } from './validator';
+import { analyzeType } from '~/compiler/type-analyzer';
+import { generateValidator } from '../validator';
 
 
 const ASYNC_PATTERN = /^\s*\(?async\s|\bawait\b/;

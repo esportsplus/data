@@ -1,5 +1,5 @@
 import { getFieldTag, getProtoFieldInfo, type WireType } from './type-mapper';
-import type { AnalyzedProperty } from '~/transformer/type-analyzer';
+import type { AnalyzedProperty } from '~/compiler/type-analyzer';
 
 
 type MappedField = {

@@ -1,4 +1,4 @@
-import type { AnalyzedProperty, AnalyzedType } from '~/transformer/type-analyzer';
+import type { AnalyzedProperty, AnalyzedType } from '~/compiler/type-analyzer';
 import { mapFields, type MappedField } from './field-mapper';
 import {
     WIRE_TYPE_32BIT,

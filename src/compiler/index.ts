@@ -1,7 +1,7 @@
 import { clearValidatorCache, getValidatorsForSource, type BrandedValidator } from './config-parser';
 import { contains, detectCalls, type DetectedCall } from './detector';
 import { transformValidatorBuild } from './transforms';
-import { transformCodec } from './transforms/proto';
+import { transformCodec } from './proto';
 import { ts } from '@esportsplus/typescript';
 
 

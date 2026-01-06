@@ -1,7 +1,7 @@
-import type { AnalyzedProperty, AnalyzedType } from '~/transformer/type-analyzer';
-import { inlineValidatorBody, type BrandedValidator } from '../config-parser';
+import type { AnalyzedProperty, AnalyzedType } from '~/compiler/type-analyzer';
+import { inlineValidatorBody, type BrandedValidator } from './config-parser';
 import { uid } from '@esportsplus/typescript/transformer';
-import { ERRORS_VARIABLE } from '~/transformer/constants';
+import { ERRORS_VARIABLE } from '~/compiler/constants';
 
 
 type GeneratorContext = {

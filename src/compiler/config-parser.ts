@@ -1,6 +1,7 @@
+import { ts } from '@esportsplus/typescript';
+import { ast } from '@esportsplus/typescript/transformer';
 import { resolveBrandedType } from './branded-types';
 import { ERRORS_VARIABLE } from './constants';
-import { ts } from '@esportsplus/typescript';
 
 
 interface BrandedValidator {
@@ -17,22 +18,6 @@ const VALUE_WORD_REGEX = /\bvalue\b/g;
 
 let cache = new Map<string, Map<string, BrandedValidator>>();
 
-
-function containsAwait(node: ts.Node): boolean {
-    if (ts.isAwaitExpression(node)) {
-        return true;
-    }
-
-    let children = node.getChildren();
-
-    for (let i = 0, n = children.length; i < n; i++) {
-        if (containsAwait(children[i])) {
-            return true;
-        }
-    }
-
-    return false;
-}
 
 function inlineValidatorBody(
     body: string,
@@ -109,7 +94,7 @@ function parseValidatorSetCall(
     }
 
     if (!isAsync && fn.body) {
-        isAsync = containsAwait(fn.body);
+        isAsync = ast.hasMatch(fn.body, ts.isAwaitExpression);
     }
 
     return { async: isAsync, body: fn.body.getText(), brand };

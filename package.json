@@ -5,7 +5,7 @@
     },
     "description": "Compile-time data validation utility",
     "devDependencies": {
-        "@esportsplus/typescript": "^0.18.0",
+        "@esportsplus/typescript": "^0.20.0",
         "@types/node": "^25.0.3",
         "vite": "^7.3.0",
         "vitest": "^4.0.16"
@@ -15,13 +15,14 @@
             "import": "./build/index.js",
             "types": "./build/index.d.ts"
         },
-        "./plugins/tsc": {
-            "import": "./build/transformer/plugins/tsc.js",
-            "types": "./build/transformer/plugins/tsc.d.ts"
+        "./compiler/tsc": {
+            "import": "./build/compiler/plugins/tsc.js",
+            "require": "./build/compiler/plugins/tsc.js",
+            "types": "./build/compiler/plugins/tsc.d.ts"
         },
-        "./plugins/vite": {
-            "import": "./build/transformer/plugins/vite.js",
-            "types": "./build/transformer/plugins/vite.d.ts"
+        "./compiler/vite": {
+            "import": "./build/compiler/plugins/vite.js",
+            "types": "./build/compiler/plugins/vite.d.ts"
         }
     },
     "files": [
