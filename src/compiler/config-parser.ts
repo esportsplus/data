@@ -1,5 +1,5 @@
 import { ts } from '@esportsplus/typescript';
-import { ast } from '@esportsplus/typescript/transformer';
+import { ast } from '@esportsplus/typescript/compiler';
 import { resolveBrandedType } from './branded-types';
 import { ERRORS_VARIABLE } from './constants';
 

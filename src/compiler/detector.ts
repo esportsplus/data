@@ -1,4 +1,4 @@
-import { code as c } from '@esportsplus/typescript/transformer';
+import { code as c } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
 
 

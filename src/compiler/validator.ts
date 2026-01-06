@@ -1,6 +1,6 @@
 import type { AnalyzedProperty, AnalyzedType } from '~/compiler/type-analyzer';
 import { inlineValidatorBody, type BrandedValidator } from './config-parser';
-import { uid } from '@esportsplus/typescript/transformer';
+import { uid } from '@esportsplus/typescript/compiler';
 import { ERRORS_VARIABLE } from '~/compiler/constants';
 
 

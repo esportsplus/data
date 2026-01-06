@@ -1,5 +1,5 @@
 import { PACKAGE } from '../../constants';
-import { plugin } from '@esportsplus/typescript/transformer';
+import { plugin } from '@esportsplus/typescript/compiler';
 import { clearValidatorCache, transform } from '..';
 
 

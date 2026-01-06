@@ -1,4 +1,4 @@
-import { plugin } from '@esportsplus/typescript/transformer';
+import { plugin } from '@esportsplus/typescript/compiler';
 import { transform } from '..';
 
 

@@ -1,6 +1,7 @@
 import { clearValidatorCache, getValidatorsForSource, type BrandedValidator } from './config-parser';
 import { contains, detectCalls, type DetectedCall } from './detector';
-import { transformValidatorBuild } from './transforms';
+import { analyzeType } from '~/compiler/type-analyzer';
+import { generateValidator } from './validator';
 import { transformCodec } from './proto';
 import { ts } from '@esportsplus/typescript';
 
@@ -12,8 +13,33 @@ type TransformResult = {
 };
 
 
+const ASYNC_PATTERN = /^\s*\(?async\s|\bawait\b/;
+
 let cache = new WeakMap<ts.SourceFile, Map<ts.CallExpression, DetectedCall>>();
 
+
+function extractMessages(
+    type: ts.Type,
+    pathParts: string[],
+    messages: Map<string, string>,
+    typeChecker: ts.TypeChecker
+): void {
+    if (type.isStringLiteral()) {
+        messages.set(pathParts.join('.'), type.value);
+        return;
+    }
+
+    if (type.flags & ts.TypeFlags.Object) {
+        let props = typeChecker.getPropertiesOfType(type);
+
+        for (let i = 0, n = props.length; i < n; i++) {
+            let prop = props[i],
+                propType = typeChecker.getTypeOfSymbol(prop);
+
+            extractMessages(propType, [...pathParts, prop.getName()], messages, typeChecker);
+        }
+    }
+}
 
 function getCachedDetectedCalls(sourceFile: ts.SourceFile, program: ts.Program): Map<ts.CallExpression, DetectedCall> {
     let calls = cache.get(sourceFile);
@@ -24,6 +50,18 @@ function getCachedDetectedCalls(sourceFile: ts.SourceFile, program: ts.Program):
     }
 
     return calls;
+}
+
+function parseErrorMessages(typeNode: ts.TypeNode | undefined, typeChecker: ts.TypeChecker): Map<string, string> {
+    let messages = new Map<string, string>();
+
+    if (!typeNode) {
+        return messages;
+    }
+
+    extractMessages(typeChecker.getTypeAtLocation(typeNode), [], messages, typeChecker);
+
+    return messages;
 }
 
 function synthesizeNode(node: ts.Node, factory: ts.NodeFactory): ts.Node {
@@ -49,7 +87,8 @@ function synthesizeNode(node: ts.Node, factory: ts.NodeFactory): ts.Node {
 function transformCall(
     call: DetectedCall,
     typeChecker: ts.TypeChecker,
-    brandValidators: Map<string, BrandedValidator>
+    brandValidators: Map<string, BrandedValidator>,
+    sourceFile: ts.SourceFile
 ): ts.Node {
     let generatedCode: string;
 
@@ -58,14 +97,20 @@ function transformCall(
             generatedCode = transformCodec(call.typeArg, call.configArg, typeChecker);
             break;
 
-        case 'validator.build':
-            generatedCode = transformValidatorBuild(
-                call.typeArg,
-                call.errorMessagesType,
-                typeChecker,
-                brandValidators
+        case 'validator.build': {
+            let customValidatorSource = call.configArg?.getText(sourceFile);
+
+            generatedCode = generateValidator(
+                analyzeType(call.typeArg, typeChecker),
+                {
+                    brandValidators,
+                    customMessages: parseErrorMessages(call.errorMessagesType, typeChecker),
+                    hasAsync: customValidatorSource ? ASYNC_PATTERN.test(customValidatorSource) : false
+                },
+                customValidatorSource
             );
             break;
+        }
 
         default:
             return call.node;
@@ -115,7 +160,7 @@ const transform = (sourceFile: ts.SourceFile, program: ts.Program): TransformRes
                             let call = detectedCalls.get(node);
 
                             if (call) {
-                                return transformCall(call, typeChecker, getValidatorsForSource(call.importSource, program));
+                                return transformCall(call, typeChecker, getValidatorsForSource(call.importSource, program), sourceFile);
                             }
                         }
 
