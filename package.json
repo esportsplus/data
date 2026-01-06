@@ -12,17 +12,16 @@
     },
     "exports": {
         ".": {
-            "import": "./build/index.js",
-            "types": "./build/index.d.ts"
+            "types": "./build/index.d.ts",
+            "default": "./build/index.js"
         },
         "./compiler/tsc": {
-            "import": "./build/compiler/plugins/tsc.js",
-            "require": "./build/compiler/plugins/tsc.js",
-            "types": "./build/compiler/plugins/tsc.d.ts"
+            "types": "./build/compiler/plugins/tsc.d.ts",
+            "default": "./build/compiler/plugins/tsc.js"
         },
         "./compiler/vite": {
-            "import": "./build/compiler/plugins/vite.js",
-            "types": "./build/compiler/plugins/vite.d.ts"
+            "types": "./build/compiler/plugins/vite.d.ts",
+            "default": "./build/compiler/plugins/vite.js"
         }
     },
     "files": [
