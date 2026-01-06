@@ -1,10 +1,9 @@
-import { code as c } from '@esportsplus/typescript/compiler';
+import { code as c, imports } from '@esportsplus/typescript/compiler';
+import { PACKAGE } from '~/constants';
 import { ts } from '@esportsplus/typescript';
 
 
 type CallType = 'codec' | 'validator.build';
-
-type ImportMap = Map<string, string>;
 
 interface DetectedCall {
     callType: CallType;
@@ -18,58 +17,39 @@ interface DetectedCall {
 
 const CHECK_TRANSFORM_PATTERNS = ['codec<', 'codec(', 'validator.build'];
 
+let packageImports: Set<string> | null = null;
 
-let cache = new WeakMap<ts.SourceFile, ImportMap>();
 
-
-function buildImportMap(sourceFile: ts.SourceFile, program: ts.Program): ImportMap {
-    let cached = cache.get(sourceFile);
-
-    if (cached) {
-        return cached;
+function cachePackageImports(sourceFile: ts.SourceFile): Set<string> {
+    if (packageImports) {
+        return packageImports;
     }
 
-    let map = new Map<string, string>();
+    packageImports = new Set();
 
-    for (let i = 0, n = sourceFile.statements.length; i < n; i++) {
-        let statement = sourceFile.statements[i];
+    let found = imports.find(sourceFile, PACKAGE);
 
-        if (!ts.isImportDeclaration(statement)) {
-            break;
-        }
-
-        let importClause = statement.importClause;
-
-        if (!importClause) {
-            continue;
-        }
-
-        let moduleSpecifier = (statement.moduleSpecifier as ts.StringLiteral).text,
-            resolvedPath = resolveModulePath(moduleSpecifier, sourceFile.fileName, program);
-
-        if (importClause.namedBindings && ts.isNamedImports(importClause.namedBindings)) {
-            let elements = importClause.namedBindings.elements;
-
-            for (let j = 0, m = elements.length; j < m; j++) {
-                let element = elements[j],
-                    importedName = element.propertyName?.text ?? element.name.text,
-                    localName = element.name.text;
-
-                if (importedName === 'validator') {
-                    map.set(localName, resolvedPath || '');
-                }
-            }
-        }
-
-        if (importClause.name) {
-            map.set(importClause.name.text, resolvedPath || '');
+    for (let i = 0, n = found.length; i < n; i++) {
+        for (let [, alias] of found[i].specifiers) {
+            packageImports.add(alias);
         }
     }
 
-    cache.set(sourceFile, map);
-
-    return map;
+    return packageImports;
 }
+
+function isIdentifierFromPackage(
+    identifier: ts.Identifier,
+    sourceFile: ts.SourceFile,
+    typeChecker: ts.TypeChecker | undefined
+): boolean {
+    if (imports.isFromPackage(identifier, PACKAGE, typeChecker)) {
+        return true;
+    }
+
+    return cachePackageImports(sourceFile).has(identifier.text);
+}
+
 
 function detectCallType(node: ts.CallExpression): CallType | null {
     let expr = node.expression;
@@ -89,65 +69,38 @@ function detectCallType(node: ts.CallExpression): CallType | null {
         return null;
     }
 
-    let objectName = objectExpr.text;
-
-    if (objectName === 'validator' && methodName === 'build') {
+    if (objectExpr.text === 'validator' && methodName === 'build') {
         return 'validator.build';
     }
 
     return null;
 }
 
-function resolveModulePath(
-    moduleSpecifier: string,
-    containingFile: string,
-    program: ts.Program
-): string | null {
-    if (!moduleSpecifier.startsWith('.') && !moduleSpecifier.startsWith('/')) {
-        return null;
-    }
-
-    let resolved = ts.resolveModuleName(
-            moduleSpecifier,
-            containingFile,
-            program.getCompilerOptions(),
-            ts.sys
-        );
-
-    if (resolved.resolvedModule) {
-        return resolved.resolvedModule.resolvedFileName;
-    }
-
-    return null;
-}
-
-function resolveValidatorImportSource(node: ts.CallExpression, importMap: ImportMap): string | null {
-    let expr = node.expression;
-
-    if (!ts.isPropertyAccessExpression(expr)) {
-        return null;
-    }
-
-    let identifier = expr.expression;
-
-    if (!ts.isIdentifier(identifier)) {
-        return null;
-    }
-
-    return importMap.get(identifier.text) || null;
-}
-
 function visitDetectCall(
     node: ts.Node,
     calls: Map<ts.CallExpression, DetectedCall>,
     sourceFile: ts.SourceFile,
-    program: ts.Program | undefined,
-    importMap: ImportMap
+    typeChecker: ts.TypeChecker | undefined
 ): void {
     if (ts.isCallExpression(node)) {
         let callType = detectCallType(node);
 
         if (callType && node.typeArguments && node.typeArguments.length > 0) {
+            let expr = node.expression,
+                identifier: ts.Identifier | undefined;
+
+            if (callType === 'codec' && ts.isIdentifier(expr)) {
+                identifier = expr;
+            }
+            else if (callType === 'validator.build' && ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression)) {
+                identifier = expr.expression;
+            }
+
+            if (!identifier || !isIdentifierFromPackage(identifier, sourceFile, typeChecker)) {
+                ts.forEachChild(node, (child) => visitDetectCall(child, calls, sourceFile, typeChecker));
+                return;
+            }
+
             let detected: DetectedCall = {
                 callType,
                 node,
@@ -157,6 +110,10 @@ function visitDetectCall(
             if (callType === 'codec') {
                 if (node.arguments.length > 0) {
                     detected.configArg = node.arguments[0];
+                }
+
+                if (typeChecker) {
+                    detected.importSource = imports.trace(identifier, typeChecker) ?? undefined;
                 }
             }
             else if (callType === 'validator.build') {
@@ -168,11 +125,8 @@ function visitDetectCall(
                     detected.configArg = node.arguments[0];
                 }
 
-                if (program) {
-                    detected.importSource = resolveValidatorImportSource(
-                        node,
-                        importMap
-                    ) ?? undefined;
+                if (typeChecker) {
+                    detected.importSource = imports.trace(identifier, typeChecker) ?? undefined;
                 }
             }
 
@@ -180,7 +134,7 @@ function visitDetectCall(
         }
     }
 
-    ts.forEachChild(node, (child) => visitDetectCall(child, calls, sourceFile, program, importMap));
+    ts.forEachChild(node, (child) => visitDetectCall(child, calls, sourceFile, typeChecker));
 }
 
 
@@ -189,10 +143,10 @@ const contains = (code: string): boolean => {
 };
 
 const detectCalls = (sourceFile: ts.SourceFile, program?: ts.Program): Map<ts.CallExpression, DetectedCall> => {
-    let calls = new Map<ts.CallExpression, DetectedCall>(),
-        map = program ? buildImportMap(sourceFile, program) : new Map<string, string>();
+    let calls = new Map<ts.CallExpression, DetectedCall>();
 
-    visitDetectCall(sourceFile, calls, sourceFile, program, map);
+    packageImports = null;
+    visitDetectCall(sourceFile, calls, sourceFile, program?.getTypeChecker());
 
     return calls;
 };

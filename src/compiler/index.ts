@@ -2,6 +2,8 @@ import { clearValidatorCache, getValidatorsForSource, type BrandedValidator } fr
 import { contains, detectCalls, type DetectedCall } from './detector';
 import { analyzeType } from '~/compiler/type-analyzer';
 import { generateValidator } from './validator';
+import { imports } from '@esportsplus/typescript/compiler';
+import { PACKAGE } from '~/constants';
 import { transformCodec } from './proto';
 import { ts } from '@esportsplus/typescript';
 
@@ -152,7 +154,8 @@ const transform = (sourceFile: ts.SourceFile, program: ts.Program): TransformRes
         return { code, sourceFile, changed: false };
     }
 
-    let result = ts.transform(sourceFile, [
+    let remove: string[] = [],
+        result = ts.transform(sourceFile, [
             (context: ts.TransformationContext) => {
                 let typeChecker = program.getTypeChecker(),
                     visit = (node: ts.Node): ts.Node => {
@@ -160,6 +163,13 @@ const transform = (sourceFile: ts.SourceFile, program: ts.Program): TransformRes
                             let call = detectedCalls.get(node);
 
                             if (call) {
+                                if (call.callType === 'codec') {
+                                    remove.push('codec');
+                                }
+                                else if (call.callType === 'validator.build') {
+                                    remove.push('validator');
+                                }
+
                                 return transformCall(call, typeChecker, getValidatorsForSource(call.importSource, program), sourceFile);
                             }
                         }
@@ -179,6 +189,11 @@ const transform = (sourceFile: ts.SourceFile, program: ts.Program): TransformRes
 
     code = ts.createPrinter().printFile(transformed);
     result.dispose();
+
+    if (remove.length > 0) {
+        code = imports.modify(code, transformed, PACKAGE, { remove });
+        transformed = ts.createSourceFile(sourceFile.fileName, code, sourceFile.languageVersion, true);
+    }
 
     return { code, sourceFile: transformed, changed: true };
 };

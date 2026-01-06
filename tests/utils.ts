@@ -1,6 +1,8 @@
-import { contains, transform } from '../src/transformer/index';
+import { contains, transform } from '../src/compiler/index';
 import { ts } from '@esportsplus/typescript';
 
+
+const PACKAGE_IMPORT = "import { codec, validator } from '@esportsplus/data';\n";
 
 let compilerOptions: ts.CompilerOptions = {
     lib: ['lib.es2020.d.ts'],
@@ -44,7 +46,8 @@ function createProgram(code: string, fileName: string = 'test.ts'): ts.Program {
 }
 
 function transformCode(code: string): string {
-    let program = createProgram(code),
+    let fullCode = PACKAGE_IMPORT + code,
+        program = createProgram(fullCode),
         sourceFile = program.getSourceFile('test.ts')!,
         result = transform(sourceFile, program);
 
