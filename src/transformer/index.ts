@@ -12,19 +12,16 @@ type TransformResult = {
 };
 
 
-let detectedCallsCache = new WeakMap<ts.SourceFile, Map<ts.CallExpression, DetectedCall>>();
+let cache = new WeakMap<ts.SourceFile, Map<ts.CallExpression, DetectedCall>>();
 
 
 function getCachedDetectedCalls(sourceFile: ts.SourceFile, program: ts.Program): Map<ts.CallExpression, DetectedCall> {
-    let cached = detectedCallsCache.get(sourceFile);
+    let calls = cache.get(sourceFile);
 
-    if (cached) {
-        return cached;
+    if (!calls) {
+        calls = detectCalls(sourceFile, program);
+        cache.set(sourceFile, calls);
     }
-
-    let calls = detectCalls(sourceFile, program);
-
-    detectedCallsCache.set(sourceFile, calls);
 
     return calls;
 }
@@ -74,23 +71,25 @@ function transformCall(
             return call.node;
     }
 
-    let expression: ts.Expression | undefined,
-        tempSourceFile = ts.createSourceFile(
+    let expression: ts.Expression | undefined;
+
+    ts.forEachChild(
+        ts.createSourceFile(
             'generated.ts',
             `const __generated = ${generatedCode}`,
             ts.ScriptTarget.Latest,
             true
-        );
+        ),
+        (node) => {
+            if (ts.isVariableStatement(node)) {
+                let decl = node.declarationList.declarations[0];
 
-    ts.forEachChild(tempSourceFile, (node) => {
-        if (ts.isVariableStatement(node)) {
-            let decl = node.declarationList.declarations[0];
-
-            if (decl && decl.initializer) {
-                expression = decl.initializer;
+                if (decl && decl.initializer) {
+                    expression = decl.initializer;
+                }
             }
         }
-    });
+    );
 
     if (!expression) {
         return call.node;
@@ -140,5 +139,5 @@ const transform = (sourceFile: ts.SourceFile, program: ts.Program): TransformRes
 };
 
 
-export { clearValidatorCache, transform };
+export { clearValidatorCache, contains, transform };
 export type { TransformResult };

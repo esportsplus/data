@@ -48,6 +48,7 @@
     },
     "scripts": {
         "build": "tsc",
+        "build:test": "pnpm build && pnpm test",
         "-": "-",
         "prepare": "pnpm build",
         "prepublishOnly": "pnpm build",

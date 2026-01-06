@@ -1,4 +1,4 @@
-import { createTransformer, mightNeedTransform } from '../src/transformer/index';
+import { contains, transform } from '../src/transformer/index';
 import { ts } from '@esportsplus/typescript';
 
 
@@ -44,18 +44,11 @@ function createProgram(code: string, fileName: string = 'test.ts'): ts.Program {
 }
 
 function transformCode(code: string): string {
-    let printer = ts.createPrinter(),
-        program = createProgram(code),
+    let program = createProgram(code),
         sourceFile = program.getSourceFile('test.ts')!,
-        transformer = createTransformer(program),
-        result = ts.transform(sourceFile, [transformer]),
-        transformed = result.transformed[0];
+        result = transform(sourceFile, program);
 
-    let output = printer.printFile(transformed);
-
-    result.dispose();
-
-    return output;
+    return result.code;
 }
 
 function createValidator<T>(code: string): (input: unknown) => { ok: boolean; data: unknown; errors?: Array<{ message: string; path: string }> } {
@@ -178,4 +171,4 @@ function createCodec<T>(code: string): { encode: (data: T) => Uint8Array; decode
 }
 
 
-export { createCodec, createProgram, createValidator, mightNeedTransform, transformCode };
+export { contains as mightNeedTransform, createCodec, createProgram, createValidator, transformCode };

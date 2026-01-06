@@ -15,7 +15,7 @@ const ERRORS_PUSH_REGEX = /errors\.push\((['"`])(.+?)\1\)/g;
 const VALUE_WORD_REGEX = /\bvalue\b/g;
 
 
-let validatorCache = new Map<string, Map<string, BrandedValidator>>();
+let cache = new Map<string, Map<string, BrandedValidator>>();
 
 
 function containsAwait(node: ts.Node): boolean {
@@ -46,7 +46,6 @@ function inlineValidatorBody(
     }
 
     code = code.replace(VALUE_WORD_REGEX, variable);
-
     code = code.replace(
         ERRORS_PUSH_REGEX,
         `(${ERRORS_VARIABLE} ??= []).push({ message: $1$2$1, path: ${path} })`
@@ -55,10 +54,7 @@ function inlineValidatorBody(
     return code;
 }
 
-function parseValidatorFile(
-    sourceFile: ts.SourceFile,
-    typeChecker: ts.TypeChecker
-): Map<string, BrandedValidator> {
+function parseValidatorFile(sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker) {
     let brandValidators = new Map<string, BrandedValidator>();
 
     visitValidatorSetCall(sourceFile, brandValidators, typeChecker);
@@ -116,9 +112,7 @@ function parseValidatorSetCall(
         isAsync = containsAwait(fn.body);
     }
 
-    let body = fn.body.getText();
-
-    return { async: isAsync, body, brand };
+    return { async: isAsync, body: fn.body.getText(), brand };
 }
 
 function visitValidatorSetCall(
@@ -139,32 +133,29 @@ function visitValidatorSetCall(
 
 
 const clearValidatorCache = (): void => {
-    validatorCache.clear();
+    cache.clear();
 };
 
-const getValidatorsForSource = (
-    sourcePath: string | null | undefined,
-    program: ts.Program
-): Map<string, BrandedValidator> => {
+const getValidatorsForSource = (sourcePath: string | null | undefined, program: ts.Program) => {
     if (!sourcePath) {
         return new Map();
     }
 
-    if (validatorCache.has(sourcePath)) {
-        return validatorCache.get(sourcePath)!;
+    if (cache.has(sourcePath)) {
+        return cache.get(sourcePath)!;
     }
 
     let sourceFile = program.getSourceFile(sourcePath);
 
     if (!sourceFile) {
-        validatorCache.set(sourcePath, new Map());
+        cache.set(sourcePath, new Map());
         return new Map();
     }
 
     let typeChecker = program.getTypeChecker(),
         validators = parseValidatorFile(sourceFile, typeChecker);
 
-    validatorCache.set(sourcePath, validators);
+    cache.set(sourcePath, validators);
 
     return validators;
 };
