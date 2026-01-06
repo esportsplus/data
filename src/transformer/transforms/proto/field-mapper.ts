@@ -12,8 +12,8 @@ interface MappedField {
 }
 
 
+// Properties are already sorted alphabetically by type-analyzer
 const mapFields = (properties: AnalyzedProperty[]): MappedField[] => {
-    // Properties are already sorted alphabetically by type-analyzer
     let fields: MappedField[] = [];
 
     for (let i = 0, n = properties.length; i < n; i++) {

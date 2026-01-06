@@ -4,11 +4,7 @@ import type { BrandedValidator } from '../config-parser';
 import { ts } from '@esportsplus/typescript';
 
 
-const ASYNC_ARROW_REGEX = /^\(?async\s/;
-
-const ASYNC_FUNCTION_REGEX = /^async\s/;
-
-const AWAIT_KEYWORD_REGEX = /\bawait\b/;
+const ASYNC_PATTERN = /^\s*\(?async\s|\bawait\b/;
 
 
 function extractMessages(
@@ -36,27 +32,6 @@ function extractMessages(
     }
 }
 
-function isAsyncValidator(source: string): boolean {
-    let trimmed = source.trim();
-
-    // Check for async function declaration
-    if (ASYNC_FUNCTION_REGEX.test(trimmed)) {
-        return true;
-    }
-
-    // Check for async arrow function
-    if (ASYNC_ARROW_REGEX.test(trimmed)) {
-        return true;
-    }
-
-    // Check for await usage in function body
-    if (AWAIT_KEYWORD_REGEX.test(source)) {
-        return true;
-    }
-
-    return false;
-}
-
 function parseErrorMessages(typeNode: ts.TypeNode | undefined, typeChecker: ts.TypeChecker): Map<string, string> {
     let messages = new Map<string, string>();
 
@@ -82,7 +57,7 @@ const transformValidatorBuild = (
         {
             brandValidators,
             customMessages: parseErrorMessages(errorMessagesType, typeChecker),
-            hasAsync: customValidatorSource ? isAsyncValidator(customValidatorSource) : false
+            hasAsync: customValidatorSource ? ASYNC_PATTERN.test(customValidatorSource) : false
         },
         customValidatorSource
     );

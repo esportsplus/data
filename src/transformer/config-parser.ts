@@ -1,3 +1,4 @@
+import { resolveBrandedType } from './branded-types';
 import { ERRORS_VARIABLE } from '~/transformer/constants';
 import { ts } from '@esportsplus/typescript';
 
@@ -19,39 +20,15 @@ function containsAwait(node: ts.Node): boolean {
         return true;
     }
 
-    let found = false;
+    let children = node.getChildren();
 
-    ts.forEachChild(node, (child) => {
-        if (!found && containsAwait(child)) {
-            found = true;
-        }
-    });
-
-    return found;
-}
-
-function extractBrandName(type: ts.Type, typeChecker: ts.TypeChecker): string | null {
-    if (!type.isIntersection()) {
-        return null;
-    }
-
-    for (let i = 0, n = type.types.length; i < n; i++) {
-        let t = type.types[i];
-
-        if (t.flags & ts.TypeFlags.Object) {
-            let brandProp = typeChecker.getPropertyOfType(t, '__brand');
-
-            if (brandProp) {
-                let brandType = typeChecker.getTypeOfSymbol(brandProp);
-
-                if (brandType.isStringLiteral()) {
-                    return brandType.value;
-                }
-            }
+    for (let i = 0, n = children.length; i < n; i++) {
+        if (containsAwait(children[i])) {
+            return true;
         }
     }
 
-    return null;
+    return false;
 }
 
 function inlineValidatorBody(
@@ -115,7 +92,7 @@ function parseValidatorSetCall(
 
     // Extract brand name from type
     let type = typeChecker.getTypeAtLocation(valueParam.type),
-        brand = extractBrandName(type, typeChecker);
+        brand = resolveBrandedType(type, typeChecker).brand;
 
     if (!brand) {
         return null;

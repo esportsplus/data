@@ -16,19 +16,23 @@ const transformCodec = (
         encoderCode = generateEncoder(analyzed),
         runtimeHelpers = buildRuntimeHelpers(analyzeRuntimeNeeds(analyzed));
 
-    let defaultsApplication = '',
-        propertyNames = analyzed.properties.map(p => p.name);
+    let defaultsApplication = '';
 
     if (defaultsArg) {
-        let checks = propertyNames.map(name =>
-                `if (_result['${name}'] === undefined && _defaults['${name}'] !== undefined) { _result['${name}'] = _defaults['${name}']; }`
-            ).join('\n');
+        let checks = '',
+            properties = analyzed.properties;
+
+        for (let i = 0, n = properties.length; i < n; i++) {
+            let name = properties[i].name;
+
+            checks += `if (_result['${name}'] === undefined && _defaults['${name}'] !== undefined) { _result['${name}'] = _defaults['${name}']; }\n`;
+        }
 
         defaultsApplication = `
             let _applyDefaults = (_result) => {
-                ${checks}
-                return _result;
-            };
+                    ${checks}
+                    return _result;
+                };
         `;
     }
 
@@ -37,6 +41,7 @@ const transformCodec = (
             ${runtimeHelpers}
 
             let _defaults = ${defaultsCode};
+
             ${defaultsApplication}
 
             return {

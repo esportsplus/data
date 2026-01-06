@@ -2,25 +2,24 @@ import type { ValidatorFunction } from '~/types';
 
 
 const max = (number: number, error?: string): ValidatorFunction<unknown> => {
-    // Pre-compute error messages to avoid template literal allocation in hot path
-    let arrayError = error || `must be at most ${number} items`,
-        numberError = error || `must be at most ${number}`,
-        stringError = error || `must be at most ${number} characters`;
+    let arr = error || `must be at most ${number} items`,
+        num = error || `must be at most ${number}`,
+        str = error || `must be at most ${number} characters`;
 
     return (value, errors) => {
         if (typeof value === 'number') {
             if (value > number) {
-                errors.push(numberError);
+                errors.push(num);
             }
         }
         else if (typeof value === 'string') {
             if (value.length > number) {
-                errors.push(stringError);
+                errors.push(str);
             }
         }
         else if (Array.isArray(value)) {
             if (value.length > number) {
-                errors.push(arrayError);
+                errors.push(arr);
             }
         }
         else {

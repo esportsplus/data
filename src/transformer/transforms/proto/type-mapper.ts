@@ -111,4 +111,4 @@ const getFieldTag = (fieldNumber: number, wireType: WireType): number => {
 
 
 export { getFieldTag, getProtoFieldInfo, WIRE_TYPE_32BIT, WIRE_TYPE_64BIT, WIRE_TYPE_LENGTH_DELIMITED, WIRE_TYPE_VARINT };
-export type { ProtoFieldInfo, ProtobufType, WireType };
+export type { WireType };

@@ -8,18 +8,12 @@ let encoderCount = 0,
     nestedEncoders: string[] = [];
 
 
-function generateArraySizeCalc(
-    field: MappedField,
-    accessor: string
-): string {
-    let itemType = field.property.itemType!,
-        fieldInfo = getProtoFieldInfo(field.property);
+function generateArraySizeCalc(field: MappedField, accessor: string): string {
+    let itemType = field.property.itemType!;
 
-    if (fieldInfo.packed) {
+    if (getProtoFieldInfo(field.property).packed) {
         // Packed encoding
-        let itemInfo = getProtoFieldInfo(itemType);
-
-        switch (itemInfo.wireType) {
+        switch (getProtoFieldInfo(itemType).wireType) {
             case WIRE_TYPE_VARINT:
                 if (itemType.type === 'bigint') {
                     return `
@@ -73,8 +67,8 @@ function generateArraySizeCalc(
 
     // Non-packed repeated field
     switch (itemType.type) {
+        // Cache encoded strings for reuse in write phase
         case 'string':
-            // Cache encoded strings for reuse in write phase
             return `
                 // field ${field.fieldNumber}: repeated string
                 let _sa${field.fieldNumber} = new Array(${accessor}.length);
@@ -108,17 +102,11 @@ function generateArraySizeCalc(
     }
 }
 
-function generateArrayWrite(
-    field: MappedField,
-    accessor: string
-): string {
-    let itemType = field.property.itemType!,
-        fieldInfo = getProtoFieldInfo(field.property);
+function generateArrayWrite(field: MappedField, accessor: string): string {
+    let itemType = field.property.itemType!;
 
-    if (fieldInfo.packed) {
-        let itemInfo = getProtoFieldInfo(itemType);
-
-        switch (itemInfo.wireType) {
+    if (getProtoFieldInfo(field.property).packed) {
+        switch (getProtoFieldInfo(itemType).wireType) {
             case WIRE_TYPE_VARINT:
                 if (itemType.type === 'bigint') {
                     return `
@@ -196,8 +184,8 @@ function generateArrayWrite(
 
     // Non-packed repeated field
     switch (itemType.type) {
+        // Reuse cached encoded strings from size calculation phase
         case 'string':
-            // Reuse cached encoded strings from size calculation phase
             return `
                 // field ${field.fieldNumber}: repeated string
                 for (let _i = 0, _n = _sa${field.fieldNumber}.length; _i < _n; _i++) {
@@ -234,10 +222,7 @@ function generateArrayWrite(
     }
 }
 
-function generateFieldSizeCalc(
-    field: MappedField,
-    accessor: string
-): string {
+function generateFieldSizeCalc(field: MappedField, accessor: string): string {
     let prop = field.property;
 
     if (prop.type === 'array') {
@@ -288,11 +273,9 @@ function generateFieldSizeCalc(
             }
 
             if (prop.type === 'object' && prop.properties && prop.properties.length > 0) {
-                let encoderName = generateNestedEncoder(prop.properties);
-
                 return `
                     // field ${field.fieldNumber}: message
-                    let _ms${field.fieldNumber} = ${encoderName}_size(${accessor});
+                    let _ms${field.fieldNumber} = ${generateNestedEncoder(prop.properties)}_size(${accessor});
 
                     _size += 1 + _varintSize(_ms${field.fieldNumber}) + _ms${field.fieldNumber};
                 `;
@@ -305,10 +288,7 @@ function generateFieldSizeCalc(
     }
 }
 
-function generateFieldWrite(
-    field: MappedField,
-    accessor: string
-): string {
+function generateFieldWrite(field: MappedField, accessor: string): string {
     let prop = field.property;
 
     if (prop.type === 'array') {
@@ -354,8 +334,8 @@ function generateFieldWrite(
             `;
 
         case WIRE_TYPE_LENGTH_DELIMITED:
+            // Reuse cached encoded bytes from size calculation phase
             if (prop.type === 'string') {
-                // Reuse cached encoded bytes from size calculation phase
                 return `
                     // field ${field.fieldNumber}: string
                     _buffer[_offset++] = ${field.tag};

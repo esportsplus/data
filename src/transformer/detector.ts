@@ -16,9 +16,10 @@ interface DetectedCall {
 }
 
 
-let importMapCache = new WeakMap<ts.SourceFile, ImportMap>();
-
 const CHECK_TRANSFORM_PATTERNS = ['codec<', 'codec(', 'validator.build'];
+
+
+let importMapCache = new WeakMap<ts.SourceFile, ImportMap>();
 
 
 function buildImportMap(
@@ -37,7 +38,8 @@ function buildImportMap(
         let statement = sourceFile.statements[i];
 
         if (!ts.isImportDeclaration(statement)) {
-            continue;
+            // Imports must be at module top; break on first non-import
+            break;
         }
 
         let importClause = statement.importClause;
@@ -49,7 +51,6 @@ function buildImportMap(
         let moduleSpecifier = (statement.moduleSpecifier as ts.StringLiteral).text,
             resolvedPath = resolveModulePath(moduleSpecifier, sourceFile.fileName, program);
 
-        // Check named imports: import { validator } from '...'
         if (importClause.namedBindings && ts.isNamedImports(importClause.namedBindings)) {
             let elements = importClause.namedBindings.elements;
 
@@ -64,7 +65,6 @@ function buildImportMap(
             }
         }
 
-        // Check default import: import validator from '...'
         if (importClause.name) {
             map.set(importClause.name.text, resolvedPath || '');
         }
@@ -114,11 +114,10 @@ function resolveModulePath(
         return null;
     }
 
-    let compilerOptions = program.getCompilerOptions(),
-        resolved = ts.resolveModuleName(
+    let resolved = ts.resolveModuleName(
             moduleSpecifier,
             containingFile,
-            compilerOptions,
+            program.getCompilerOptions(),
             ts.sys
         );
 
@@ -129,10 +128,7 @@ function resolveModulePath(
     return null;
 }
 
-function resolveValidatorImportSource(
-    node: ts.CallExpression,
-    importMap: ImportMap
-): string | null {
+function resolveValidatorImportSource(node: ts.CallExpression, importMap: ImportMap): string | null {
     let expr = node.expression;
 
     if (!ts.isPropertyAccessExpression(expr)) {
@@ -145,16 +141,13 @@ function resolveValidatorImportSource(
         return null;
     }
 
-    // O(1) lookup using cached import map
-    let resolvedPath = importMap.get(identifier.text);
-
-    return resolvedPath !== undefined ? (resolvedPath || null) : null;
+    return importMap.get(identifier.text) || null;
 }
 
 
 function visitDetectCall(
     node: ts.Node,
-    calls: DetectedCall[],
+    calls: Map<ts.CallExpression, DetectedCall>,
     sourceFile: ts.SourceFile,
     program: ts.Program | undefined,
     importMap: ImportMap
@@ -170,7 +163,6 @@ function visitDetectCall(
             };
 
             if (callType === 'codec') {
-                // Extract defaults argument for codec
                 if (node.arguments.length > 0) {
                     detected.configArg = node.arguments[0];
                 }
@@ -184,7 +176,6 @@ function visitDetectCall(
                     detected.configArg = node.arguments[0];
                 }
 
-                // Resolve import source for validator using O(1) lookup
                 if (program) {
                     detected.importSource = resolveValidatorImportSource(
                         node,
@@ -193,7 +184,7 @@ function visitDetectCall(
                 }
             }
 
-            calls.push(detected);
+            calls.set(node, detected);
         }
     }
 
@@ -201,20 +192,13 @@ function visitDetectCall(
 }
 
 
-const detectCalls = (
-    sourceFile: ts.SourceFile,
-    program?: ts.Program
-): DetectedCall[] => {
-    let calls: DetectedCall[] = [],
-        importMap: ImportMap = program ? buildImportMap(sourceFile, program) : new Map();
+const detectCalls = (sourceFile: ts.SourceFile, program?: ts.Program): Map<ts.CallExpression, DetectedCall> => {
+    let calls = new Map<ts.CallExpression, DetectedCall>(),
+        map: ImportMap = program ? buildImportMap(sourceFile, program) : new Map();
 
-    visitDetectCall(sourceFile, calls, sourceFile, program, importMap);
+    visitDetectCall(sourceFile, calls, sourceFile, program, map);
 
     return calls;
-};
-
-const clearImportMapCache = (): void => {
-    importMapCache = new WeakMap();
 };
 
 const mightNeedTransform = (code: string): boolean => {
@@ -222,5 +206,5 @@ const mightNeedTransform = (code: string): boolean => {
 };
 
 
-export { clearImportMapCache, detectCalls, mightNeedTransform };
-export type { CallType, DetectedCall };
+export { detectCalls, mightNeedTransform };
+export type { DetectedCall };

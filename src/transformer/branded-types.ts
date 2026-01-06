@@ -64,4 +64,3 @@ const resolveBrandedType = (type: ts.Type, typeChecker: ts.TypeChecker): Branded
 
 
 export { resolveBrandedType };
-export type { BaseType, BrandedTypeInfo };

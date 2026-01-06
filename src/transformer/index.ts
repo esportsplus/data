@@ -1,21 +1,23 @@
 import { clearValidatorCache, getValidatorsForSource, type BrandedValidator } from './config-parser';
-import { clearImportMapCache, detectCalls, mightNeedTransform, type DetectedCall } from './detector';
-import { clearTypeAnalysisCache } from './type-analyzer';
+import { detectCalls, mightNeedTransform, type DetectedCall } from './detector';
 import { transformCodec } from './transforms/proto';
 import { transformValidatorBuild } from './transforms';
 import { ts } from '@esportsplus/typescript';
 
 
-type DetectedCallsCache = WeakMap<ts.SourceFile, DetectedCall[]>;
+type DetectedCallsCache = WeakMap<ts.SourceFile, Map<ts.CallExpression, DetectedCall>>;
+
+type TransformResult = {
+    code: string;
+    sourceFile: ts.SourceFile;
+    transformed: boolean;
+};
 
 
 let detectedCallsCache: DetectedCallsCache = new WeakMap();
 
 
-function getCachedDetectedCalls(
-    sourceFile: ts.SourceFile,
-    program: ts.Program
-): DetectedCall[] {
+function getCachedDetectedCalls(sourceFile: ts.SourceFile, program: ts.Program): Map<ts.CallExpression, DetectedCall> {
     let cached = detectedCallsCache.get(sourceFile);
 
     if (cached) {
@@ -79,14 +81,13 @@ function transformCall(
     }
 
     // Parse the generated code and return the expression
-    let tempSourceFile = ts.createSourceFile(
-        'generated.ts',
-        `const __generated = ${generatedCode}`,
-        ts.ScriptTarget.Latest,
-        true
-    );
-
-    let expression: ts.Expression | undefined;
+    let expression: ts.Expression | undefined,
+        tempSourceFile = ts.createSourceFile(
+            'generated.ts',
+            `const __generated = ${generatedCode}`,
+            ts.ScriptTarget.Latest,
+            true
+        );
 
     ts.forEachChild(tempSourceFile, (node) => {
         if (ts.isVariableStatement(node)) {
@@ -106,59 +107,57 @@ function transformCall(
     return synthesizeNode(expression, ts.factory);
 }
 
-function visitTransformNode(
-    node: ts.Node,
+function createVisitor(
     context: ts.TransformationContext,
-    detectedCalls: DetectedCall[],
+    detectedCalls: Map<ts.CallExpression, DetectedCall>,
     program: ts.Program,
     typeChecker: ts.TypeChecker
-): ts.Node {
-    // Check if this node is one of our detected calls
-    if (ts.isCallExpression(node)) {
-        for (let i = 0, n = detectedCalls.length; i < n; i++) {
-            let call = detectedCalls[i];
+): (node: ts.Node) => ts.Node {
+    let visit = (node: ts.Node): ts.Node => {
+        if (ts.isCallExpression(node)) {
+            let call = detectedCalls.get(node);
 
-            if (call.node === node) {
-                let brandValidators = getValidatorsForSource(call.importSource, program);
-
-                return transformCall(call, typeChecker, brandValidators);
+            if (call) {
+                return transformCall(call, typeChecker, getValidatorsForSource(call.importSource, program));
             }
         }
-    }
 
-    return ts.visitEachChild(
-        node,
-        (child) => visitTransformNode(child, context, detectedCalls, program, typeChecker),
-        context
-    );
+        return ts.visitEachChild(node, visit, context);
+    };
+
+    return visit;
 }
 
 
-const clearCaches = (): void => {
-    clearImportMapCache();
-    clearTypeAnalysisCache();
-    clearValidatorCache();
-    detectedCallsCache = new WeakMap();
-};
+const transform = (sourceFile: ts.SourceFile, program: ts.Program): TransformResult => {
+    let code = sourceFile.getFullText(),
+        detectedCalls = getCachedDetectedCalls(sourceFile, program);
 
-const createTransformer = (program: ts.Program): ts.TransformerFactory<ts.SourceFile> => {
-    let typeChecker = program.getTypeChecker();
+    if (detectedCalls.size === 0) {
+        return { code, sourceFile, transformed: false };
+    }
 
-    return (context: ts.TransformationContext) => {
-        return (sourceFile: ts.SourceFile): ts.SourceFile => {
-            let detectedCalls = getCachedDetectedCalls(sourceFile, program);
+    let result = ts.transform(sourceFile, [
+            (context: ts.TransformationContext) => {
+                let typeChecker = program.getTypeChecker(),
+                    visit = createVisitor(context, detectedCalls, program, typeChecker);
 
-            if (detectedCalls.length === 0) {
-                return sourceFile;
+                return (sf: ts.SourceFile) => ts.visitNode(sf, visit) as ts.SourceFile;
             }
+        ]),
+        transformed = result.transformed[0];
 
-            return ts.visitNode(
-                sourceFile,
-                (node) => visitTransformNode(node, context, detectedCalls, program, typeChecker)
-            ) as ts.SourceFile;
-        };
-    };
+    if (transformed === sourceFile) {
+        result.dispose();
+        return { code, sourceFile, transformed: false };
+    }
+
+    code = ts.createPrinter().printFile(transformed);
+    result.dispose();
+
+    return { code, sourceFile: transformed, transformed: true };
 };
 
 
-export { clearCaches, clearValidatorCache, createTransformer, mightNeedTransform };
+export { clearValidatorCache, mightNeedTransform, transform };
+export type { TransformResult };

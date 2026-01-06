@@ -9,18 +9,34 @@ import {
 } from './type-mapper';
 
 
+const SKIP_UNKNOWN_FIELD = `
+    let _wireType = _tag & 0x7;
+
+    if (_wireType === 0) {
+        while (_buffer[_offset++] & 0x80) {}
+    }
+    else if (_wireType === 1) {
+        _offset += 8;
+    }
+    else if (_wireType === 2) {
+        let [_len, _o] = _readVarint(_buffer, _offset);
+
+        _offset = _o + _len;
+    }
+    else if (_wireType === 5) {
+        _offset += 4;
+    }
+`;
+
+
 let decoderCount = 0,
     nestedDecoders: string[] = [];
 
 
-function generateArrayDecode(
-    field: MappedField,
-    resultVar: string
-): string {
-    let itemType = field.property.itemType!,
-        fieldInfo = getProtoFieldInfo(field.property);
+function generateArrayDecode(field: MappedField, resultVar: string): string {
+    let itemType = field.property.itemType!;
 
-    if (fieldInfo.packed) {
+    if (getProtoFieldInfo(field.property).packed) {
         let itemInfo = getProtoFieldInfo(itemType);
 
         switch (itemInfo.wireType) {
@@ -74,8 +90,8 @@ function generateArrayDecode(
                     }
                 `;
 
+            // Pre-allocate exact count (4 bytes per float)
             case WIRE_TYPE_32BIT:
-                // Pre-allocate exact count (4 bytes per float)
                 return `
                     let [_len, _newOff] = _readVarint(_buffer, _offset);
 
@@ -94,8 +110,8 @@ function generateArrayDecode(
                     ${resultVar} = _arr;
                 `;
 
+            // Pre-allocate exact count (8 bytes per double)
             case WIRE_TYPE_64BIT:
-                // Pre-allocate exact count (8 bytes per double)
                 return `
                     let [_len, _newOff] = _readVarint(_buffer, _offset);
 
@@ -149,10 +165,7 @@ function generateArrayDecode(
     }
 }
 
-function generateFieldDecode(
-    field: MappedField,
-    resultVar: string
-): string {
+function generateFieldDecode(field: MappedField, resultVar: string): string {
     let prop = field.property;
 
     if (prop.type === 'array') {
@@ -267,23 +280,7 @@ function generateNestedDecoder(properties: AnalyzedProperty[]): string {
                     ${caseParts.join('\n')}
 
                     default:
-                        let _wireType = _tag & 0x7;
-
-                        if (_wireType === 0) {
-                            while (_buffer[_offset++] & 0x80) {}
-                        }
-                        else if (_wireType === 1) {
-                            _offset += 8;
-                        }
-                        else if (_wireType === 2) {
-                            let [_len, _o] = _readVarint(_buffer, _offset);
-
-                            _offset = _o + _len;
-                        }
-                        else if (_wireType === 5) {
-                            _offset += 4;
-                        }
-
+                        ${SKIP_UNKNOWN_FIELD}
                         break;
                 }
             }
@@ -335,23 +332,7 @@ const generateDecoder = (type: AnalyzedType): string => {
                     ${caseParts.join('\n')}
 
                     default:
-                        let _wireType = _tag & 0x7;
-
-                        if (_wireType === 0) {
-                            while (_buffer[_offset++] & 0x80) {}
-                        }
-                        else if (_wireType === 1) {
-                            _offset += 8;
-                        }
-                        else if (_wireType === 2) {
-                            let [_len, _o] = _readVarint(_buffer, _offset);
-
-                            _offset = _o + _len;
-                        }
-                        else if (_wireType === 5) {
-                            _offset += 4;
-                        }
-
+                        ${SKIP_UNKNOWN_FIELD}
                         break;
                 }
             }

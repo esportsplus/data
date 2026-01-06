@@ -468,7 +468,6 @@ function generatePropertyExtraction(
     for (let i = 0, n = properties.length; i < n; i++) {
         let prop = properties[i];
 
-        // Skip never properties - they are explicitly excluded
         if (prop.type === 'never') {
             continue;
         }
@@ -479,47 +478,10 @@ function generatePropertyExtraction(
                 : `'${escape(prop.name)}'`;
 
         if (prop.optional) {
-            // Optional: spread conditionally
             parts.push(`...(${access} !== undefined && { ${key}: ${access} })`);
         }
         else if (prop.type === 'object' && prop.properties) {
-            // Nested object: recursive extraction
-            parts.push(`${key}: ${generateNestedExtraction(prop, access)}`);
-        }
-        else {
-            // Required: direct copy
-            parts.push(`${key}: ${access}`);
-        }
-    }
-
-    return `{ ${parts.join(', ')} }`;
-}
-
-function generateNestedExtraction(
-    prop: AnalyzedProperty,
-    variable: string
-): string {
-    let parts: string[] = [],
-        properties = prop.properties || [];
-
-    for (let i = 0, n = properties.length; i < n; i++) {
-        let p = properties[i];
-
-        // Skip never properties
-        if (p.type === 'never') {
-            continue;
-        }
-
-        let access = propertyAccess(p.name, variable),
-            key = VALID_IDENTIFIER.test(p.name) && !RESERVED_WORDS.has(p.name)
-                ? p.name
-                : `'${escape(p.name)}'`;
-
-        if (p.optional) {
-            parts.push(`...(${access} !== undefined && { ${key}: ${access} })`);
-        }
-        else if (p.type === 'object' && p.properties) {
-            parts.push(`${key}: ${generateNestedExtraction(p, access)}`);
+            parts.push(`${key}: ${generatePropertyExtraction(prop.properties, access)}`);
         }
         else {
             parts.push(`${key}: ${access}`);
@@ -849,5 +811,4 @@ const generateValidator = (
 };
 
 
-export type { GeneratorContext };
-export { generateValidator, propertyAccess };
+export { generateValidator };
