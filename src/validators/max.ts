@@ -1,3 +1,4 @@
+import { PACKAGE } from '~/constants';
 import type { ValidatorFunction } from '~/types';
 
 
@@ -23,7 +24,7 @@ const max = (number: number, error?: string): ValidatorFunction<unknown> => {
             }
         }
         else {
-            throw new Error('@esportsplus/data: max validator can only be applied to number, string, or array types');
+            throw new Error(`${PACKAGE}: max validator can only be applied to number, string, or array types`);
         }
     };
 };

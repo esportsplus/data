@@ -1,13 +1,5 @@
-import { ts } from '@esportsplus/typescript';
-import { transform } from '~/transformer';
+import { plugin } from '@esportsplus/typescript/transformer';
+import { transform } from '..';
 
 
-export default (program: ts.Program): ts.TransformerFactory<ts.SourceFile> => {
-    return () => {
-        return (sourceFile: ts.SourceFile): ts.SourceFile => {
-            let result = transform(sourceFile, program);
-
-            return result.changed ? result.sourceFile : sourceFile;
-        };
-    };
-};
+export default plugin.tsc(transform) as ReturnType<typeof plugin.tsc>;
