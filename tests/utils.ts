@@ -1,5 +1,6 @@
-import { contains, transform } from '../src/compiler/index';
+import { coordinator } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
+import plugin from '../src/compiler/index';
 
 
 const PACKAGE_IMPORT = "import { codec, validator } from '@esportsplus/data';\n";
@@ -13,13 +14,12 @@ let compilerOptions: ts.CompilerOptions = {
 };
 
 
-function createProgram(code: string, fileName: string = 'test.ts'): ts.Program {
-    let host = ts.createCompilerHost(compilerOptions);
-
-    let originalGetSourceFile = host.getSourceFile.bind(host);
+function createProgram(code: string, filename: string = 'test.ts'): ts.Program {
+    let host = ts.createCompilerHost(compilerOptions),
+        originalGetSourceFile = host.getSourceFile.bind(host);
 
     host.getSourceFile = (name, languageVersion) => {
-        if (name === fileName) {
+        if (name === filename) {
             return ts.createSourceFile(name, code, languageVersion, true);
         }
 
@@ -27,7 +27,7 @@ function createProgram(code: string, fileName: string = 'test.ts'): ts.Program {
     };
 
     host.fileExists = (name) => {
-        if (name === fileName) {
+        if (name === filename) {
             return true;
         }
 
@@ -35,21 +35,35 @@ function createProgram(code: string, fileName: string = 'test.ts'): ts.Program {
     };
 
     host.readFile = (name) => {
-        if (name === fileName) {
+        if (name === filename) {
             return code;
         }
 
         return ts.sys.readFile(name);
     };
 
-    return ts.createProgram([fileName], compilerOptions, host);
+    return ts.createProgram([filename], compilerOptions, host);
+}
+
+function mightNeedTransform(code: string): boolean {
+    let patterns = plugin.patterns || [];
+
+    for (let i = 0, n = patterns.length; i < n; i++) {
+        if (code.indexOf(patterns[i]) !== -1) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 function transformCode(code: string): string {
     let fullCode = PACKAGE_IMPORT + code,
         program = createProgram(fullCode),
-        sourceFile = program.getSourceFile('test.ts')!,
-        result = transform(sourceFile, program);
+        shared = new Map(),
+        sourceFile = program.getSourceFile('test.ts')!;
+
+    let result = coordinator.transform([plugin], fullCode, sourceFile, program, shared);
 
     return result.code;
 }
@@ -174,4 +188,4 @@ function createCodec<T>(code: string): { encode: (data: T) => Uint8Array; decode
 }
 
 
-export { contains as mightNeedTransform, createCodec, createProgram, createValidator, transformCode };
+export { createCodec, createProgram, createValidator, mightNeedTransform, transformCode };

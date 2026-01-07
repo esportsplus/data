@@ -19,14 +19,14 @@ importers:
         version: 5.9.3
     devDependencies:
       '@esportsplus/typescript':
-        specifier: ^0.22.0
-        version: 0.22.0
+        specifier: ^0.25.0
+        version: 0.25.0
       '@types/node':
         specifier: ^25.0.3
         version: 25.0.3
       vite:
-        specifier: ^7.3.0
-        version: 7.3.0(@types/node@25.0.3)
+        specifier: ^7.3.1
+        version: 7.3.1(@types/node@25.0.3)
       vitest:
         specifier: ^4.0.16
         version: 4.0.16(@types/node@25.0.3)
@@ -192,8 +192,8 @@ packages:
   '@esportsplus/cli-passthrough@0.0.12':
     resolution: {integrity: sha512-8gnWk5L7IG5Fl6mffDYpnkK1xJHUj/PpBuMhqrb/6wadb1UKSWk/seN2uOdITCfK/UlhmtdQqGljg3dA/bGT8w==}
 
-  '@esportsplus/typescript@0.22.0':
-    resolution: {integrity: sha512-u6Afrpi/168LcpGWWuiQwaDINKK946+b9yTBWutIZXG4FmuvWYfJ/4kzlWet6lKghSKlf0lQVUGyrgcpbN7YFQ==}
+  '@esportsplus/typescript@0.25.0':
+    resolution: {integrity: sha512-L03HSLShBib3b10BLIC77rjuLEN1H0lvNCTNUYuv+SI5HnGDa/ZFd0TXMD1sJpJsfnYuzU3jWGenGyXXm3nuAw==}
     hasBin: true
 
   '@esportsplus/utilities@0.27.2':
@@ -603,8 +603,8 @@ packages:
   undici-types@7.16.0:
     resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
 
-  vite@7.3.0:
-    resolution: {integrity: sha512-dZwN5L1VlUBewiP6H9s2+B3e3Jg96D0vzN+Ry73sOefebhYr9f94wwkMNN/9ouoU8pV1BqA1d1zGk8928cx0rg==}
+  vite@7.3.1:
+    resolution: {integrity: sha512-w+N7Hifpc3gRjZ63vYBXA56dvvRlNWRczTdmCBBa+CotUzAPf5b7YMdMR/8CQoeYE5LX3W4wj6RYTgonm1b9DA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -764,7 +764,7 @@ snapshots:
 
   '@esportsplus/cli-passthrough@0.0.12': {}
 
-  '@esportsplus/typescript@0.22.0':
+  '@esportsplus/typescript@0.25.0':
     dependencies:
       '@esportsplus/cli-passthrough': 0.0.12
       '@esportsplus/utilities': 0.27.2
@@ -878,13 +878,13 @@ snapshots:
       chai: 6.2.1
       tinyrainbow: 3.0.3
 
-  '@vitest/mocker@4.0.16(vite@7.3.0(@types/node@25.0.3))':
+  '@vitest/mocker@4.0.16(vite@7.3.1(@types/node@25.0.3))':
     dependencies:
       '@vitest/spy': 4.0.16
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.0(@types/node@25.0.3)
+      vite: 7.3.1(@types/node@25.0.3)
 
   '@vitest/pretty-format@4.0.16':
     dependencies:
@@ -1156,7 +1156,7 @@ snapshots:
 
   undici-types@7.16.0: {}
 
-  vite@7.3.0(@types/node@25.0.3):
+  vite@7.3.1(@types/node@25.0.3):
     dependencies:
       esbuild: 0.27.2
       fdir: 6.5.0(picomatch@4.0.3)
@@ -1171,7 +1171,7 @@ snapshots:
   vitest@4.0.16(@types/node@25.0.3):
     dependencies:
       '@vitest/expect': 4.0.16
-      '@vitest/mocker': 4.0.16(vite@7.3.0(@types/node@25.0.3))
+      '@vitest/mocker': 4.0.16(vite@7.3.1(@types/node@25.0.3))
       '@vitest/pretty-format': 4.0.16
       '@vitest/runner': 4.0.16
       '@vitest/snapshot': 4.0.16
@@ -1188,7 +1188,7 @@ snapshots:
       tinyexec: 1.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.0.3
-      vite: 7.3.0(@types/node@25.0.3)
+      vite: 7.3.1(@types/node@25.0.3)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 25.0.3
