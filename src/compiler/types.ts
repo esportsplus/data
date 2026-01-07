@@ -8,8 +8,8 @@ type GeneratorContext = {
 };
 
 type PathMode =
-    | { kind: 'dynamic'; indexVar: string; parentParts: string[] }
-    | { kind: 'static'; parts: string[] };
+    | { kind: 'dynamic' | 'record'; key: string; path: string[] }
+    | { kind: 'static'; path: string[] };
 
 
 export type { GeneratorContext, PathMode };

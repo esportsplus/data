@@ -6,24 +6,30 @@ const ERRORS_VARIABLE = '_errors';
 
 
 function resolvePath(mode: PathMode): string {
-    if (mode.kind === 'static') {
-        if (mode.parts.length === 0) {
-            return "''";
-        }
+    let parts = mode.path;
 
-        return `'${mode.parts.join('.')}'`;
+    if (mode.kind === 'static') {
+        return parts.length === 0 ? "''" : `'${parts.join('.')}'`;
     }
 
-    return mode.parentParts.length
-        ? `'${mode.parentParts.join('.')}[' + ${mode.indexVar} + ']'`
-        : `'[' + ${mode.indexVar} + ']'`;
-};
+    let key = mode.key;
+
+    if (mode.kind === 'record') {
+        return parts.length
+            ? `'${parts.join('.')}.' + ${key}`
+            : key;
+    }
+
+    return parts.length
+        ? `'${parts.join('.')}[' + ${key} + ']'`
+        : `'[' + ${key} + ']'`;
+}
 
 
 const generate = (message: string, pathMode: PathMode, context?: GeneratorContext): string => {
     if (context) {
         message = context.customMessages.get(
-            pathMode.kind === 'static' ? pathMode.parts.join('.') : ''
+            pathMode.kind === 'static' ? pathMode.path.join('.') : ''
         ) || message;
     }
 
@@ -36,5 +42,5 @@ const generate = (message: string, pathMode: PathMode, context?: GeneratorContex
 };
 
 
-export default { generate };
+export default { generate, resolvePath };
 export { ERRORS_VARIABLE };

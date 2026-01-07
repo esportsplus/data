@@ -42,7 +42,7 @@ const TYPE_VALIDATORS: Record<string, TypeValidator> = {
 const VALID_IDENTIFIER = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
 
 
-function booleanCoercionTemplate(varname: string, message: string, path: string, lookup?: { context: GeneratorContext, pathMode: PathMode }): string {
+function booleanCoercionTemplate(varname: string, message: string, pathMode: PathMode, context: GeneratorContext): string {
     return code`
         if (typeof ${varname} !== 'boolean') {
             if (${varname} === 'true' || ${varname} === 1 || ${varname} === '1') {
@@ -61,7 +61,7 @@ function booleanCoercionTemplate(varname: string, message: string, path: string,
                     ${varname} = false;
                 }
                 else {
-                    ${error.generate(message, path, lookup)}
+                    ${error.generate(message, pathMode, context)}
                 }
             }
         }
@@ -104,9 +104,9 @@ function generateArrayValidation(
                     prop.itemType || { name: 'item', optional: false, type: 'unknown' },
                     `${varname}[${i}]`,
                     {
+                        key: i,
                         kind: 'dynamic',
-                        indexVar: i,
-                        parentParts: pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts
+                        path: pathMode.path
                     },
                     context
                 )}
@@ -164,7 +164,7 @@ function generateEnumValidation(
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    return code`
+    return `
         if (${buildLiteralChecks(varname, prop.literals || []).join(' && ')}) {
             ${error.generate('invalid enum type', pathMode, context)}
         }
@@ -183,7 +183,7 @@ function generateLiteralValidation(
         checks.unshift(`${varname} !== null`);
     }
 
-    return code`
+    return `
         if (${checks.join(' && ')}) {
             ${error.generate('invalid literal type', pathMode, context)}
         }
@@ -196,7 +196,7 @@ function generateNullValidation(
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    return code`
+    return `
         if (${varname} !== null) {
             ${error.generate('invalid null type', pathMode, context)}
         }
@@ -209,12 +209,11 @@ function generateNumberValidation(
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let body = '',
-        path = resolvePath(pathMode),
+    let parts = '',
         validator = prop.brand ? context.brandValidators.get(prop.brand) : undefined;
 
     if (validator) {
-        body = validators.inline(validator.body, path, varname);
+        parts = validators.inline(validator.body, pathMode, varname);
 
         if (validator.async) {
             context.hasAsync = true;
@@ -232,9 +231,9 @@ function generateNumberValidation(
         ) {
             ${error.generate(prop.brand === 'integer' ? 'must be an integer' : 'must be a number', pathMode, context)}
         }
-        ${body && `
+        ${parts && `
             else if (${varname} !== null) {
-                ${body}
+                ${parts}
             }
         `}
     `;
@@ -246,8 +245,8 @@ function generateObjectValidation(
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let body: string[] = [],
-        parts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts,
+    let parts: string[] = [],
+        path = pathMode.path,
         properties = prop.properties || [];
 
     for (let i = 0, n = properties.length; i < n; i++) {
@@ -257,13 +256,13 @@ function generateObjectValidation(
             continue;
         }
 
-        body.push(
+        parts.push(
             code`
                 ${prop.optional && `if (${propertyAccess(prop.name, varname)} !== undefined) {`}
                     ${generateTypeValidation(
                         prop,
                         propertyAccess(prop.name, varname),
-                        { kind: 'static', parts: [...parts, prop.name] },
+                        { kind: 'static', path: [...path, prop.name] },
                         context
                     )}
                 ${prop.optional && `}`}
@@ -280,7 +279,7 @@ function generateObjectValidation(
             ${error.generate('must be an object', pathMode, context)}
         }
         else if (${prop.nullable && '${varname} !== null &&'} true) {
-            ${body.join('\n')}
+            ${parts.join('\n')}
         }
     `;
 }
@@ -322,7 +321,6 @@ function generateRecordValidation(
 ): string {
     let check = '',
         key = uid('key'),
-        parts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts,
         type = prop.indexType?.type;
 
     switch (type) {
@@ -355,7 +353,8 @@ function generateRecordValidation(
                                         : type === 'string'
                                             ? 'must be a string'
                                             : 'invalid value',
-                            parts.length ? `'${parts.join('.')}.' + ` : '' + key
+                            { key, kind: 'record', path: pathMode.path },
+                            context
                         )}
                         break;
                     }
@@ -371,7 +370,7 @@ function generateStringValidation(
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let body = '';
+    let parts = '';
 
     // Template literal types - just validate as string with special error
     if (prop.brand === 'template') {
@@ -385,7 +384,7 @@ function generateStringValidation(
             context.hasAsync = true;
         }
 
-        body = code`
+        parts = code`
             else if (${varname} !== null) {
                 ${validators.inline(validator.body, pathMode, varname)}
             }
@@ -396,7 +395,7 @@ function generateStringValidation(
         if (${prop.nullable && `${varname} !== null &&`} typeof ${varname} !== 'string') {
             ${error.generate('must be a string', pathMode, context)}
         }
-        ${body}
+        ${parts}
     `;
 }
 
@@ -406,16 +405,16 @@ function generateTupleValidation(
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let codeParts: string[] = [],
-        pathParts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts,
+    let parts: string[] = [],
+        path = pathMode.path,
         tupleTypes = prop.tupleTypes || [];
 
     for (let i = 0, n = tupleTypes.length; i < n; i++) {
-        codeParts.push(
+        parts.push(
             generateTypeValidation(
                 tupleTypes[i],
                 `${varname}[${i}]`,
-                { kind: 'static', parts: [...pathParts, `[${i}]`] },
+                { kind: 'static', path: [...path, `[${i}]`] },
                 context
             )
         );
@@ -426,7 +425,7 @@ function generateTupleValidation(
             ${error.generate('invalid tuple type', pathMode, context)}
         }
         else {
-            ${codeParts.join('\n')}
+            ${parts.join('\n')}
         }
     `;
 }
@@ -454,9 +453,7 @@ function generateUnionValidation(prop: AnalyzedProperty, varname: string, pathMo
 
     // Add type checks
     for (let i = 0, n = unionTypes.length; i < n; i++) {
-        let ut = unionTypes[i];
-
-        switch (ut.type) {
+        switch (unionTypes[i].type) {
             case 'boolean':
                 checks.push(`typeof ${varname} !== 'boolean'`);
                 break;
@@ -514,11 +511,11 @@ const generateValidator = (
         }
 
         let varname = propertyAccess(property.name, INPUT_VARIABLE);
-
+parts
         parts.push(
             code`
                 ${property.optional && `if (${varname} !== undefined) {`}
-                    ${generateTypeValidation(property, varname, { kind: 'static', parts: [property.name] }, context)}
+                    ${generateTypeValidation(property, varname, { kind: 'static', path: [property.name] }, context)}
                 ${property.optional && `}`}
             `
         );
