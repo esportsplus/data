@@ -25,154 +25,81 @@ const ASYNC_PATTERN = /^\s*\(?async\s|\bawait\b/;
 const PATTERNS = ['codec<', 'codec(', 'validator.build', 'validator', '.codec', '.build'];
 
 
-function isSymbolFromPackage(
+function collectCalls(
+    calls: Map<ts.CallExpression, DetectedCall>,
     checker: ts.TypeChecker,
     node: ts.Node,
-    expectedName: string,
     packageImports: Set<string>
-): boolean {
-    // Fast path: check if identifier matches known imports from package
-    if (ts.isIdentifier(node) && packageImports.has(node.text) && node.text === expectedName) {
-        return true;
-    }
+): void {
+    if (ts.isCallExpression(node) && node.typeArguments && node.typeArguments.length > 0) {
+        let expr = node.expression,
+            callType: CallType | null = null,
+            traceNode: ts.Node | undefined;
 
-    let symbol = checker.getSymbolAtLocation(node);
-
-    if (!symbol) {
-        return false;
-    }
-
-    // Follow aliases to original symbol (handles re-exports and aliased imports)
-    if (symbol.flags & ts.SymbolFlags.Alias) {
-        symbol = checker.getAliasedSymbol(symbol);
-    }
-
-    // Check symbol name matches expected
-    if (symbol.name !== expectedName) {
-        // Fallback: aliased import - check if local name is in imports
-        if (ts.isIdentifier(node) && packageImports.has(node.text)) {
-            return true;
+        // Direct call: codec<T>() or aliasedCodec<T>()
+        if (ts.isIdentifier(expr)) {
+            if (imports.inPackage(checker, expr, PACKAGE, 'codec', packageImports)) {
+                callType = 'codec';
+                traceNode = expr;
+            }
         }
+        // Property access: validator.build<T>() or ns.codec<T>() or ns.validator.build<T>()
+        else if (ts.isPropertyAccessExpression(expr)) {
+            let methodName = expr.name.text;
 
-        return false;
-    }
-
-    let declarations = symbol.getDeclarations();
-
-    if (!declarations || declarations.length === 0) {
-        // Fallback: if can't resolve declarations, check imports
-        if (ts.isIdentifier(node) && packageImports.has(node.text)) {
-            return true;
-        }
-
-        return false;
-    }
-
-    // Check if declaration is from our package
-    for (let i = 0, n = declarations.length; i < n; i++) {
-        let sourceFile = declarations[i].getSourceFile();
-
-        if (sourceFile.fileName.includes(PACKAGE) || sourceFile.fileName.includes('esportsplus/data')) {
-            return true;
-        }
-    }
-
-    // Fallback: declaration exists but source not found - trust import check
-    if (ts.isIdentifier(node) && packageImports.has(node.text)) {
-        return true;
-    }
-
-    return false;
-}
-
-function detectCalls(ctx: TransformContext): Map<ts.CallExpression, DetectedCall> {
-    let calls = new Map<ts.CallExpression, DetectedCall>(),
-        packageImports = new Set<string>();
-
-    // Cache package imports for fallback detection
-    let found = imports.find(ctx.sourceFile, PACKAGE);
-
-    for (let i = 0, n = found.length; i < n; i++) {
-        for (let [, alias] of found[i].specifiers) {
-            packageImports.add(alias);
-        }
-    }
-
-    function visit(node: ts.Node): void {
-        if (ts.isCallExpression(node) && node.typeArguments && node.typeArguments.length > 0) {
-            let expr = node.expression,
-                callType: CallType | null = null,
-                traceNode: ts.Node | undefined;
-
-            // Direct call: codec<T>() or aliasedCodec<T>()
-            if (ts.isIdentifier(expr)) {
-                if (isSymbolFromPackage(ctx.checker, expr, 'codec', packageImports)) {
+            // validator.build<T>() or aliasedValidator.build<T>()
+            if (methodName === 'build' && ts.isIdentifier(expr.expression)) {
+                if (imports.inPackage(checker, expr.expression, PACKAGE, 'validator', packageImports)) {
+                    callType = 'validator.build';
+                    traceNode = expr.expression;
+                }
+            }
+            // ns.codec<T>() - namespace import
+            else if (methodName === 'codec' && ts.isIdentifier(expr.expression)) {
+                if (imports.inPackage(checker, expr.name, PACKAGE, 'codec', packageImports)) {
                     callType = 'codec';
-                    traceNode = expr;
+                    traceNode = expr.name;
                 }
             }
-            // Property access: validator.build<T>() or ns.codec<T>() or ns.validator.build<T>()
-            else if (ts.isPropertyAccessExpression(expr)) {
-                let methodName = expr.name.text;
+            // ns.validator.build<T>() - namespace import with validator
+            else if (methodName === 'build' && ts.isPropertyAccessExpression(expr.expression)) {
+                let inner = expr.expression;
 
-                // validator.build<T>() or aliasedValidator.build<T>()
-                if (methodName === 'build' && ts.isIdentifier(expr.expression)) {
-                    if (isSymbolFromPackage(ctx.checker, expr.expression, 'validator', packageImports)) {
+                if (inner.name.text === 'validator' && ts.isIdentifier(inner.expression)) {
+                    if (imports.inPackage(checker, inner.name, PACKAGE, 'validator', packageImports)) {
                         callType = 'validator.build';
-                        traceNode = expr.expression;
-                    }
-                }
-                // ns.codec<T>() - namespace import
-                else if (methodName === 'codec' && ts.isIdentifier(expr.expression)) {
-                    if (isSymbolFromPackage(ctx.checker, expr.name, 'codec', packageImports)) {
-                        callType = 'codec';
-                        traceNode = expr.name;
-                    }
-                }
-                // ns.validator.build<T>() - namespace import with validator
-                else if (methodName === 'build' && ts.isPropertyAccessExpression(expr.expression)) {
-                    let inner = expr.expression;
-
-                    if (inner.name.text === 'validator' && ts.isIdentifier(inner.expression)) {
-                        if (isSymbolFromPackage(ctx.checker, inner.name, 'validator', packageImports)) {
-                            callType = 'validator.build';
-                            traceNode = inner.name;
-                        }
+                        traceNode = inner.name;
                     }
                 }
             }
+        }
 
-            if (callType && traceNode) {
-                let detected: DetectedCall = {
-                    callType,
-                    importSource: imports.trace(traceNode as ts.Identifier, ctx.checker) ?? undefined,
-                    node,
-                    typeArg: node.typeArguments[0]
-                };
+        if (callType && traceNode) {
+            let detected: DetectedCall = {
+                callType,
+                importSource: imports.trace(traceNode as ts.Identifier, checker) ?? undefined,
+                node,
+                typeArg: node.typeArguments[0]
+            };
 
-                if (callType === 'codec' && node.arguments.length > 0) {
+            if (callType === 'codec' && node.arguments.length > 0) {
+                detected.configArg = node.arguments[0];
+            }
+            else if (callType === 'validator.build') {
+                if (node.typeArguments.length > 1) {
+                    detected.errorMessagesType = node.typeArguments[1];
+                }
+
+                if (node.arguments.length > 0) {
                     detected.configArg = node.arguments[0];
                 }
-                else if (callType === 'validator.build') {
-                    if (node.typeArguments.length > 1) {
-                        detected.errorMessagesType = node.typeArguments[1];
-                    }
-
-                    if (node.arguments.length > 0) {
-                        detected.configArg = node.arguments[0];
-                    }
-                }
-
-                calls.set(node, detected);
             }
-        }
 
-        ts.forEachChild(node, visit);
+            calls.set(node, detected);
+        }
     }
 
-    visit(ctx.sourceFile);
-
-    return calls;
+    ts.forEachChild(node, n => collectCalls(calls, checker, n, packageImports));
 }
 
 function extractMessages(
@@ -196,10 +123,6 @@ function extractMessages(
             extractMessages(propType, [...pathParts, prop.getName()], messages, typeChecker);
         }
     }
-}
-
-function hasPackageImport(sourceFile: ts.SourceFile): boolean {
-    return imports.find(sourceFile, PACKAGE).length > 0;
 }
 
 function parseErrorMessages(typeNode: ts.TypeNode | undefined, typeChecker: ts.TypeChecker): Map<string, string> {
@@ -247,11 +170,23 @@ const plugin: Plugin = {
     patterns: PATTERNS,
 
     transform: (ctx: TransformContext) => {
-        if (!hasPackageImport(ctx.sourceFile)) {
+        if (imports.find(ctx.sourceFile, PACKAGE).length === 0) {
             return {};
         }
 
-        let detectedCalls = detectCalls(ctx);
+        let detectedCalls = new Map<ts.CallExpression, DetectedCall>(),
+            packageImports = new Set<string>();
+
+        // Cache package imports for fallback detection
+        let found = imports.find(ctx.sourceFile, PACKAGE);
+
+        for (let i = 0, n = found.length; i < n; i++) {
+            for (let [, alias] of found[i].specifiers) {
+                packageImports.add(alias);
+            }
+        }
+
+        collectCalls(detectedCalls, ctx.checker, ctx.sourceFile, packageImports);
 
         if (detectedCalls.size === 0) {
             return {};
