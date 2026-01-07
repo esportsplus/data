@@ -27,6 +27,23 @@ const WIRE_TYPE_LENGTH_DELIMITED: WireType = 2;
 const WIRE_TYPE_VARINT: WireType = 0;
 
 
+const PROTO_BOOL: ProtoFieldInfo = { packed: false, protoType: 'bool', wireType: WIRE_TYPE_VARINT };
+
+const PROTO_BYTES: ProtoFieldInfo = { packed: false, protoType: 'bytes', wireType: WIRE_TYPE_LENGTH_DELIMITED };
+
+const PROTO_DOUBLE: ProtoFieldInfo = { packed: false, protoType: 'double', wireType: WIRE_TYPE_64BIT };
+
+const PROTO_FLOAT: ProtoFieldInfo = { packed: false, protoType: 'float', wireType: WIRE_TYPE_32BIT };
+
+const PROTO_INT32: ProtoFieldInfo = { packed: false, protoType: 'int32', wireType: WIRE_TYPE_VARINT };
+
+const PROTO_INT64: ProtoFieldInfo = { packed: false, protoType: 'int64', wireType: WIRE_TYPE_VARINT };
+
+const PROTO_MESSAGE: ProtoFieldInfo = { packed: false, protoType: 'message', wireType: WIRE_TYPE_LENGTH_DELIMITED };
+
+const PROTO_STRING: ProtoFieldInfo = { packed: false, protoType: 'string', wireType: WIRE_TYPE_LENGTH_DELIMITED };
+
+
 const getFieldTag = (fieldNumber: number, wireType: WireType): number => {
     return (fieldNumber << 3) | wireType;
 };
@@ -47,63 +64,30 @@ const getProtoFieldInfo = (prop: AnalyzedProperty): ProtoFieldInfo => {
 
     switch (prop.type) {
         case 'bigint':
-            return {
-                packed: false,
-                protoType: 'int64',
-                wireType: WIRE_TYPE_VARINT
-            };
+            return PROTO_INT64;
 
         case 'boolean':
-            return {
-                packed: false,
-                protoType: 'bool',
-                wireType: WIRE_TYPE_VARINT
-            };
+            return PROTO_BOOL;
 
         case 'number':
             if (prop.brand === 'integer') {
-                return {
-                    packed: false,
-                    protoType: 'int32',
-                    wireType: WIRE_TYPE_VARINT
-                };
+                return PROTO_INT32;
             }
 
             if (prop.brand === 'float') {
-                return {
-                    packed: false,
-                    protoType: 'float',
-                    wireType: WIRE_TYPE_32BIT
-                };
+                return PROTO_FLOAT;
             }
 
-            // Unbranded number defaults to double
-            return {
-                packed: false,
-                protoType: 'double',
-                wireType: WIRE_TYPE_64BIT
-            };
+            return PROTO_DOUBLE;
 
         case 'object':
-            return {
-                packed: false,
-                protoType: 'message',
-                wireType: WIRE_TYPE_LENGTH_DELIMITED
-            };
+            return PROTO_MESSAGE;
 
         case 'string':
-            return {
-                packed: false,
-                protoType: 'string',
-                wireType: WIRE_TYPE_LENGTH_DELIMITED
-            };
+            return PROTO_STRING;
 
         default:
-            return {
-                packed: false,
-                protoType: 'bytes',
-                wireType: WIRE_TYPE_LENGTH_DELIMITED
-            };
+            return PROTO_BYTES;
     }
 };
 

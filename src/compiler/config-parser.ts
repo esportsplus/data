@@ -84,14 +84,7 @@ function parseValidatorSetCall(
         return null;
     }
 
-    let isAsync = false;
-
-    if (ts.isArrowFunction(fn)) {
-        isAsync = !!fn.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword);
-    }
-    else if (ts.isFunctionExpression(fn)) {
-        isAsync = !!fn.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword);
-    }
+    let isAsync = !!fn.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword);
 
     if (!isAsync && fn.body) {
         isAsync = ast.hasMatch(fn.body, ts.isAwaitExpression);

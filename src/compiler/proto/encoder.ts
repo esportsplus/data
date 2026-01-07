@@ -366,23 +366,24 @@ function generateFieldWrite(field: MappedField, accessor: string): string {
     }
 }
 
-function generateNestedEncoder(properties: AnalyzedProperty[]): string {
-    let name = `_enc${encoderCount++}`,
-        fields = mapFields(properties),
-        sizeCalcParts: string[] = [],
+function processFields(
+    fields: MappedField[],
+    accessor: (name: string) => string
+): { sizeCalcParts: string[]; writeParts: string[] } {
+    let sizeCalcParts: string[] = [],
         writeParts: string[] = [];
 
     for (let i = 0, n = fields.length; i < n; i++) {
         let field = fields[i],
-            accessor = `_d['${field.name}']`;
+            fieldAccessor = accessor(field.name);
 
-        let sizeCode = generateFieldSizeCalc(field, accessor),
-            writeCode = generateFieldWrite(field, accessor);
+        let sizeCode = generateFieldSizeCalc(field, fieldAccessor),
+            writeCode = generateFieldWrite(field, fieldAccessor);
 
         if (field.optional) {
             if (sizeCode) {
                 sizeCalcParts.push(`
-                    if (${accessor} !== undefined) {
+                    if (${fieldAccessor} !== undefined) {
                         ${sizeCode}
                     }
                 `);
@@ -390,7 +391,7 @@ function generateNestedEncoder(properties: AnalyzedProperty[]): string {
 
             if (writeCode) {
                 writeParts.push(`
-                    if (${accessor} !== undefined) {
+                    if (${fieldAccessor} !== undefined) {
                         ${writeCode}
                     }
                 `);
@@ -406,6 +407,13 @@ function generateNestedEncoder(properties: AnalyzedProperty[]): string {
             }
         }
     }
+
+    return { sizeCalcParts, writeParts };
+}
+
+function generateNestedEncoder(properties: AnalyzedProperty[]): string {
+    let name = `_enc${encoderCount++}`,
+        { sizeCalcParts, writeParts } = processFields(mapFields(properties), (n) => `_d['${n}']`);
 
     nestedEncoders.push(`
         function ${name}_size(_d) {
@@ -431,44 +439,7 @@ const generateEncoder = (type: AnalyzedType): string => {
     nestedEncoders = [];
     encoderCount = 0;
 
-    let fields = mapFields(type.properties),
-        sizeCalcParts: string[] = [],
-        writeParts: string[] = [];
-
-    for (let i = 0, n = fields.length; i < n; i++) {
-        let field = fields[i],
-            accessor = `_data['${field.name}']`;
-
-        let sizeCode = generateFieldSizeCalc(field, accessor),
-            writeCode = generateFieldWrite(field, accessor);
-
-        if (field.optional) {
-            if (sizeCode) {
-                sizeCalcParts.push(`
-                    if (${accessor} !== undefined) {
-                        ${sizeCode}
-                    }
-                `);
-            }
-
-            if (writeCode) {
-                writeParts.push(`
-                    if (${accessor} !== undefined) {
-                        ${writeCode}
-                    }
-                `);
-            }
-        }
-        else {
-            if (sizeCode) {
-                sizeCalcParts.push(sizeCode);
-            }
-
-            if (writeCode) {
-                writeParts.push(writeCode);
-            }
-        }
-    }
+    let { sizeCalcParts, writeParts } = processFields(mapFields(type.properties), (n) => `_data['${n}']`);
 
     return `
         ((_data) => {

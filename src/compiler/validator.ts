@@ -10,6 +10,15 @@ type GeneratorContext = {
     hasAsync: boolean;
 };
 
+type LiteralValue = {
+    type: 'boolean' | 'number' | 'string';
+    value: boolean | number | string;
+};
+
+type PathMode =
+    | { kind: 'dynamic'; indexVar: string; parentParts: string[] }
+    | { kind: 'static'; parts: string[] };
+
 
 const RESERVED_WORDS = new Set([
     'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
@@ -23,6 +32,20 @@ const SINGLE_QUOTE_REGEX = /'/g;
 
 const VALID_IDENTIFIER = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
 
+
+function buildLiteralChecks(variable: string, literals: LiteralValue[]): string[] {
+    let checks: string[] = [];
+
+    for (let i = 0, n = literals.length; i < n; i++) {
+        let lit = literals[i];
+
+        checks.push(
+            `${variable} !== ${lit.type === 'string' ? `'${escape(String(lit.value))}'` : lit.value}`
+        );
+    }
+
+    return checks;
+}
 
 function escape(str: string): string {
     return str.replace(SINGLE_QUOTE_REGEX, "\\'");
@@ -57,16 +80,17 @@ function booleanCoercionTemplate(variable: string, errorMessage: string, path: s
 function generateArrayValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
     let e = uid('e'),
-        errorMessage = context.customMessages.get(pathParts.join('.')) || 'must be an array',
+        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'must be an array',
         i = uid('i'),
         itemType = prop.itemType || { name: 'item', optional: false, type: 'unknown' },
         n = uid('n'),
         nullCheck = prop.nullable ? `${variable} !== null && ` : '',
-        path = generatePath(pathParts);
+        path = resolvePath(pathMode),
+        pathParts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts;
 
     return `
         if (${nullCheck}!Array.isArray(${variable})) {
@@ -76,11 +100,10 @@ function generateArrayValidation(
             let ${e} = ${ERRORS_VARIABLE}?.length ?? 0;
 
             for (let ${i} = 0, ${n} = ${variable}.length; ${i} < ${n}; ${i}++) {
-                ${generateItemValidation(
+                ${generateTypeValidation(
                     itemType,
                     `${variable}[${i}]`,
-                    pathParts,
-                    i,
+                    { kind: 'dynamic', indexVar: i, parentParts: pathParts },
                     context
                 )}
 
@@ -95,12 +118,12 @@ function generateArrayValidation(
 function generateBigintValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let errorMessage = context.customMessages.get(pathParts.join('.')) || 'must be a bigint',
+    let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'must be a bigint',
         nullCheck = prop.nullable ? `${variable} !== null && ` : '',
-        path = generatePath(pathParts);
+        path = resolvePath(pathMode);
 
     return `
         if (${nullCheck}typeof ${variable} !== 'bigint') {
@@ -112,11 +135,11 @@ function generateBigintValidation(
 function generateBooleanValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let errorMessage = context.customMessages.get(pathParts.join('.')) || 'must be true or false',
-        path = generatePath(pathParts);
+    let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'must be true or false',
+        path = resolvePath(pathMode);
 
     if (prop.nullable) {
         return `
@@ -132,12 +155,12 @@ function generateBooleanValidation(
 function generateDateValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let errorMessage = context.customMessages.get(pathParts.join('.')) || 'invalid date type',
+    let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid date type',
         nullCheck = prop.nullable ? `${variable} !== null && ` : '',
-        path = generatePath(pathParts);
+        path = resolvePath(pathMode);
 
     return `
         if (${nullCheck}(!(${variable} instanceof Date) || isNaN(${variable}.getTime()))) {
@@ -149,19 +172,12 @@ function generateDateValidation(
 function generateEnumValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let checks: string[] = [],
-        errorMessage = context.customMessages.get(pathParts.join('.')) || 'invalid enum type',
-        literals = prop.literals || [],
-        path = generatePath(pathParts);
-
-    for (let i = 0, n = literals.length; i < n; i++) {
-        let lit = literals[i];
-
-        checks.push(`${variable} !== ${lit.type === 'string' ? `'${escape(String(lit.value))}'` : lit.value}`);
-    }
+    let checks = buildLiteralChecks(variable, prop.literals || []),
+        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid enum type',
+        path = resolvePath(pathMode);
 
     return `
         if (${checks.join(' && ')}) {
@@ -170,155 +186,16 @@ function generateEnumValidation(
     `;
 }
 
-function generateItemValidation(
-    itemType: AnalyzedProperty,
-    variable: string,
-    parentPathParts: string[],
-    indexVar: string,
-    context: GeneratorContext
-): string {
-    let dynamicPath = parentPathParts.length
-        ? `'${parentPathParts.join('.')}[' + ${indexVar} + ']'`
-        : `'[' + ${indexVar} + ']'`;
-
-    switch (itemType.type) {
-        case 'any':
-        case 'unknown':
-            return '';
-
-        case 'array':
-            if (itemType.itemType) {
-                let e = uid('e'),
-                    i = uid('i'),
-                    n = uid('n');
-
-                return `
-                    if (!Array.isArray(${variable})) {
-                        (${ERRORS_VARIABLE} ??= []).push({ message: 'must be an array', path: ${dynamicPath} });
-                    }
-                    else {
-                        let ${e} = ${ERRORS_VARIABLE}?.length ?? 0;
-
-                        for (let ${i} = 0, ${n} = ${variable}.length; ${i} < ${n}; ${i}++) {
-                            ${generateItemValidation(
-                                itemType.itemType,
-                                `${variable}[${i}]`,
-                                [...parentPathParts, '[*]'],
-                                i,
-                                context
-                            )}
-
-                            if ((${ERRORS_VARIABLE}?.length ?? 0) > ${e}) {
-                                break;
-                            }
-                        }
-                    }
-                `;
-            }
-
-            return '';
-
-        case 'bigint':
-            return `
-                if (typeof ${variable} !== 'bigint') {
-                    (${ERRORS_VARIABLE} ??= []).push({ message: 'must be a bigint', path: ${dynamicPath} });
-                }
-            `;
-
-        case 'boolean':
-            return booleanCoercionTemplate(variable, 'must be true or false', dynamicPath);
-
-        case 'date':
-            return `
-                if (!(${variable} instanceof Date) || isNaN(${variable}.getTime())) {
-                    (${ERRORS_VARIABLE} ??= []).push({ message: 'invalid date type', path: ${dynamicPath} });
-                }
-            `;
-
-        case 'enum':
-        case 'literal': {
-            let checks: string[] = [],
-                literals = itemType.literals || [];
-
-            for (let i = 0, n = literals.length; i < n; i++) {
-                let lit = literals[i];
-
-                checks.push(`${variable} !== ${lit.type === 'string' ? `'${escape(String(lit.value))}'` : lit.value}`);
-            }
-
-            let errorMsg = itemType.type === 'enum' ? 'invalid enum type' : 'invalid literal type';
-
-            return `
-                if (${checks.join(' && ')}) {
-                    (${ERRORS_VARIABLE} ??= []).push({ message: '${errorMsg}', path: ${dynamicPath} });
-                }
-            `;
-        }
-
-        case 'null':
-            return `
-                if (${variable} !== null) {
-                    (${ERRORS_VARIABLE} ??= []).push({ message: 'invalid null type', path: ${dynamicPath} });
-                }
-            `;
-
-        case 'number':
-            if (itemType.brand === 'integer') {
-                return `
-                    if ((typeof ${variable} !== 'number' && isNaN(${variable} = +${variable})) || ${variable} % 1 !== 0) {
-                        (${ERRORS_VARIABLE} ??= []).push({ message: 'must be an integer', path: ${dynamicPath} });
-                    }
-                `;
-            }
-
-            return `
-                if (typeof ${variable} !== 'number' && isNaN(${variable} = +${variable})) {
-                    (${ERRORS_VARIABLE} ??= []).push({ message: 'must be a number', path: ${dynamicPath} });
-                }
-            `;
-
-        case 'object':
-            return generateObjectValidation(
-                itemType,
-                variable,
-                parentPathParts,
-                context,
-                true
-            );
-
-        case 'string':
-            return `
-                if (typeof ${variable} !== 'string') {
-                    (${ERRORS_VARIABLE} ??= []).push({ message: 'must be a string', path: ${dynamicPath} });
-                }
-            `;
-
-        case 'union':
-            return generateUnionValidation(itemType, variable, parentPathParts, context);
-
-        default:
-            return '';
-    }
-}
-
 function generateLiteralValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let checks: string[] = [],
-        errorMessage = context.customMessages.get(pathParts.join('.')) || 'invalid literal type',
-        literals = prop.literals || [],
-        path = generatePath(pathParts);
+    let checks = buildLiteralChecks(variable, prop.literals || []),
+        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid literal type',
+        path = resolvePath(pathMode);
 
-    for (let i = 0, n = literals.length; i < n; i++) {
-        let lit = literals[i];
-
-        checks.push(`${variable} !== ${lit.type === 'string' ? `'${escape(String(lit.value))}'` : lit.value}`);
-    }
-
-    // Handle nullable
     if (prop.nullable) {
         checks.unshift(`${variable} !== null`);
     }
@@ -332,11 +209,11 @@ function generateLiteralValidation(
 
 function generateNullValidation(
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let errorMessage = context.customMessages.get(pathParts.join('.')) || 'invalid null type',
-        path = generatePath(pathParts);
+    let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid null type',
+        path = resolvePath(pathMode);
 
     return `
         if (${variable} !== null) {
@@ -348,15 +225,15 @@ function generateNullValidation(
 function generateNumberValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
     let isInteger = prop.brand === 'integer',
         defaultMessage = isInteger ? 'must be an integer' : 'must be a number',
-        errorMessage = context.customMessages.get(pathParts.join('.')) || defaultMessage,
+        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || defaultMessage,
         integerCheck = isInteger ? ` || ${variable} % 1 !== 0` : '',
         nullCheck = prop.nullable ? `${variable} !== null && ` : '',
-        path = generatePath(pathParts);
+        path = resolvePath(pathMode);
 
     // Check for branded validator
     let inlinedBody = '',
@@ -393,15 +270,13 @@ function generateNumberValidation(
 function generateObjectValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
-    context: GeneratorContext,
-    isDynamic: boolean = false
+    pathMode: PathMode,
+    context: GeneratorContext
 ): string {
     let codeParts: string[] = [],
-        errorMessage = context.customMessages.get(pathParts.join('.')) || 'must be an object',
-        path = isDynamic
-            ? (pathParts.length ? `'${pathParts.join('.')}'` : "''")
-            : generatePath(pathParts),
+        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'must be an object',
+        path = resolvePath(pathMode),
+        pathParts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts,
         properties = prop.properties || [];
 
     for (let i = 0, n = properties.length; i < n; i++) {
@@ -415,7 +290,7 @@ function generateObjectValidation(
         let propVar = propertyAccess(p.name, variable),
             propPathParts = [...pathParts, p.name];
 
-        let code = generateTypeValidation(p, propVar, propPathParts, context);
+        let code = generateTypeValidation(p, propVar, { kind: 'static', parts: propPathParts }, context);
 
         if (p.optional) {
             codeParts.push(`
@@ -459,6 +334,20 @@ function generatePath(pathParts: string[]): string {
     return `'${pathParts.join('.')}'`;
 }
 
+function resolvePath(mode: PathMode): string {
+    if (mode.kind === 'static') {
+        return generatePath(mode.parts);
+    }
+
+    return mode.parentParts.length
+        ? `'${mode.parentParts.join('.')}[' + ${mode.indexVar} + ']'`
+        : `'[' + ${mode.indexVar} + ']'`;
+}
+
+function resolveMessagePath(mode: PathMode): string {
+    return mode.kind === 'static' ? mode.parts.join('.') : '';
+}
+
 function generatePropertyExtraction(
     properties: AnalyzedProperty[],
     variable: string
@@ -494,13 +383,14 @@ function generatePropertyExtraction(
 function generateRecordValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let errorMessage = context.customMessages.get(pathParts.join('.')) || 'invalid record type',
+    let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid record type',
         indexType = prop.indexType,
         key = uid('key'),
-        path = generatePath(pathParts);
+        path = resolvePath(pathMode),
+        pathParts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts;
 
     if (!indexType) {
         return `
@@ -555,15 +445,15 @@ function generateRecordValidation(
 function generateStringValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
     let nullCheck = prop.nullable ? `${variable} !== null && ` : '',
-        path = generatePath(pathParts);
+        path = resolvePath(pathMode);
 
     // Template literal types - just validate as string with special error
     if (prop.brand === 'template') {
-        let errorMessage = context.customMessages.get(pathParts.join('.')) || 'invalid template type';
+        let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid template type';
 
         return `
             if (${nullCheck}typeof ${variable} !== 'string') {
@@ -572,7 +462,7 @@ function generateStringValidation(
         `;
     }
 
-    let errorMessage = context.customMessages.get(pathParts.join('.')) || 'must be a string';
+    let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'must be a string';
 
     let baseCheck = `
         if (${nullCheck}typeof ${variable} !== 'string') {
@@ -606,12 +496,13 @@ function generateStringValidation(
 function generateTupleValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
     let codeParts: string[] = [],
-        errorMessage = context.customMessages.get(pathParts.join('.')) || 'invalid tuple type',
-        path = generatePath(pathParts),
+        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid tuple type',
+        path = resolvePath(pathMode),
+        pathParts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts,
         tupleTypes = prop.tupleTypes || [];
 
     for (let i = 0, n = tupleTypes.length; i < n; i++) {
@@ -619,7 +510,7 @@ function generateTupleValidation(
             elemPathParts = [...pathParts, `[${i}]`],
             elemVar = `${variable}[${i}]`;
 
-        codeParts.push(generateTypeValidation(elemType, elemVar, elemPathParts, context));
+        codeParts.push(generateTypeValidation(elemType, elemVar, { kind: 'static', parts: elemPathParts }, context));
     }
 
     return `
@@ -635,7 +526,7 @@ function generateTupleValidation(
 function generateTypeValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
     switch (prop.type) {
@@ -645,43 +536,43 @@ function generateTypeValidation(
             return '';
 
         case 'array':
-            return generateArrayValidation(prop, variable, pathParts, context);
+            return generateArrayValidation(prop, variable, pathMode, context);
 
         case 'bigint':
-            return generateBigintValidation(prop, variable, pathParts, context);
+            return generateBigintValidation(prop, variable, pathMode, context);
 
         case 'boolean':
-            return generateBooleanValidation(prop, variable, pathParts, context);
+            return generateBooleanValidation(prop, variable, pathMode, context);
 
         case 'date':
-            return generateDateValidation(prop, variable, pathParts, context);
+            return generateDateValidation(prop, variable, pathMode, context);
 
         case 'enum':
-            return generateEnumValidation(prop, variable, pathParts, context);
+            return generateEnumValidation(prop, variable, pathMode, context);
 
         case 'literal':
-            return generateLiteralValidation(prop, variable, pathParts, context);
+            return generateLiteralValidation(prop, variable, pathMode, context);
 
         case 'null':
-            return generateNullValidation(variable, pathParts, context);
+            return generateNullValidation(variable, pathMode, context);
 
         case 'number':
-            return generateNumberValidation(prop, variable, pathParts, context);
+            return generateNumberValidation(prop, variable, pathMode, context);
 
         case 'object':
-            return generateObjectValidation(prop, variable, pathParts, context);
+            return generateObjectValidation(prop, variable, pathMode, context);
 
         case 'record':
-            return generateRecordValidation(prop, variable, pathParts, context);
+            return generateRecordValidation(prop, variable, pathMode, context);
 
         case 'string':
-            return generateStringValidation(prop, variable, pathParts, context);
+            return generateStringValidation(prop, variable, pathMode, context);
 
         case 'tuple':
-            return generateTupleValidation(prop, variable, pathParts, context);
+            return generateTupleValidation(prop, variable, pathMode, context);
 
         case 'union':
-            return generateUnionValidation(prop, variable, pathParts, context);
+            return generateUnionValidation(prop, variable, pathMode, context);
 
         default:
             return '';
@@ -691,13 +582,13 @@ function generateTypeValidation(
 function generateUnionValidation(
     prop: AnalyzedProperty,
     variable: string,
-    pathParts: string[],
+    pathMode: PathMode,
     context: GeneratorContext
 ): string {
     let checks: string[] = [],
-        errorMessage = context.customMessages.get(pathParts.join('.')) || 'invalid union type',
+        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid union type',
         literals = prop.literals || [],
-        path = generatePath(pathParts),
+        path = resolvePath(pathMode),
         unionTypes = prop.unionTypes || [];
 
     // Handle nullable first
@@ -779,12 +670,12 @@ const generateValidator = (
         if (property.optional) {
             codeParts.push(`
                 if (${variable} !== undefined) {
-                    ${generateTypeValidation(property, variable, [property.name], context)}
+                    ${generateTypeValidation(property, variable, { kind: 'static', parts: [property.name] }, context)}
                 }
             `);
         }
         else {
-            codeParts.push(generateTypeValidation(property, variable, [property.name], context));
+            codeParts.push(generateTypeValidation(property, variable, { kind: 'static', parts: [property.name] }, context));
         }
     }
 

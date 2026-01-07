@@ -1,10 +1,7 @@
 import type { AnalyzedProperty, AnalyzedType } from '~/compiler/type-analyzer';
 import { mapFields, type MappedField } from './field-mapper';
 import {
-    WIRE_TYPE_32BIT,
-    WIRE_TYPE_64BIT,
-    WIRE_TYPE_LENGTH_DELIMITED,
-    WIRE_TYPE_VARINT,
+    WIRE_TYPE_32BIT, WIRE_TYPE_64BIT, WIRE_TYPE_LENGTH_DELIMITED, WIRE_TYPE_VARINT,
     getProtoFieldInfo
 } from './type-mapper';
 
@@ -247,27 +244,34 @@ function generateFieldDecode(field: MappedField, resultVar: string): string {
     }
 }
 
-function generateNestedDecoder(properties: AnalyzedProperty[]): string {
-    let name = `_dec${decoderCount++}`,
-        fields = mapFields(properties),
-        caseParts: string[] = [],
+function processDecoderFields(
+    fields: MappedField[],
+    resultVar: string
+): { caseParts: string[]; initParts: string[] } {
+    let caseParts: string[] = [],
         initParts: string[] = [];
 
     for (let i = 0, n = fields.length; i < n; i++) {
         let field = fields[i];
 
-        // Initialize arrays
         if (field.property.type === 'array') {
             initParts.push(`'${field.name}': []`);
         }
 
         caseParts.push(`
             case ${field.tag}: {
-                ${generateFieldDecode(field, '_result')}
+                ${generateFieldDecode(field, resultVar)}
                 break;
             }
         `);
     }
+
+    return { caseParts, initParts };
+}
+
+function generateNestedDecoder(properties: AnalyzedProperty[]): string {
+    let name = `_dec${decoderCount++}`,
+        { caseParts, initParts } = processDecoderFields(mapFields(properties), '_result');
 
     nestedDecoders.push(`
         function ${name}(_buffer, _offset, _end) {
@@ -297,25 +301,7 @@ const generateDecoder = (type: AnalyzedType): string => {
     nestedDecoders = [];
     decoderCount = 0;
 
-    let fields = mapFields(type.properties),
-        caseParts: string[] = [],
-        initParts: string[] = [];
-
-    for (let i = 0, n = fields.length; i < n; i++) {
-        let field = fields[i];
-
-        // Initialize arrays
-        if (field.property.type === 'array') {
-            initParts.push(`'${field.name}': []`);
-        }
-
-        caseParts.push(`
-            case ${field.tag}: {
-                ${generateFieldDecode(field, '_result')}
-                break;
-            }
-        `);
-    }
+    let { caseParts, initParts } = processDecoderFields(mapFields(type.properties), '_result');
 
     return `
         ((_buffer) => {
