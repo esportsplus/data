@@ -75,7 +75,7 @@ function buildLiteralChecks(varname: string, literals: LiteralValue[]): string[]
         let lit = literals[i];
 
         checks.push(
-            code`${varname} !== ${lit.type === 'string' ? `'${code.escape(String(lit.value))}'` : lit.value}`
+            code`${varname} !== ${lit.type === 'string' ? `'${code.escape(String(lit.value))}'` : String(lit.value)}`
         );
     }
 
@@ -278,7 +278,7 @@ function generateObjectValidation(
         }) {
             ${error.generate('must be an object', pathMode, context)}
         }
-        else if (${prop.nullable && '${varname} !== null &&'} true) {
+        else if (${prop.nullable && `${varname} !== null &&`} true) {
             ${parts.join('\n')}
         }
     `;
@@ -448,7 +448,7 @@ function generateUnionValidation(prop: AnalyzedProperty, varname: string, pathMo
     for (let i = 0, n = literals.length; i < n; i++) {
         let lit = literals[i];
 
-        checks.push(`${varname} !== ${lit.type === 'string' ? `'${code.escape(String(lit.value))}'` : lit.value}`);
+        checks.push(`${varname} !== ${lit.type === 'string' ? `'${code.escape(String(lit.value))}'` : String(lit.value)}`);
     }
 
     // Add type checks
@@ -495,11 +495,7 @@ function propertyAccess(prop: string, varname: string): string {
 }
 
 
-const generateValidator = (
-    type: AnalyzedType,
-    context: GeneratorContext,
-    customValidatorCode?: string
-): string => {
+const generateValidator = (type: AnalyzedType, context: GeneratorContext, customValidatorCode?: string): string => {
     let parts: string[] = [],
         properties = type.properties;
 
@@ -511,7 +507,7 @@ const generateValidator = (
         }
 
         let varname = propertyAccess(property.name, INPUT_VARIABLE);
-parts
+
         parts.push(
             code`
                 ${property.optional && `if (${varname} !== undefined) {`}
