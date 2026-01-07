@@ -1,11 +1,11 @@
-import type { ImportIntent, Plugin, ReplacementIntent, TransformContext } from '@esportsplus/typescript/compiler';
-import { getValidatorsForSource, type BrandedValidator } from './config-parser';
+import type { ImportIntent, ReplacementIntent, TransformContext } from '@esportsplus/typescript/compiler';
+import { ts } from '@esportsplus/typescript';
 import { imports } from '@esportsplus/typescript/compiler';
 import { analyzeType } from '~/compiler/type-analyzer';
-import { generateValidator } from './validator';
 import { PACKAGE } from '~/constants';
+import { default as validators, type BrandedValidator } from './validators';
 import { transformCodec } from './proto';
-import { ts } from '@esportsplus/typescript';
+import { generateValidator } from './validator';
 
 
 type CallType = 'codec' | 'validator.build';
@@ -22,10 +22,75 @@ type DetectedCall = {
 
 const ASYNC_PATTERN = /^\s*\(?async\s|\bawait\b/;
 
-const PATTERNS = ['codec<', 'codec(', 'validator.build', 'validator', '.codec', '.build'];
 
+function extractMessages(type: ts.Type, parts: string[], messages: Map<string, string>, checker: ts.TypeChecker): void {
+    if (type.isStringLiteral()) {
+        messages.set(parts.join('.'), type.value);
+        return;
+    }
 
-function collectCalls(
+    if (type.flags & ts.TypeFlags.Object) {
+        let properties = checker.getPropertiesOfType(type);
+
+        for (let i = 0, n = properties.length; i < n; i++) {
+            let prop = properties[i];
+
+            extractMessages(checker.getTypeOfSymbol(prop), [...parts, prop.getName()], messages, checker);
+        }
+    }
+}
+
+// Trace symbol through re-exports to find original declaration source file
+const trace = (node: ts.Identifier, checker: ts.TypeChecker): string | null => {
+    let symbol = checker.getSymbolAtLocation(node);
+
+    if (!symbol) {
+        return null;
+    }
+
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+        symbol = checker.getAliasedSymbol(symbol);
+    }
+
+    let declarations = symbol.getDeclarations();
+
+    if (!declarations || declarations.length === 0) {
+        return null;
+    }
+
+    return declarations[0].getSourceFile().fileName;
+};
+
+function transform(call: DetectedCall, ctx: TransformContext, validators: Map<string, BrandedValidator>): string {
+    switch (call.callType) {
+        case 'codec':
+            return transformCodec(call.typeArg, call.configArg, ctx.checker);
+
+        case 'validator.build': {
+            let source = call.configArg?.getText(ctx.sourceFile),
+                messages = new Map<string, string>();
+
+            if (call.errorMessagesType) {
+                extractMessages(ctx.checker.getTypeAtLocation(call.errorMessagesType), [], messages, ctx.checker);
+            }
+
+            return generateValidator(
+                analyzeType(call.typeArg, ctx.checker),
+                {
+                    brandValidators: validators,
+                    customMessages: messages,
+                    hasAsync: source ? ASYNC_PATTERN.test(source) : false
+                },
+                source
+            );
+        }
+
+        default:
+            return call.node.getText(ctx.sourceFile);
+    }
+}
+
+function visit(
     calls: Map<ts.CallExpression, DetectedCall>,
     checker: ts.TypeChecker,
     node: ts.Node,
@@ -76,11 +141,11 @@ function collectCalls(
 
         if (callType && traceNode) {
             let detected: DetectedCall = {
-                callType,
-                importSource: imports.trace(traceNode as ts.Identifier, checker) ?? undefined,
-                node,
-                typeArg: node.typeArguments[0]
-            };
+                    callType,
+                    importSource: trace(traceNode as ts.Identifier, checker) ?? undefined,
+                    node,
+                    typeArg: node.typeArguments[0]
+                };
 
             if (callType === 'codec' && node.arguments.length > 0) {
                 detected.configArg = node.arguments[0];
@@ -99,82 +164,18 @@ function collectCalls(
         }
     }
 
-    ts.forEachChild(node, n => collectCalls(calls, checker, n, packageImports));
-}
-
-function extractMessages(
-    type: ts.Type,
-    pathParts: string[],
-    messages: Map<string, string>,
-    typeChecker: ts.TypeChecker
-): void {
-    if (type.isStringLiteral()) {
-        messages.set(pathParts.join('.'), type.value);
-        return;
-    }
-
-    if (type.flags & ts.TypeFlags.Object) {
-        let props = typeChecker.getPropertiesOfType(type);
-
-        for (let i = 0, n = props.length; i < n; i++) {
-            let prop = props[i],
-                propType = typeChecker.getTypeOfSymbol(prop);
-
-            extractMessages(propType, [...pathParts, prop.getName()], messages, typeChecker);
-        }
-    }
-}
-
-function parseErrorMessages(typeNode: ts.TypeNode | undefined, typeChecker: ts.TypeChecker): Map<string, string> {
-    let messages = new Map<string, string>();
-
-    if (!typeNode) {
-        return messages;
-    }
-
-    extractMessages(typeChecker.getTypeAtLocation(typeNode), [], messages, typeChecker);
-
-    return messages;
-}
-
-function transformCall(
-    call: DetectedCall,
-    ctx: TransformContext,
-    brandValidators: Map<string, BrandedValidator>
-): string {
-    switch (call.callType) {
-        case 'codec':
-            return transformCodec(call.typeArg, call.configArg, ctx.checker);
-
-        case 'validator.build': {
-            let customValidatorSource = call.configArg?.getText(ctx.sourceFile);
-
-            return generateValidator(
-                analyzeType(call.typeArg, ctx.checker),
-                {
-                    brandValidators,
-                    customMessages: parseErrorMessages(call.errorMessagesType, ctx.checker),
-                    hasAsync: customValidatorSource ? ASYNC_PATTERN.test(customValidatorSource) : false
-                },
-                customValidatorSource
-            );
-        }
-
-        default:
-            return call.node.getText(ctx.sourceFile);
-    }
+    ts.forEachChild(node, n => visit(calls, checker, n, packageImports));
 }
 
 
-const plugin: Plugin = {
-    patterns: PATTERNS,
-
+export default {
+    patterns: ['codec<', 'codec(', 'validator.build', 'validator', '.codec', '.build'],
     transform: (ctx: TransformContext) => {
         if (imports.find(ctx.sourceFile, PACKAGE).length === 0) {
             return {};
         }
 
-        let detectedCalls = new Map<ts.CallExpression, DetectedCall>(),
+        let detected = new Map<ts.CallExpression, DetectedCall>(),
             packageImports = new Set<string>();
 
         // Cache package imports for fallback detection
@@ -186,45 +187,39 @@ const plugin: Plugin = {
             }
         }
 
-        collectCalls(detectedCalls, ctx.checker, ctx.sourceFile, packageImports);
+        visit(detected, ctx.checker, ctx.sourceFile, packageImports);
 
-        if (detectedCalls.size === 0) {
+        if (detected.size === 0) {
             return {};
         }
 
-        let importsIntent: ImportIntent[] = [],
+        let intents: ImportIntent[] = [],
             remove: string[] = [],
             replacements: ReplacementIntent[] = [];
 
-        for (let [, call] of detectedCalls) {
-            let brandValidators = getValidatorsForSource(call.importSource, ctx.program);
+        for (let [, call] of detected) {
+            let cache = validators.get(call.importSource, ctx.program);
 
             replacements.push({
-                generate: () => transformCall(call, ctx, brandValidators),
+                generate: () => transform(call, ctx, cache),
                 node: call.node
             });
 
-            if (call.callType === 'codec' && !remove.includes('codec')) {
+            if (call.callType === 'codec' && remove.indexOf('codec') !== -1) {
                 remove.push('codec');
             }
-            else if (call.callType === 'validator.build' && !remove.includes('validator')) {
+            else if (call.callType === 'validator.build' && remove.indexOf('validator') !== -1) {
                 remove.push('validator');
             }
         }
 
         if (remove.length > 0) {
-            importsIntent.push({
+            intents.push({
                 package: PACKAGE,
                 remove
             });
         }
 
-        return {
-            imports: importsIntent,
-            replacements
-        };
+        return { imports: intents, replacements };
     }
-};
-
-
-export default plugin;
+};;

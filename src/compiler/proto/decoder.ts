@@ -270,8 +270,8 @@ function processDecoderFields(
 }
 
 function generateNestedDecoder(properties: AnalyzedProperty[]): string {
-    let name = `_dec${decoderCount++}`,
-        { caseParts, initParts } = processDecoderFields(mapFields(properties), '_result');
+    let { caseParts, initParts } = processDecoderFields(mapFields(properties), '_result'),
+        name = `_dec${decoderCount++}`;
 
     nestedDecoders.push(`
         function ${name}(_buffer, _offset, _end) {

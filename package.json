@@ -5,7 +5,7 @@
     },
     "description": "Compile-time data validation utility",
     "devDependencies": {
-        "@esportsplus/typescript": "^0.26.0",
+        "@esportsplus/typescript": "^0.26.1",
         "@types/node": "^25.0.3",
         "vite": "^7.3.1",
         "vitest": "^4.0.16"

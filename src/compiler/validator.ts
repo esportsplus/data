@@ -1,24 +1,19 @@
+import { code, uid } from '@esportsplus/typescript/compiler';
 import type { AnalyzedProperty, AnalyzedType } from '~/compiler/type-analyzer';
-import { inlineValidatorBody, type BrandedValidator } from './config-parser';
-import { uid } from '@esportsplus/typescript/compiler';
-import { ERRORS_VARIABLE } from '~/compiler/constants';
+import { GeneratorContext, PathMode } from './types';
+import error, { ERRORS_VARIABLE } from './error';
+import validators from './validators';
 
-
-type GeneratorContext = {
-    brandValidators: Map<string, BrandedValidator>;
-    customMessages: Map<string, string>;
-    hasAsync: boolean;
-};
 
 type LiteralValue = {
     type: 'boolean' | 'number' | 'string';
     value: boolean | number | string;
 };
 
-type PathMode =
-    | { kind: 'dynamic'; indexVar: string; parentParts: string[] }
-    | { kind: 'static'; parts: string[] };
+type TypeValidator = (prop: AnalyzedProperty, varname: string, pathMode: PathMode, context: GeneratorContext) => string;
 
+
+const INPUT_VARIABLE = '_input';
 
 const RESERVED_WORDS = new Set([
     'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
@@ -28,82 +23,91 @@ const RESERVED_WORDS = new Set([
     'var', 'void', 'while', 'with', 'yield'
 ]);
 
-const SINGLE_QUOTE_REGEX = /'/g;
+const TYPE_VALIDATORS: Record<string, TypeValidator> = {
+    array: generateArrayValidation,
+    bigint: generateBigintValidation,
+    boolean: generateBooleanValidation,
+    date: generateDateValidation,
+    enum: generateEnumValidation,
+    literal: generateLiteralValidation,
+    null: generateNullValidation,
+    number: generateNumberValidation,
+    object: generateObjectValidation,
+    record: generateRecordValidation,
+    string: generateStringValidation,
+    tuple: generateTupleValidation,
+    union: generateUnionValidation
+};
 
 const VALID_IDENTIFIER = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
 
 
-function buildLiteralChecks(variable: string, literals: LiteralValue[]): string[] {
-    let checks: string[] = [];
-
-    for (let i = 0, n = literals.length; i < n; i++) {
-        let lit = literals[i];
-
-        checks.push(
-            `${variable} !== ${lit.type === 'string' ? `'${escape(String(lit.value))}'` : lit.value}`
-        );
-    }
-
-    return checks;
-}
-
-function escape(str: string): string {
-    return str.replace(SINGLE_QUOTE_REGEX, "\\'");
-}
-
-function booleanCoercionTemplate(variable: string, errorMessage: string, path: string): string {
-    return `
-        if (typeof ${variable} !== 'boolean') {
-            if (${variable} === 'true' || ${variable} === 1 || ${variable} === '1') {
-                ${variable} = true;
+function booleanCoercionTemplate(varname: string, message: string, path: string, lookup?: { context: GeneratorContext, pathMode: PathMode }): string {
+    return code`
+        if (typeof ${varname} !== 'boolean') {
+            if (${varname} === 'true' || ${varname} === 1 || ${varname} === '1') {
+                ${varname} = true;
             }
-            else if (${variable} === 'false' || ${variable} === 0 || ${variable} === '0') {
-                ${variable} = false;
+            else if (${varname} === 'false' || ${varname} === 0 || ${varname} === '0') {
+                ${varname} = false;
             }
             else {
-                let _str = String(${variable}).toLowerCase();
+                let _str = String(${varname}).toLowerCase();
 
                 if (_str === 'true' || _str === '1') {
-                    ${variable} = true;
+                    ${varname} = true;
                 }
                 else if (_str === 'false' || _str === '0') {
-                    ${variable} = false;
+                    ${varname} = false;
                 }
                 else {
-                    (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+                    ${error.generate(message, path, lookup)}
                 }
             }
         }
     `;
 }
 
+function buildLiteralChecks(varname: string, literals: LiteralValue[]): string[] {
+    let checks: string[] = [];
+
+    for (let i = 0, n = literals.length; i < n; i++) {
+        let lit = literals[i];
+
+        checks.push(
+            code`${varname} !== ${lit.type === 'string' ? `'${code.escape(String(lit.value))}'` : lit.value}`
+        );
+    }
+
+    return checks;
+}
+
 function generateArrayValidation(
     prop: AnalyzedProperty,
-    variable: string,
+    varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
     let e = uid('e'),
-        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'must be an array',
         i = uid('i'),
-        itemType = prop.itemType || { name: 'item', optional: false, type: 'unknown' },
-        n = uid('n'),
-        nullCheck = prop.nullable ? `${variable} !== null && ` : '',
-        path = resolvePath(pathMode),
-        pathParts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts;
+        n = uid('n');
 
-    return `
-        if (${nullCheck}!Array.isArray(${variable})) {
-            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+    return code`
+        if (${prop.nullable && `${varname} !== null &&`} !Array.isArray(${varname})) {
+            ${error.generate('must be an array', pathMode, context)}
         }
-        else if (${variable} !== null) {
+        else if (${varname} !== null) {
             let ${e} = ${ERRORS_VARIABLE}?.length ?? 0;
 
-            for (let ${i} = 0, ${n} = ${variable}.length; ${i} < ${n}; ${i}++) {
+            for (let ${i} = 0, ${n} = ${varname}.length; ${i} < ${n}; ${i}++) {
                 ${generateTypeValidation(
-                    itemType,
-                    `${variable}[${i}]`,
-                    { kind: 'dynamic', indexVar: i, parentParts: pathParts },
+                    prop.itemType || { name: 'item', optional: false, type: 'unknown' },
+                    `${varname}[${i}]`,
+                    {
+                        kind: 'dynamic',
+                        indexVar: i,
+                        parentParts: pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts
+                    },
                     context
                 )}
 
@@ -117,241 +121,171 @@ function generateArrayValidation(
 
 function generateBigintValidation(
     prop: AnalyzedProperty,
-    variable: string,
+    varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'must be a bigint',
-        nullCheck = prop.nullable ? `${variable} !== null && ` : '',
-        path = resolvePath(pathMode);
-
-    return `
-        if (${nullCheck}typeof ${variable} !== 'bigint') {
-            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+    return code`
+        if (${prop.nullable && `${varname} !== null &&`} typeof ${varname} !== 'bigint') {
+            ${error.generate('must be a bigint', pathMode, context)}
         }
     `;
 }
 
 function generateBooleanValidation(
     prop: AnalyzedProperty,
-    variable: string,
+    varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'must be true or false',
-        path = resolvePath(pathMode);
-
-    if (prop.nullable) {
-        return `
-            if (${variable} !== null) {
-                ${booleanCoercionTemplate(variable, errorMessage, path)}
-            }
-        `;
-    }
-
-    return booleanCoercionTemplate(variable, errorMessage, path);
+    return code`
+        if (${prop.nullable && `${varname} !== null &&`} true) {
+            ${booleanCoercionTemplate(varname, 'must be true or false', pathMode, context)}
+        }
+    `;
 }
 
 function generateDateValidation(
     prop: AnalyzedProperty,
-    variable: string,
+    varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid date type',
-        nullCheck = prop.nullable ? `${variable} !== null && ` : '',
-        path = resolvePath(pathMode);
-
-    return `
-        if (${nullCheck}(!(${variable} instanceof Date) || isNaN(${variable}.getTime()))) {
-            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+    return code`
+        if (${prop.nullable && `${varname} !== null &&`} (!(${varname} instanceof Date) || isNaN(${varname}.getTime()))) {
+            ${error.generate('invalid date type', pathMode, context)}
         }
     `;
 }
 
 function generateEnumValidation(
     prop: AnalyzedProperty,
-    variable: string,
+    varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let checks = buildLiteralChecks(variable, prop.literals || []),
-        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid enum type',
-        path = resolvePath(pathMode);
-
-    return `
-        if (${checks.join(' && ')}) {
-            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+    return code`
+        if (${buildLiteralChecks(varname, prop.literals || []).join(' && ')}) {
+            ${error.generate('invalid enum type', pathMode, context)}
         }
     `;
 }
 
 function generateLiteralValidation(
     prop: AnalyzedProperty,
-    variable: string,
+    varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let checks = buildLiteralChecks(variable, prop.literals || []),
-        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid literal type',
-        path = resolvePath(pathMode);
+    let checks = buildLiteralChecks(varname, prop.literals || []);
 
     if (prop.nullable) {
-        checks.unshift(`${variable} !== null`);
+        checks.unshift(`${varname} !== null`);
     }
 
-    return `
+    return code`
         if (${checks.join(' && ')}) {
-            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            ${error.generate('invalid literal type', pathMode, context)}
         }
     `;
 }
 
 function generateNullValidation(
-    variable: string,
+    _: AnalyzedProperty,
+    varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid null type',
-        path = resolvePath(pathMode);
-
-    return `
-        if (${variable} !== null) {
-            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+    return code`
+        if (${varname} !== null) {
+            ${error.generate('invalid null type', pathMode, context)}
         }
     `;
 }
 
 function generateNumberValidation(
     prop: AnalyzedProperty,
-    variable: string,
+    varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let isInteger = prop.brand === 'integer',
-        defaultMessage = isInteger ? 'must be an integer' : 'must be a number',
-        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || defaultMessage,
-        integerCheck = isInteger ? ` || ${variable} % 1 !== 0` : '',
-        nullCheck = prop.nullable ? `${variable} !== null && ` : '',
-        path = resolvePath(pathMode);
-
-    // Check for branded validator
-    let inlinedBody = '',
+    let body = '',
+        path = resolvePath(pathMode),
         validator = prop.brand ? context.brandValidators.get(prop.brand) : undefined;
 
     if (validator) {
-        inlinedBody = inlineValidatorBody(validator.body, variable, path);
+        body = validators.inline(validator.body, path, varname);
 
         if (validator.async) {
             context.hasAsync = true;
         }
     }
 
-    let baseCheck = `${nullCheck}(typeof ${variable} !== 'number' && isNaN(${variable} = +${variable})${integerCheck})`;
-
-    if (inlinedBody) {
-        return `
-            if (${baseCheck}) {
-                (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
-            }
-            else if (${variable} !== null) {
-                ${inlinedBody}
-            }
-        `;
-    }
-
-    return `
-        if (${baseCheck}) {
-            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+    return code`
+        if (
+            ${prop.nullable && `${varname} !== null &&`}
+            (
+                typeof ${varname} !== 'number' &&
+                isNaN(${varname} = +${varname})
+                ${prop.brand === 'integer' && ` || ${varname} % 1 !== 0`}
+            )
+        ) {
+            ${error.generate(prop.brand === 'integer' ? 'must be an integer' : 'must be a number', pathMode, context)}
         }
+        ${body && `
+            else if (${varname} !== null) {
+                ${body}
+            }
+        `}
     `;
 }
 
 function generateObjectValidation(
     prop: AnalyzedProperty,
-    variable: string,
+    varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let codeParts: string[] = [],
-        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'must be an object',
-        path = resolvePath(pathMode),
-        pathParts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts,
+    let body: string[] = [],
+        parts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts,
         properties = prop.properties || [];
 
     for (let i = 0, n = properties.length; i < n; i++) {
-        let p = properties[i];
+        let prop = properties[i];
 
-        // Skip never properties entirely
-        if (p.type === 'never') {
+        if (prop.type === 'never') {
             continue;
         }
 
-        let propVar = propertyAccess(p.name, variable),
-            propPathParts = [...pathParts, p.name];
-
-        let code = generateTypeValidation(p, propVar, { kind: 'static', parts: propPathParts }, context);
-
-        if (p.optional) {
-            codeParts.push(`
-                if (${propVar} !== undefined) {
-                    ${code}
-                }
-            `);
-        }
-        else {
-            codeParts.push(code);
-        }
+        body.push(
+            code`
+                ${prop.optional && `if (${propertyAccess(prop.name, varname)} !== undefined) {`}
+                    ${generateTypeValidation(
+                        prop,
+                        propertyAccess(prop.name, varname),
+                        { kind: 'static', parts: [...parts, prop.name] },
+                        context
+                    )}
+                ${prop.optional && `}`}
+            `
+        );
     }
 
-    // Optimized object check - handle nullable
-    if (prop.nullable) {
-        return `
-            if (${variable} !== null && (typeof ${variable} !== 'object' || Array.isArray(${variable}))) {
-                (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
-            }
-            else if (${variable} !== null) {
-                ${codeParts.join('\n')}
-            }
-        `;
-    }
-
-    return `
-        if (${variable} === null || typeof ${variable} !== 'object' || Array.isArray(${variable})) {
-            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+    return code`
+        if (${
+            prop.nullable
+                ? `${varname} !== null && (typeof ${varname} !== 'object' || Array.isArray(${varname}))`
+                : `${varname} === null || typeof ${varname} !== 'object' || Array.isArray(${varname})`
+        }) {
+            ${error.generate('must be an object', pathMode, context)}
         }
-        else {
-            ${codeParts.join('\n')}
+        else if (${prop.nullable && '${varname} !== null &&'} true) {
+            ${body.join('\n')}
         }
     `;
 }
 
-function generatePath(pathParts: string[]): string {
-    if (pathParts.length === 0) {
-        return "''";
-    }
-
-    return `'${pathParts.join('.')}'`;
-}
-
-function resolvePath(mode: PathMode): string {
-    if (mode.kind === 'static') {
-        return generatePath(mode.parts);
-    }
-
-    return mode.parentParts.length
-        ? `'${mode.parentParts.join('.')}[' + ${mode.indexVar} + ']'`
-        : `'[' + ${mode.indexVar} + ']'`;
-}
-
-function resolveMessagePath(mode: PathMode): string {
-    return mode.kind === 'static' ? mode.parts.join('.') : '';
-}
-
-function generatePropertyExtraction(
-    properties: AnalyzedProperty[],
-    variable: string
-): string {
+function generatePropertyExtraction(properties: AnalyzedProperty[], varname: string): string {
     let parts: string[] = [];
 
     for (let i = 0, n = properties.length; i < n; i++) {
@@ -361,10 +295,10 @@ function generatePropertyExtraction(
             continue;
         }
 
-        let access = propertyAccess(prop.name, variable),
+        let access = propertyAccess(prop.name, varname),
             key = VALID_IDENTIFIER.test(prop.name) && !RESERVED_WORDS.has(prop.name)
                 ? prop.name
-                : `'${escape(prop.name)}'`;
+                : `'${code.escape(prop.name)}'`;
 
         if (prop.optional) {
             parts.push(`...(${access} !== undefined && { ${key}: ${access} })`);
@@ -382,140 +316,114 @@ function generatePropertyExtraction(
 
 function generateRecordValidation(
     prop: AnalyzedProperty,
-    variable: string,
+    varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid record type',
-        indexType = prop.indexType,
+    let check = '',
         key = uid('key'),
-        path = resolvePath(pathMode),
-        pathParts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts;
+        parts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts,
+        type = prop.indexType?.type;
 
-    if (!indexType) {
-        return `
-            if (${variable} === null || typeof ${variable} !== 'object' || Array.isArray(${variable})) {
-                (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
-            }
-        `;
-    }
-
-    let valueCheck = '';
-
-    switch (indexType.type) {
+    switch (type) {
         case 'boolean':
-            valueCheck = `typeof ${variable}[${key}] !== 'boolean'`;
+            check = `typeof ${varname}[${key}] !== 'boolean'`;
             break;
         case 'number':
-            valueCheck = `typeof ${variable}[${key}] !== 'number'`;
+            check = `typeof ${varname}[${key}] !== 'number'`;
             break;
         case 'string':
-            valueCheck = `typeof ${variable}[${key}] !== 'string'`;
+            check = `typeof ${varname}[${key}] !== 'string'`;
             break;
         default:
-            valueCheck = 'false';
+            check = 'false';
     }
 
-    return `
-        if (${variable} === null || typeof ${variable} !== 'object' || Array.isArray(${variable})) {
-            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+    return code`
+        if (${varname} === null || typeof ${varname} !== 'object' || Array.isArray(${varname})) {
+            ${error.generate('invalid record type', pathMode, context)}
         }
-        else {
-            for (let ${key} in ${variable}) {
-                if (${valueCheck}) {
-                    (${ERRORS_VARIABLE} ??= []).push({
-                        message: '${
-                            indexType.type === 'boolean'
-                                ? 'must be a boolean'
-                                : indexType.type === 'number'
-                                    ? 'must be a number'
-                                    : indexType.type === 'string'
-                                        ? 'must be a string'
-                                        : 'invalid value'
-                        }',
-                        path: ${pathParts.length ? `'${pathParts.join('.')}.' + ` : ''}${key}
-                    });
-                    break;
+        ${type && `
+            else {
+                for (let ${key} in ${varname}) {
+                    if (${check}) {
+                        ${error.generate(
+                            type === 'boolean'
+                                    ? 'must be a boolean'
+                                    : type === 'number'
+                                        ? 'must be a number'
+                                        : type === 'string'
+                                            ? 'must be a string'
+                                            : 'invalid value',
+                            parts.length ? `'${parts.join('.')}.' + ` : '' + key
+                        )}
+                        break;
+                    }
                 }
             }
-        }
+        `}
     `;
 }
 
 function generateStringValidation(
     prop: AnalyzedProperty,
-    variable: string,
+    varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let nullCheck = prop.nullable ? `${variable} !== null && ` : '',
-        path = resolvePath(pathMode);
+    let body = '';
 
     // Template literal types - just validate as string with special error
     if (prop.brand === 'template') {
-        let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid template type';
-
-        return `
-            if (${nullCheck}typeof ${variable} !== 'string') {
-                (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
-            }
-        `;
     }
-
-    let errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'must be a string';
-
-    let baseCheck = `
-        if (${nullCheck}typeof ${variable} !== 'string') {
-            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
-        }
-    `;
-
     // Check for branded validator
-    if (prop.brand && context.brandValidators.has(prop.brand)) {
-        let validator = context.brandValidators.get(prop.brand)!,
-            inlinedBody = inlineValidatorBody(validator.body, variable, path);
+    else if (prop.brand && context.brandValidators.has(prop.brand)) {
+        let validator = context.brandValidators.get(prop.brand)!;
 
         // Track async
         if (validator.async) {
             context.hasAsync = true;
         }
 
-        return `
-            if (${nullCheck}typeof ${variable} !== 'string') {
-                (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
-            }
-            else if (${variable} !== null) {
-                ${inlinedBody}
+        body = code`
+            else if (${varname} !== null) {
+                ${validators.inline(validator.body, pathMode, varname)}
             }
         `;
     }
 
-    return baseCheck;
+    return code`
+        if (${prop.nullable && `${varname} !== null &&`} typeof ${varname} !== 'string') {
+            ${error.generate('must be a string', pathMode, context)}
+        }
+        ${body}
+    `;
 }
 
 function generateTupleValidation(
     prop: AnalyzedProperty,
-    variable: string,
+    varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
     let codeParts: string[] = [],
-        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid tuple type',
-        path = resolvePath(pathMode),
         pathParts = pathMode.kind === 'static' ? pathMode.parts : pathMode.parentParts,
         tupleTypes = prop.tupleTypes || [];
 
     for (let i = 0, n = tupleTypes.length; i < n; i++) {
-        let elemType = tupleTypes[i],
-            elemPathParts = [...pathParts, `[${i}]`],
-            elemVar = `${variable}[${i}]`;
-
-        codeParts.push(generateTypeValidation(elemType, elemVar, { kind: 'static', parts: elemPathParts }, context));
+        codeParts.push(
+            generateTypeValidation(
+                tupleTypes[i],
+                `${varname}[${i}]`,
+                { kind: 'static', parts: [...pathParts, `[${i}]`] },
+                context
+            )
+        );
     }
 
     return `
-        if (!Array.isArray(${variable}) || ${variable}.length !== ${tupleTypes.length}) {
-            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+        if (!Array.isArray(${varname}) || ${varname}.length !== ${tupleTypes.length}) {
+            ${error.generate('invalid tuple type', pathMode, context)}
         }
         else {
             ${codeParts.join('\n')}
@@ -523,84 +431,25 @@ function generateTupleValidation(
     `;
 }
 
-function generateTypeValidation(
-    prop: AnalyzedProperty,
-    variable: string,
-    pathMode: PathMode,
-    context: GeneratorContext
-): string {
-    switch (prop.type) {
-        case 'any':
-        case 'never':
-        case 'unknown':
-            return '';
-
-        case 'array':
-            return generateArrayValidation(prop, variable, pathMode, context);
-
-        case 'bigint':
-            return generateBigintValidation(prop, variable, pathMode, context);
-
-        case 'boolean':
-            return generateBooleanValidation(prop, variable, pathMode, context);
-
-        case 'date':
-            return generateDateValidation(prop, variable, pathMode, context);
-
-        case 'enum':
-            return generateEnumValidation(prop, variable, pathMode, context);
-
-        case 'literal':
-            return generateLiteralValidation(prop, variable, pathMode, context);
-
-        case 'null':
-            return generateNullValidation(variable, pathMode, context);
-
-        case 'number':
-            return generateNumberValidation(prop, variable, pathMode, context);
-
-        case 'object':
-            return generateObjectValidation(prop, variable, pathMode, context);
-
-        case 'record':
-            return generateRecordValidation(prop, variable, pathMode, context);
-
-        case 'string':
-            return generateStringValidation(prop, variable, pathMode, context);
-
-        case 'tuple':
-            return generateTupleValidation(prop, variable, pathMode, context);
-
-        case 'union':
-            return generateUnionValidation(prop, variable, pathMode, context);
-
-        default:
-            return '';
-    }
+function generateTypeValidation(prop: AnalyzedProperty, varname: string, pathMode: PathMode, context: GeneratorContext): string {
+    return TYPE_VALIDATORS[prop.type]?.(prop, varname, pathMode, context) ?? '';
 }
 
-function generateUnionValidation(
-    prop: AnalyzedProperty,
-    variable: string,
-    pathMode: PathMode,
-    context: GeneratorContext
-): string {
+function generateUnionValidation(prop: AnalyzedProperty, varname: string, pathMode: PathMode, context: GeneratorContext): string {
     let checks: string[] = [],
-        errorMessage = context.customMessages.get(resolveMessagePath(pathMode)) || 'invalid union type',
         literals = prop.literals || [],
-        path = resolvePath(pathMode),
         unionTypes = prop.unionTypes || [];
 
     // Handle nullable first
     if (prop.nullable) {
-        checks.push(`${variable} !== null`);
+        checks.push(`${varname} !== null`);
     }
 
     // Add literal checks
     for (let i = 0, n = literals.length; i < n; i++) {
         let lit = literals[i];
 
-        checks.push(`${variable} !== ${lit.type === 'string' ? `'${escape(String(lit.value))}'` : lit.value}`);
+        checks.push(`${varname} !== ${lit.type === 'string' ? `'${code.escape(String(lit.value))}'` : lit.value}`);
     }
 
     // Add type checks
@@ -609,22 +458,22 @@ function generateUnionValidation(
 
         switch (ut.type) {
             case 'boolean':
-                checks.push(`typeof ${variable} !== 'boolean'`);
+                checks.push(`typeof ${varname} !== 'boolean'`);
                 break;
             case 'date':
-                checks.push(`!(${variable} instanceof Date)`);
+                checks.push(`!(${varname} instanceof Date)`);
                 break;
             case 'number':
-                checks.push(`typeof ${variable} !== 'number'`);
+                checks.push(`typeof ${varname} !== 'number'`);
                 break;
             case 'string':
-                checks.push(`typeof ${variable} !== 'string'`);
+                checks.push(`typeof ${varname} !== 'string'`);
                 break;
             case 'object':
-                checks.push(`(typeof ${variable} !== 'object' || ${variable} === null || Array.isArray(${variable}))`);
+                checks.push(`(typeof ${varname} !== 'object' || ${varname} === null || Array.isArray(${varname}))`);
                 break;
             case 'array':
-                checks.push(`!Array.isArray(${variable})`);
+                checks.push(`!Array.isArray(${varname})`);
                 break;
         }
     }
@@ -635,17 +484,17 @@ function generateUnionValidation(
 
     return `
         if (${checks.join(' && ')}) {
-            (${ERRORS_VARIABLE} ??= []).push({ message: '${escape(errorMessage)}', path: ${path} });
+            ${error.generate('invalid union type', pathMode, context)}
         }
     `;
 }
 
-function propertyAccess(prop: string, variable: string): string {
+function propertyAccess(prop: string, varname: string): string {
     if (VALID_IDENTIFIER.test(prop) && !RESERVED_WORDS.has(prop)) {
-        return `${variable}.${prop}`;
+        return `${varname}.${prop}`;
     }
 
-    return `${variable}['${escape(prop)}']`;
+    return `${varname}['${code.escape(prop)}']`;
 }
 
 
@@ -654,33 +503,29 @@ const generateValidator = (
     context: GeneratorContext,
     customValidatorCode?: string
 ): string => {
-    let codeParts: string[] = [],
+    let parts: string[] = [],
         properties = type.properties;
 
     for (let i = 0, n = properties.length; i < n; i++) {
         let property = properties[i];
 
-        // Skip any/unknown/never at root level
         if (property.type === 'any' || property.type === 'unknown' || property.type === 'never') {
             continue;
         }
 
-        let variable = propertyAccess(property.name, '_input');
+        let varname = propertyAccess(property.name, INPUT_VARIABLE);
 
-        if (property.optional) {
-            codeParts.push(`
-                if (${variable} !== undefined) {
-                    ${generateTypeValidation(property, variable, { kind: 'static', parts: [property.name] }, context)}
-                }
-            `);
-        }
-        else {
-            codeParts.push(generateTypeValidation(property, variable, { kind: 'static', parts: [property.name] }, context));
-        }
+        parts.push(
+            code`
+                ${property.optional && `if (${varname} !== undefined) {`}
+                    ${generateTypeValidation(property, varname, { kind: 'static', parts: [property.name] }, context)}
+                ${property.optional && `}`}
+            `
+        );
     }
 
     if (customValidatorCode) {
-        codeParts.push(`
+        parts.push(`
             if (!${ERRORS_VARIABLE}) {
                 ${customValidatorCode}
             }
@@ -688,16 +533,16 @@ const generateValidator = (
     }
 
     return `
-        ${context.hasAsync ? 'async ' : ''}(_input) => {
+        ${context.hasAsync ? 'async ' : ''}(${INPUT_VARIABLE}) => {
             let ${ERRORS_VARIABLE};
 
-            ${codeParts.join('\n')}
+            ${parts.join('\n')}
 
             if (${ERRORS_VARIABLE}) {
-                return { ok: false, data: _input, errors: ${ERRORS_VARIABLE} };
+                return { ok: false, data: ${INPUT_VARIABLE}, errors: ${ERRORS_VARIABLE} };
             }
 
-            return { ok: true, data: ${generatePropertyExtraction(properties, '_input')}, errors: undefined };
+            return { ok: true, data: ${generatePropertyExtraction(properties, INPUT_VARIABLE)}, errors: undefined };
         }
     `;
 };

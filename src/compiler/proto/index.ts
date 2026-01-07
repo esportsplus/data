@@ -8,15 +8,15 @@ import { analyzeRuntimeNeeds, buildRuntimeHelpers } from './runtime';
 const transformCodec = (
     typeArg: ts.TypeNode,
     defaultsArg: ts.Expression | undefined,
-    typeChecker: ts.TypeChecker
+    checker: ts.TypeChecker
 ): string => {
-    let analyzed = analyzeType(typeArg, typeChecker),
+    let analyzed = analyzeType(typeArg, checker),
+        defaultsApplication = '',
         defaultsCode = defaultsArg ? defaultsArg.getText() : 'undefined',
         decoderCode = generateDecoder(analyzed),
         encoderCode = generateEncoder(analyzed),
         runtimeHelpers = buildRuntimeHelpers(analyzeRuntimeNeeds(analyzed));
 
-    let defaultsApplication = '';
 
     if (defaultsArg) {
         let checks = '',

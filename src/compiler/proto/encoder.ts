@@ -375,9 +375,8 @@ function processFields(
 
     for (let i = 0, n = fields.length; i < n; i++) {
         let field = fields[i],
-            fieldAccessor = accessor(field.name);
-
-        let sizeCode = generateFieldSizeCalc(field, fieldAccessor),
+            fieldAccessor = accessor(field.name),
+            sizeCode = generateFieldSizeCalc(field, fieldAccessor),
             writeCode = generateFieldWrite(field, fieldAccessor);
 
         if (field.optional) {
@@ -412,8 +411,8 @@ function processFields(
 }
 
 function generateNestedEncoder(properties: AnalyzedProperty[]): string {
-    let name = `_enc${encoderCount++}`,
-        { sizeCalcParts, writeParts } = processFields(mapFields(properties), (n) => `_d['${n}']`);
+    let { sizeCalcParts, writeParts } = processFields(mapFields(properties), (n) => `_d['${n}']`),
+        name = `_enc${encoderCount++}`;
 
     nestedEncoders.push(`
         function ${name}_size(_d) {

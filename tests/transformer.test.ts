@@ -205,7 +205,7 @@ describe('Code Generation Patterns', () => {
     });
 
     describe('minification-friendly', () => {
-        it('uses short variable names', () => {
+        it('uses short varname names', () => {
             let code = transformCode(`
                 type Data = { value: string };
                 validator.build<Data>();

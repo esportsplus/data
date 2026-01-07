@@ -1,6 +1,12 @@
 import { ts } from '@esportsplus/typescript';
-import { resolveBrandedType } from './branded-types';
 
+
+type BaseType = 'boolean' | 'number' | 'string' | 'unknown';
+
+interface BrandedTypeInfo {
+    base: BaseType;
+    brand?: string;
+}
 
 type LiteralValue = {
     type: 'boolean' | 'number' | 'string';
@@ -46,21 +52,21 @@ interface AnalyzedType {
 }
 
 
-let typeAnalysisCache = new WeakMap<ts.TypeNode, AnalyzedType>();
+let cache = new WeakMap<ts.TypeNode, AnalyzedType>();
 
 
 function analyzeArrayType(
     type: ts.Type,
     name: string,
     optional: boolean,
-    typeChecker: ts.TypeChecker,
+    checker: ts.TypeChecker,
     visited: Set<ts.Type>
 ): AnalyzedProperty {
     let typeArgs = (type as ts.TypeReference).typeArguments;
 
     if (typeArgs && typeArgs.length > 0) {
         return {
-            itemType: analyzePropertyType(typeArgs[0], 'item', false, typeChecker, visited),
+            itemType: analyzePropertyType(typeArgs[0], 'item', false, checker, visited),
             name,
             optional,
             type: 'array'
@@ -75,72 +81,31 @@ function analyzeArrayType(
     };
 }
 
-function analyzeIndexSignature(
-    type: ts.Type,
-    name: string,
-    optional: boolean,
-    typeChecker: ts.TypeChecker,
-    visited: Set<ts.Type>
-): AnalyzedProperty | null {
-    let indexInfo = typeChecker.getIndexInfoOfType(type, ts.IndexKind.String);
-
-    if (indexInfo) {
-        return {
-            indexType: analyzePropertyType(indexInfo.type, 'value', false, typeChecker, visited),
-            name,
-            optional,
-            type: 'record'
-        };
-    }
-
-    return null;
-}
-
-function analyzeObjectType(
-    type: ts.Type,
-    name: string,
-    optional: boolean,
-    typeChecker: ts.TypeChecker,
-    visited: Set<ts.Type>
-): AnalyzedProperty {
-    return {
-        name,
-        optional,
-        properties: extractProperties(type, typeChecker, visited),
-        type: 'object'
-    };
-}
-
 function analyzePropertyType(
     type: ts.Type,
     name: string,
     optional: boolean,
-    typeChecker: ts.TypeChecker,
+    checker: ts.TypeChecker,
     visited: Set<ts.Type>
 ): AnalyzedProperty {
-    // Check for any type
     if (type.flags & ts.TypeFlags.Any) {
         return { name, optional, type: 'any' };
     }
 
-    // Check for unknown type
     if (type.flags & ts.TypeFlags.Unknown) {
         return { name, optional, type: 'unknown' };
     }
 
-    // Check for never type
     if (type.flags & ts.TypeFlags.Never) {
         return { name, optional, type: 'never' };
     }
 
-    // Check for null type
     if (type.flags & ts.TypeFlags.Null) {
         return { name, optional, type: 'null' };
     }
 
-    // Check for branded types first (intersection with __brand)
     if (type.isIntersection()) {
-        let branded = resolveBrandedType(type, typeChecker);
+        let branded = resolveBrandedType(type, checker);
 
         if (branded.brand) {
             return {
@@ -152,7 +117,6 @@ function analyzePropertyType(
         }
     }
 
-    // Check for standalone literals
     if (type.isStringLiteral()) {
         return {
             literals: [{ type: 'string', value: type.value }],
@@ -171,7 +135,6 @@ function analyzePropertyType(
         };
     }
 
-    // Check for boolean literal
     if (type.flags & ts.TypeFlags.BooleanLiteral) {
         let value = (type as any).intrinsicName === 'true';
 
@@ -183,7 +146,6 @@ function analyzePropertyType(
         };
     }
 
-    // Check for primitive types
     if (type.flags & ts.TypeFlags.Boolean) {
         return { name, optional, type: 'boolean' };
     }
@@ -205,22 +167,18 @@ function analyzePropertyType(
         return { name, optional, type: 'bigint' };
     }
 
-    // Check for tuple type
-    if (typeChecker.isTupleType(type)) {
-        return analyzeTupleType(type as ts.TupleType, name, optional, typeChecker, visited);
+    if (checker.isTupleType(type)) {
+        return analyzeTupleType(type as ts.TupleType, name, optional, checker, visited);
     }
 
-    // Check for array type
-    if (typeChecker.isArrayType(type)) {
-        return analyzeArrayType(type, name, optional, typeChecker, visited);
+    if (checker.isArrayType(type)) {
+        return analyzeArrayType(type, name, optional, checker, visited);
     }
 
-    // Check for union type
     if (type.isUnion()) {
-        return analyzeUnionType(type, name, optional, typeChecker, visited);
+        return analyzeUnionType(type, name, optional, checker, visited);
     }
 
-    // Check for object type
     if (type.flags & ts.TypeFlags.Object) {
         let symbol = type.getSymbol();
 
@@ -234,7 +192,7 @@ function analyzePropertyType(
             let symbolName = symbol.getName();
 
             if (symbolName === 'Array') {
-                return analyzeArrayType(type, name, optional, typeChecker, visited);
+                return analyzeArrayType(type, name, optional, checker, visited);
             }
 
             if (symbolName === 'Function' || symbolName === 'Promise') {
@@ -243,15 +201,16 @@ function analyzePropertyType(
         }
 
         // Check for Record/index signature
-        let indexSignature = analyzeIndexSignature(type, name, optional, typeChecker, visited);
+        let info = checker.getIndexInfoOfType(type, ts.IndexKind.String);
 
-        if (indexSignature) {
-            let props = typeChecker.getPropertiesOfType(type);
-
-            // Only treat as record if it has no explicit properties (pure index signature)
-            if (props.length === 0) {
-                return indexSignature;
-            }
+        // Only treat as record if it has no explicit properties (pure index signature)
+        if (info && checker.getPropertiesOfType(type).length === 0) {
+            return {
+                indexType: analyzePropertyType(info.type, 'value', false, checker, visited),
+                name,
+                optional,
+                type: 'record'
+            };
         }
 
         // Check for circular reference
@@ -261,7 +220,12 @@ function analyzePropertyType(
 
         visited.add(type);
 
-        let result = analyzeObjectType(type, name, optional, typeChecker, visited);
+        let result: AnalyzedProperty = {
+                name,
+                optional,
+                properties: extractProperties(type, checker, visited),
+                type: 'object'
+            };
 
         visited.delete(type);
 
@@ -275,15 +239,15 @@ function analyzeTupleType(
     type: ts.TupleType,
     name: string,
     optional: boolean,
-    typeChecker: ts.TypeChecker,
+    checker: ts.TypeChecker,
     visited: Set<ts.Type>
 ): AnalyzedProperty {
-    let elements = typeChecker.getTypeArguments(type as ts.TypeReference),
+    let elements = checker.getTypeArguments(type as ts.TypeReference),
         tupleTypes: AnalyzedProperty[] = [];
 
     for (let i = 0, n = elements.length; i < n; i++) {
         tupleTypes.push(
-            analyzePropertyType(elements[i], `${i}`, false, typeChecker, visited)
+            analyzePropertyType(elements[i], `${i}`, false, checker, visited)
         );
     }
 
@@ -294,107 +258,82 @@ function analyzeUnionType(
     type: ts.UnionType,
     name: string,
     optional: boolean,
-    typeChecker: ts.TypeChecker,
+    checker: ts.TypeChecker,
     visited: Set<ts.Type>
 ): AnalyzedProperty {
-    let hasNull = false,
-        hasUndefined = false,
-        literals: LiteralValue[] = [],
-        n = type.types.length,
+    let literals: LiteralValue[] = [],
+        nullable = false,
         types: AnalyzedProperty[] = [],
         unionTypes = type.types;
 
-    for (let i = 0; i < n; i++) {
+    for (let i = 0, n = type.types.length; i < n; i++) {
         let t = unionTypes[i],
             flags = t.flags;
 
-        // Check for null/undefined first (most common modifiers)
         if (flags & ts.TypeFlags.Null) {
-            hasNull = true;
-            continue;
+            nullable = true;
         }
-
-        if (flags & ts.TypeFlags.Undefined) {
-            hasUndefined = true;
-            continue;
+        else if (flags & ts.TypeFlags.Undefined) {
+            optional = true;
         }
-
-        // Check for literals
-        if (t.isStringLiteral()) {
+        else if (t.isStringLiteral()) {
             literals.push({ type: 'string', value: t.value });
-            continue;
         }
-
-        if (t.isNumberLiteral()) {
+        else if (t.isNumberLiteral()) {
             literals.push({ type: 'number', value: t.value });
-            continue;
         }
-
-        if (flags & ts.TypeFlags.BooleanLiteral) {
-            let value = (t as any).intrinsicName === 'true';
-
-            literals.push({ type: 'boolean', value });
-            continue;
+        else if (flags & ts.TypeFlags.BooleanLiteral) {
+            literals.push({
+                type: 'boolean',
+                value: (t as any).intrinsicName === 'true'
+            });
         }
-
         // Non-literal type - analyze recursively
-        types.push(analyzePropertyType(t, name, false, typeChecker, visited));
+        else {
+            types.push( analyzePropertyType(t, name, false, checker, visited) );
+        }
     }
 
     // Pure literal union
     if (literals.length > 0 && types.length === 0) {
-        return {
-            literals,
-            name,
-            nullable: hasNull,
-            optional: optional || hasUndefined,
-            type: 'literal'
-        };
+        return { literals, name, nullable, optional, type: 'literal' };
     }
 
     // Single non-literal type with null/undefined
     if (types.length === 1 && literals.length === 0) {
         let result = types[0];
 
-        result.nullable = hasNull;
-        result.optional = optional || hasUndefined;
+        result.nullable = nullable;
+        result.optional = optional;
 
         return result;
     }
 
     // Mixed type union
     if (types.length > 0) {
-        return {
-            literals,
-            name,
-            nullable: hasNull,
-            optional: optional || hasUndefined,
-            type: 'union',
-            unionTypes: types
-        };
+        return { literals, name, nullable, optional, type: 'union', unionTypes: types };
     }
 
-    // Just null/undefined
-    return { name, nullable: hasNull, optional: true, type: 'unknown' };
+    return { name, nullable, optional: true, type: 'unknown' };
 }
 
-function extractProperties(
-    type: ts.Type,
-    typeChecker: ts.TypeChecker,
-    visited: Set<ts.Type>
-): AnalyzedProperty[] {
-    let props = typeChecker.getPropertiesOfType(type),
+function extractProperties(type: ts.Type, checker: ts.TypeChecker, visited: Set<ts.Type>): AnalyzedProperty[] {
+    let props = checker.getPropertiesOfType(type),
         result: AnalyzedProperty[] = [];
 
     for (let i = 0, n = props.length; i < n; i++) {
-        let prop = props[i],
-            // Symbol's Optional flag is the source of truth for resolved types
-            // This correctly handles mapped types like Required<T> and Partial<T>
-            optional = !!(prop.flags & ts.SymbolFlags.Optional),
-            propType = typeChecker.getTypeOfSymbol(prop);
+        let prop = props[i];
 
         result.push(
-            analyzePropertyType(propType, prop.getName(), optional, typeChecker, visited)
+            analyzePropertyType(
+                checker.getTypeOfSymbol(prop),
+                prop.getName(),
+                // Symbol's Optional flag is the source of truth for resolved types
+                // This correctly handles mapped types like Required<T> and Partial<T>
+                !!(prop.flags & ts.SymbolFlags.Optional),
+                checker,
+                visited
+            )
         );
     }
 
@@ -405,26 +344,70 @@ function extractProperties(
 }
 
 
-const analyzeType = (
-    typeNode: ts.TypeNode,
-    typeChecker: ts.TypeChecker
-): AnalyzedType => {
-    let cached = typeAnalysisCache.get(typeNode);
+const analyzeType = (typeNode: ts.TypeNode, checker: ts.TypeChecker): AnalyzedType => {
+    let cached = cache.get(typeNode);
 
     if (cached) {
         return cached;
     }
 
-    let type = typeChecker.getTypeAtLocation(typeNode),
+    let type = checker.getTypeAtLocation(typeNode),
         result: AnalyzedType = {
-            name: typeChecker.typeToString(type),
-            properties: extractProperties(type, typeChecker, new Set<ts.Type>())
+            name: checker.typeToString(type),
+            properties: extractProperties(type, checker, new Set<ts.Type>())
         };
 
-    typeAnalysisCache.set(typeNode, result);
+    cache.set(typeNode, result);
 
     return result;
 };
 
-export { analyzeType };
+const resolveBrandedType = (type: ts.Type, checker: ts.TypeChecker): BrandedTypeInfo => {
+    let base: BaseType = 'unknown',
+        brand: string | undefined;
+
+    if (!type.isIntersection()) {
+        if (type.flags & ts.TypeFlags.Boolean || type.flags & ts.TypeFlags.BooleanLiteral) {
+            base = 'boolean';
+        }
+        else if (type.flags & ts.TypeFlags.Number || type.flags & ts.TypeFlags.NumberLiteral) {
+            base = 'number';
+        }
+        else if (type.flags & ts.TypeFlags.String || type.flags & ts.TypeFlags.StringLiteral) {
+            base = 'string';
+        }
+
+        return { base };
+    }
+
+    for (let i = 0, n = type.types.length; i < n; i++) {
+        let constituent = type.types[i];
+
+        if (constituent.flags & ts.TypeFlags.Boolean) {
+            base = 'boolean';
+        }
+        else if (constituent.flags & ts.TypeFlags.Number) {
+            base = 'number';
+        }
+        else if (constituent.flags & ts.TypeFlags.String) {
+            base = 'string';
+        }
+        else if (constituent.flags & ts.TypeFlags.Object) {
+            let brandProp = checker.getPropertyOfType(constituent, '__brand');
+
+            if (brandProp) {
+                let brandType = checker.getTypeOfSymbol(brandProp);
+
+                if (brandType.isStringLiteral()) {
+                    brand = brandType.value;
+                }
+            }
+        }
+    }
+
+    return { base, brand };
+};
+
+
+export { analyzeType, resolveBrandedType };
 export type { AnalyzedProperty, AnalyzedType };
