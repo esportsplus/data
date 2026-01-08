@@ -1,5 +1,5 @@
 import { ts } from '@esportsplus/typescript';
-import { analyzeType } from '~/compiler/type-analyzer';
+import { analyzeType } from '../type-analyzer';
 import { generateDecoder } from './decoder';
 import { generateEncoder } from './encoder';
 import { analyzeRuntimeNeeds, buildRuntimeHelpers } from './runtime';

@@ -1,5 +1,5 @@
 import { code, uid } from '@esportsplus/typescript/compiler';
-import type { AnalyzedProperty, AnalyzedType } from '~/compiler/type-analyzer';
+import type { AnalyzedProperty, AnalyzedType } from './type-analyzer';
 import { GeneratorContext, PathMode } from './types';
 import error, { ERRORS_VARIABLE } from './error';
 import validators from './validators';

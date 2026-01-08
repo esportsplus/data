@@ -1,4 +1,4 @@
-import { PACKAGE } from '~/constants';
+import { PACKAGE_NAME } from '~/constants';
 import type { ValidatorFunction } from '~/types';
 
 
@@ -24,7 +24,7 @@ const min = (number: number, error?: string): ValidatorFunction<unknown> => {
             }
         }
         else {
-            throw new Error(`${PACKAGE}: min validator can only be applied to number, string, or array types`);
+            throw new Error(`${PACKAGE_NAME}: min validator can only be applied to number, string, or array types`);
         }
     };
 };

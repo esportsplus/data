@@ -1,4 +1,4 @@
-const PACKAGE = '@esportsplus/data';
+const PACKAGE_NAME = '@esportsplus/data';
 
 
-export { PACKAGE };
+export { PACKAGE_NAME };

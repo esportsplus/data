@@ -1,4 +1,4 @@
-import { PACKAGE } from '~/constants';
+import { PACKAGE_NAME } from '~/constants';
 import type { ValidatorFunction } from '~/types';
 
 
@@ -24,7 +24,7 @@ const range = (min: number, max: number, error?: string): ValidatorFunction<unkn
             }
         }
         else {
-            throw new Error(`${PACKAGE}: range validator can only be applied to number, string, or array types`);
+            throw new Error(`${PACKAGE_NAME}: range validator can only be applied to number, string, or array types`);
         }
     };
 };

@@ -1,4 +1,4 @@
-import type { AnalyzedProperty, AnalyzedType } from '~/compiler/type-analyzer';
+import type { AnalyzedProperty, AnalyzedType } from '../type-analyzer';
 
 
 type RuntimeNeeds = {

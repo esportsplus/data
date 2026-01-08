@@ -1,4 +1,4 @@
-import { PACKAGE } from './constants';
+import { PACKAGE_NAME } from './constants';
 
 
 interface Codec<T> {
@@ -9,7 +9,7 @@ interface Codec<T> {
 
 function codec<T>(_defaults?: Partial<T>): Codec<T> {
     throw new Error(
-        `${PACKAGE}: codec<T>() must be transformed at compile-time. ` +
+        `${PACKAGE_NAME}: codec<T>() must be transformed at compile-time. ` +
         'Ensure the validation plugin is configured in your build tool.'
     );
 }

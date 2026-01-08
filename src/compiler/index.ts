@@ -1,8 +1,8 @@
 import type { ImportIntent, ReplacementIntent, TransformContext } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
 import { imports } from '@esportsplus/typescript/compiler';
-import { analyzeType } from '~/compiler/type-analyzer';
-import { PACKAGE } from '~/constants';
+import { PACKAGE_NAME } from '../constants';
+import { analyzeType } from './type-analyzer';
 import { default as validators, type BrandedValidator } from './validators';
 import { transformCodec } from './proto';
 import { generateValidator } from './validator';
@@ -103,7 +103,7 @@ function visit(
 
         // Direct call: codec<T>() or aliasedCodec<T>()
         if (ts.isIdentifier(expr)) {
-            if (imports.inPackage(checker, expr, PACKAGE, 'codec', packageImports)) {
+            if (imports.inPackage(checker, expr, PACKAGE_NAME, 'codec', packageImports)) {
                 callType = 'codec';
                 traceNode = expr;
             }
@@ -114,14 +114,14 @@ function visit(
 
             // validator.build<T>() or aliasedValidator.build<T>()
             if (methodName === 'build' && ts.isIdentifier(expr.expression)) {
-                if (imports.inPackage(checker, expr.expression, PACKAGE, 'validator', packageImports)) {
+                if (imports.inPackage(checker, expr.expression, PACKAGE_NAME, 'validator', packageImports)) {
                     callType = 'validator.build';
                     traceNode = expr.expression;
                 }
             }
             // ns.codec<T>() - namespace import
             else if (methodName === 'codec' && ts.isIdentifier(expr.expression)) {
-                if (imports.inPackage(checker, expr.name, PACKAGE, 'codec', packageImports)) {
+                if (imports.inPackage(checker, expr.name, PACKAGE_NAME, 'codec', packageImports)) {
                     callType = 'codec';
                     traceNode = expr.name;
                 }
@@ -131,7 +131,7 @@ function visit(
                 let inner = expr.expression;
 
                 if (inner.name.text === 'validator' && ts.isIdentifier(inner.expression)) {
-                    if (imports.inPackage(checker, inner.name, PACKAGE, 'validator', packageImports)) {
+                    if (imports.inPackage(checker, inner.name, PACKAGE_NAME, 'validator', packageImports)) {
                         callType = 'validator.build';
                         traceNode = inner.name;
                     }
@@ -171,15 +171,14 @@ function visit(
 export default {
     patterns: ['codec<', 'codec(', 'validator.build', 'validator', '.codec', '.build'],
     transform: (ctx: TransformContext) => {
-        if (imports.find(ctx.sourceFile, PACKAGE).length === 0) {
+        let found = imports.find(ctx.sourceFile, PACKAGE_NAME);
+
+        if (found.length === 0) {
             return {};
         }
 
         let detected = new Map<ts.CallExpression, DetectedCall>(),
             packageImports = new Set<string>();
-
-        // Cache package imports for fallback detection
-        let found = imports.find(ctx.sourceFile, PACKAGE);
 
         for (let i = 0, n = found.length; i < n; i++) {
             for (let [, alias] of found[i].specifiers) {
@@ -215,7 +214,7 @@ export default {
 
         if (remove.length > 0) {
             intents.push({
-                package: PACKAGE,
+                package: PACKAGE_NAME,
                 remove
             });
         }

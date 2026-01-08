@@ -1,5 +1,5 @@
 import { WIRE_TYPE_32BIT, WIRE_TYPE_64BIT, WIRE_TYPE_LENGTH_DELIMITED, WIRE_TYPE_VARINT, getProtoFieldInfo } from './type-mapper';
-import type { AnalyzedProperty, AnalyzedType } from '~/compiler/type-analyzer';
+import type { AnalyzedProperty, AnalyzedType } from '../type-analyzer';
 import type { MappedField } from './field-mapper';
 import { mapFields } from './field-mapper';
 

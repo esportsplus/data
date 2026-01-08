@@ -9,7 +9,9 @@ function resolvePath(mode: PathMode): string {
     let parts = mode.path;
 
     if (mode.kind === 'static') {
-        return parts.length === 0 ? "''" : `'${parts.join('.')}'`;
+        return parts.length === 0
+            ? "''"
+            : `'${parts.join('.')}'`;
     }
 
     let key = mode.key;

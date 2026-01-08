@@ -54,10 +54,10 @@ The library requires a build-time transformer. Choose one based on your setup:
 ```typescript
 // vite.config.ts
 import { defineConfig } from 'vite';
-import { plugin } from '@esportsplus/data';
+import data from '@esportsplus/data/compiler/vite';
 
 export default defineConfig({
-    plugins: [plugin()]
+    plugins: [data]
 });
 ```
 
@@ -75,7 +75,7 @@ npx ts-patch install
 {
     "compilerOptions": {
         "plugins": [
-            { "transform": "@esportsplus/data/transformer" }
+            { "transform": "@esportsplus/data/compiler/tsc" }
         ]
     }
 }
