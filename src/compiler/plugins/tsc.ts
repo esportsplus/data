@@ -1,4 +1,5 @@
+import { plugin } from '@esportsplus/typescript/compiler';
 import data from '..';
 
 
-export default data;
+export default plugin.tsc([data]);

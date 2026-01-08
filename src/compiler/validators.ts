@@ -53,7 +53,7 @@ function parse(node: ts.CallExpression, checker: ts.TypeChecker): BrandedValidat
     let isAsync = !!fn.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword);
 
     if (!isAsync && fn.body) {
-        isAsync = ast.hasMatch(fn.body, ts.isAwaitExpression);
+        isAsync = ast.test(fn.body, ts.isAwaitExpression);
     }
 
     return { async: isAsync, body: fn.body.getText(), brand };

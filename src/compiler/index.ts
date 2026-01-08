@@ -90,12 +90,7 @@ function transform(call: DetectedCall, ctx: TransformContext, validators: Map<st
     }
 }
 
-function visit(
-    calls: Map<ts.CallExpression, DetectedCall>,
-    checker: ts.TypeChecker,
-    node: ts.Node,
-    packageImports: Set<string>
-): void {
+function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChecker, node: ts.Node): void {
     if (ts.isCallExpression(node) && node.typeArguments && node.typeArguments.length > 0) {
         let expr = node.expression,
             callType: CallType | null = null,
@@ -103,7 +98,7 @@ function visit(
 
         // Direct call: codec<T>() or aliasedCodec<T>()
         if (ts.isIdentifier(expr)) {
-            if (imports.inPackage(checker, expr, PACKAGE_NAME, 'codec', packageImports)) {
+            if (imports.includes(checker, expr, PACKAGE_NAME, 'codec')) {
                 callType = 'codec';
                 traceNode = expr;
             }
@@ -114,14 +109,14 @@ function visit(
 
             // validator.build<T>() or aliasedValidator.build<T>()
             if (methodName === 'build' && ts.isIdentifier(expr.expression)) {
-                if (imports.inPackage(checker, expr.expression, PACKAGE_NAME, 'validator', packageImports)) {
+                if (imports.includes(checker, expr.expression, PACKAGE_NAME, 'validator')) {
                     callType = 'validator.build';
                     traceNode = expr.expression;
                 }
             }
             // ns.codec<T>() - namespace import
             else if (methodName === 'codec' && ts.isIdentifier(expr.expression)) {
-                if (imports.inPackage(checker, expr.name, PACKAGE_NAME, 'codec', packageImports)) {
+                if (imports.includes(checker, expr.name, PACKAGE_NAME, 'codec')) {
                     callType = 'codec';
                     traceNode = expr.name;
                 }
@@ -131,7 +126,7 @@ function visit(
                 let inner = expr.expression;
 
                 if (inner.name.text === 'validator' && ts.isIdentifier(inner.expression)) {
-                    if (imports.inPackage(checker, inner.name, PACKAGE_NAME, 'validator', packageImports)) {
+                    if (imports.includes(checker, inner.name, PACKAGE_NAME, 'validator')) {
                         callType = 'validator.build';
                         traceNode = inner.name;
                     }
@@ -164,29 +159,22 @@ function visit(
         }
     }
 
-    ts.forEachChild(node, n => visit(calls, checker, n, packageImports));
+    ts.forEachChild(node, n => visit(calls, checker, n));
 }
 
 
 export default {
     patterns: ['codec<', 'codec(', 'validator.build', 'validator', '.codec', '.build'],
     transform: (ctx: TransformContext) => {
-        let found = imports.find(ctx.sourceFile, PACKAGE_NAME);
+        let found = imports.all(ctx.sourceFile, PACKAGE_NAME);
 
         if (found.length === 0) {
             return {};
         }
 
-        let detected = new Map<ts.CallExpression, DetectedCall>(),
-            packageImports = new Set<string>();
+        let detected = new Map<ts.CallExpression, DetectedCall>();
 
-        for (let i = 0, n = found.length; i < n; i++) {
-            for (let [, alias] of found[i].specifiers) {
-                packageImports.add(alias);
-            }
-        }
-
-        visit(detected, ctx.checker, ctx.sourceFile, packageImports);
+        visit(detected, ctx.checker, ctx.sourceFile);
 
         if (detected.size === 0) {
             return {};
