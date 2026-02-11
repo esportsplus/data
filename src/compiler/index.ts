@@ -192,10 +192,10 @@ export default {
                 node: call.node
             });
 
-            if (call.callType === 'codec' && remove.indexOf('codec') !== -1) {
+            if (call.callType === 'codec' && remove.indexOf('codec') === -1) {
                 remove.push('codec');
             }
-            else if (call.callType === 'validator.build' && remove.indexOf('validator') !== -1) {
+            else if (call.callType === 'validator.build' && remove.indexOf('validator') === -1) {
                 remove.push('validator');
             }
         }
@@ -209,4 +209,4 @@ export default {
 
         return { imports: intents, replacements };
     }
-};;
+};

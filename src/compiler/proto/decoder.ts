@@ -26,11 +26,13 @@ const SKIP_UNKNOWN_FIELD = `
 `;
 
 
-let decoderCount = 0,
-    nestedDecoders: string[] = [];
+type DecoderState = {
+    count: number;
+    nested: string[];
+};
 
 
-function generateArrayDecode(field: MappedField, resultVar: string): string {
+function generateArrayDecode(state: DecoderState, field: MappedField, resultVar: string): string {
     let itemType = field.property.itemType!;
 
     if (getProtoFieldInfo(field.property).packed) {
@@ -141,7 +143,7 @@ function generateArrayDecode(field: MappedField, resultVar: string): string {
 
         case 'object':
             if (itemType.properties && itemType.properties.length > 0) {
-                let decoderName = generateNestedDecoder(itemType.properties);
+                let decoderName = generateNestedDecoder(state, itemType.properties);
 
                 return `
                     let [_len, _newOff] = _readVarint(_buffer, _offset);
@@ -162,11 +164,11 @@ function generateArrayDecode(field: MappedField, resultVar: string): string {
     }
 }
 
-function generateFieldDecode(field: MappedField, resultVar: string): string {
+function generateFieldDecode(state: DecoderState, field: MappedField, resultVar: string): string {
     let prop = field.property;
 
     if (prop.type === 'array') {
-        return generateArrayDecode(field, `${resultVar}['${field.name}']`);
+        return generateArrayDecode(state, field, `${resultVar}['${field.name}']`);
     }
 
     switch (field.wireType) {
@@ -223,7 +225,7 @@ function generateFieldDecode(field: MappedField, resultVar: string): string {
             }
 
             if (prop.type === 'object' && prop.properties && prop.properties.length > 0) {
-                let decoderName = generateNestedDecoder(prop.properties);
+                let decoderName = generateNestedDecoder(state, prop.properties);
 
                 return `
                     let [_len, _newOff] = _readVarint(_buffer, _offset);
@@ -245,6 +247,7 @@ function generateFieldDecode(field: MappedField, resultVar: string): string {
 }
 
 function processDecoderFields(
+    state: DecoderState,
     fields: MappedField[],
     resultVar: string
 ): { caseParts: string[]; initParts: string[] } {
@@ -260,7 +263,7 @@ function processDecoderFields(
 
         caseParts.push(`
             case ${field.tag}: {
-                ${generateFieldDecode(field, resultVar)}
+                ${generateFieldDecode(state, field, resultVar)}
                 break;
             }
         `);
@@ -269,11 +272,11 @@ function processDecoderFields(
     return { caseParts, initParts };
 }
 
-function generateNestedDecoder(properties: AnalyzedProperty[]): string {
-    let { caseParts, initParts } = processDecoderFields(mapFields(properties), '_result'),
-        name = `_dec${decoderCount++}`;
+function generateNestedDecoder(state: DecoderState, properties: AnalyzedProperty[]): string {
+    let { caseParts, initParts } = processDecoderFields(state, mapFields(properties), '_result'),
+        name = `_dec${state.count++}`;
 
-    nestedDecoders.push(`
+    state.nested.push(`
         function ${name}(_buffer, _offset, _end) {
             let _result = { ${initParts.join(', ')} };
 
@@ -298,14 +301,12 @@ function generateNestedDecoder(properties: AnalyzedProperty[]): string {
 
 
 const generateDecoder = (type: AnalyzedType): string => {
-    nestedDecoders = [];
-    decoderCount = 0;
-
-    let { caseParts, initParts } = processDecoderFields(mapFields(type.properties), '_result');
+    let state: DecoderState = { count: 0, nested: [] },
+        { caseParts, initParts } = processDecoderFields(state, mapFields(type.properties), '_result');
 
     return `
         ((_buffer) => {
-            ${nestedDecoders.join('\n')}
+            ${state.nested.join('\n')}
 
             let _result = { ${initParts.join(', ')} },
                 _offset = 0,

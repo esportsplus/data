@@ -249,10 +249,6 @@ describe('Codec Encode/Decode', () => {
         });
     });
 
-    // Note: Multi-property codec has a known issue with varname name collision
-    // in generated code. Single-property types work correctly.
-    // TODO: Fix codec generator to use unique varname names for each property
-
     describe('buffer output', () => {
         it('produces Uint8Array output', () => {
             let codec = createCodec<{ value: string }>(`

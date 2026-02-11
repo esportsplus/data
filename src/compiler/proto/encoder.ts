@@ -1,14 +1,19 @@
-import { WIRE_TYPE_32BIT, WIRE_TYPE_64BIT, WIRE_TYPE_LENGTH_DELIMITED, WIRE_TYPE_VARINT, getProtoFieldInfo } from './type-mapper';
 import type { AnalyzedProperty, AnalyzedType } from '../type-analyzer';
 import type { MappedField } from './field-mapper';
 import { mapFields } from './field-mapper';
+import {
+    WIRE_TYPE_32BIT, WIRE_TYPE_64BIT, WIRE_TYPE_LENGTH_DELIMITED, WIRE_TYPE_VARINT,
+    getProtoFieldInfo
+} from './type-mapper';
 
 
-let encoderCount = 0,
-    nestedEncoders: string[] = [];
+type EncoderState = {
+    count: number;
+    nested: string[];
+};
 
 
-function generateArraySizeCalc(field: MappedField, accessor: string): string {
+function generateArraySizeCalc(state: EncoderState, field: MappedField, accessor: string): string {
     let itemType = field.property.itemType!;
 
     if (getProtoFieldInfo(field.property).packed) {
@@ -83,14 +88,17 @@ function generateArraySizeCalc(field: MappedField, accessor: string): string {
 
         case 'object':
             if (itemType.properties && itemType.properties.length > 0) {
-                let encoderName = generateNestedEncoder(itemType.properties);
+                let encoderName = generateNestedEncoder(state, itemType.properties);
 
                 return `
                     // field ${field.fieldNumber}: repeated message
-                    for (let _i = 0, _n = ${accessor}.length; _i < _n; _i++) {
-                        let _ms = ${encoderName}_size(${accessor}[_i]);
+                    let _mba${field.fieldNumber} = new Array(${accessor}.length);
 
-                        _size += 1 + _varintSize(_ms) + _ms;
+                    for (let _i = 0, _n = ${accessor}.length; _i < _n; _i++) {
+                        let _mb = ${encoderName}(${accessor}[_i]);
+
+                        _mba${field.fieldNumber}[_i] = _mb;
+                        _size += 1 + _varintSize(_mb.length) + _mb.length;
                     }
                 `;
             }
@@ -102,7 +110,7 @@ function generateArraySizeCalc(field: MappedField, accessor: string): string {
     }
 }
 
-function generateArrayWrite(field: MappedField, accessor: string): string {
+function generateArrayWrite(_state: EncoderState, field: MappedField, accessor: string): string {
     let itemType = field.property.itemType!;
 
     if (getProtoFieldInfo(field.property).packed) {
@@ -200,17 +208,15 @@ function generateArrayWrite(field: MappedField, accessor: string): string {
 
         case 'object':
             if (itemType.properties && itemType.properties.length > 0) {
-                let encoderName = generateNestedEncoder(itemType.properties);
-
                 return `
                     // field ${field.fieldNumber}: repeated message
-                    for (let _i = 0, _n = ${accessor}.length; _i < _n; _i++) {
+                    for (let _i = 0, _n = _mba${field.fieldNumber}.length; _i < _n; _i++) {
+                        let _mb = _mba${field.fieldNumber}[_i];
+
                         _buffer[_offset++] = ${field.tag};
-
-                        let _ms = ${encoderName}_size(${accessor}[_i]);
-
-                        _offset = _writeVarint(_buffer, _offset, _ms);
-                        _offset = ${encoderName}_write(_buffer, _offset, ${accessor}[_i]);
+                        _offset = _writeVarint(_buffer, _offset, _mb.length);
+                        _buffer.set(_mb, _offset);
+                        _offset += _mb.length;
                     }
                 `;
             }
@@ -222,11 +228,11 @@ function generateArrayWrite(field: MappedField, accessor: string): string {
     }
 }
 
-function generateFieldSizeCalc(field: MappedField, accessor: string): string {
+function generateFieldSizeCalc(state: EncoderState, field: MappedField, accessor: string): string {
     let prop = field.property;
 
     if (prop.type === 'array') {
-        return generateArraySizeCalc(field, accessor);
+        return generateArraySizeCalc(state, field, accessor);
     }
 
     switch (field.wireType) {
@@ -275,9 +281,9 @@ function generateFieldSizeCalc(field: MappedField, accessor: string): string {
             if (prop.type === 'object' && prop.properties && prop.properties.length > 0) {
                 return `
                     // field ${field.fieldNumber}: message
-                    let _ms${field.fieldNumber} = ${generateNestedEncoder(prop.properties)}_size(${accessor});
+                    let _mb${field.fieldNumber} = ${generateNestedEncoder(state, prop.properties)}(${accessor});
 
-                    _size += 1 + _varintSize(_ms${field.fieldNumber}) + _ms${field.fieldNumber};
+                    _size += 1 + _varintSize(_mb${field.fieldNumber}.length) + _mb${field.fieldNumber}.length;
                 `;
             }
 
@@ -288,11 +294,11 @@ function generateFieldSizeCalc(field: MappedField, accessor: string): string {
     }
 }
 
-function generateFieldWrite(field: MappedField, accessor: string): string {
+function generateFieldWrite(state: EncoderState, field: MappedField, accessor: string): string {
     let prop = field.property;
 
     if (prop.type === 'array') {
-        return generateArrayWrite(field, accessor);
+        return generateArrayWrite(state, field, accessor);
     }
 
     switch (field.wireType) {
@@ -345,17 +351,14 @@ function generateFieldWrite(field: MappedField, accessor: string): string {
                 `;
             }
 
+            // Reuse cached buffer from size calculation phase
             if (prop.type === 'object' && prop.properties && prop.properties.length > 0) {
-                let encoderName = generateNestedEncoder(prop.properties);
-
                 return `
                     // field ${field.fieldNumber}: message
                     _buffer[_offset++] = ${field.tag};
-
-                    let _ms${field.fieldNumber} = ${encoderName}_size(${accessor});
-
-                    _offset = _writeVarint(_buffer, _offset, _ms${field.fieldNumber});
-                    _offset = ${encoderName}_write(_buffer, _offset, ${accessor});
+                    _offset = _writeVarint(_buffer, _offset, _mb${field.fieldNumber}.length);
+                    _buffer.set(_mb${field.fieldNumber}, _offset);
+                    _offset += _mb${field.fieldNumber}.length;
                 `;
             }
 
@@ -367,6 +370,7 @@ function generateFieldWrite(field: MappedField, accessor: string): string {
 }
 
 function processFields(
+    state: EncoderState,
     fields: MappedField[],
     accessor: (name: string) => string
 ): { sizeCalcParts: string[]; writeParts: string[] } {
@@ -376,8 +380,8 @@ function processFields(
     for (let i = 0, n = fields.length; i < n; i++) {
         let field = fields[i],
             fieldAccessor = accessor(field.name),
-            sizeCode = generateFieldSizeCalc(field, fieldAccessor),
-            writeCode = generateFieldWrite(field, fieldAccessor);
+            sizeCode = generateFieldSizeCalc(state, field, fieldAccessor),
+            writeCode = generateFieldWrite(state, field, fieldAccessor);
 
         if (field.optional) {
             if (sizeCode) {
@@ -410,23 +414,22 @@ function processFields(
     return { sizeCalcParts, writeParts };
 }
 
-function generateNestedEncoder(properties: AnalyzedProperty[]): string {
-    let { sizeCalcParts, writeParts } = processFields(mapFields(properties), (n) => `_d['${n}']`),
-        name = `_enc${encoderCount++}`;
+function generateNestedEncoder(state: EncoderState, properties: AnalyzedProperty[]): string {
+    let { sizeCalcParts, writeParts } = processFields(state, mapFields(properties), (n) => `_d['${n}']`),
+        name = `_enc${state.count++}`;
 
-    nestedEncoders.push(`
-        function ${name}_size(_d) {
+    state.nested.push(`
+        function ${name}(_d) {
             let _size = 0;
 
             ${sizeCalcParts.join('\n')}
 
-            return _size;
-        }
+            let _buffer = new Uint8Array(_size),
+                _offset = 0;
 
-        function ${name}_write(_buffer, _offset, _d) {
             ${writeParts.join('\n')}
 
-            return _offset;
+            return _buffer;
         }
     `);
 
@@ -435,14 +438,12 @@ function generateNestedEncoder(properties: AnalyzedProperty[]): string {
 
 
 const generateEncoder = (type: AnalyzedType): string => {
-    nestedEncoders = [];
-    encoderCount = 0;
-
-    let { sizeCalcParts, writeParts } = processFields(mapFields(type.properties), (n) => `_data['${n}']`);
+    let state: EncoderState = { count: 0, nested: [] },
+        { sizeCalcParts, writeParts } = processFields(state, mapFields(type.properties), (n) => `_data['${n}']`);
 
     return `
         ((_data) => {
-            ${nestedEncoders.join('\n')}
+            ${state.nested.join('\n')}
 
             let _size = 0;
 
