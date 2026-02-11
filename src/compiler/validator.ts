@@ -72,10 +72,11 @@ function buildLiteralChecks(varname: string, literals: LiteralValue[]): string[]
     let checks: string[] = [];
 
     for (let i = 0, n = literals.length; i < n; i++) {
-        let lit = literals[i];
+        let lit = literals[i],
+            value = String(lit.value);
 
         checks.push(
-            code`${varname} !== ${lit.type === 'string' ? `'${code.escape(String(lit.value))}'` : String(lit.value)}`
+            code`${varname} !== ${lit.type === 'string' ? `'${code.escape(value)}'` : value}`
         );
     }
 
