@@ -53,6 +53,7 @@
         "prepare": "pnpm build",
         "prepublishOnly": "pnpm build",
         "--": "--",
+        "bench": "vitest bench",
         "test": "vitest run"
     },
     "sideEffects": false,
