@@ -11,6 +11,7 @@ export default defineConfig({
     test: {
         environment: 'node',
         globals: true,
-        include: ['tests/**/*.test.ts']
+        exclude: ['tests/compile-validators.ts', 'tests/utils.ts'],
+        include: ['tests/**/*.ts']
     }
 });
