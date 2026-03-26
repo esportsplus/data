@@ -10,7 +10,7 @@ export default defineConfig({
     },
     test: {
         benchmark: {
-            include: ['benchmarks/**/*.bench.ts']
+            include: ['tests/bench/**/*.ts']
         }
     }
 });
