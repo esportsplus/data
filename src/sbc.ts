@@ -6,6 +6,220 @@ function getTypedArrayType(_value: unknown): number { return -1; }
 function encodeTypedArray(_value: unknown): Uint8Array { return new Uint8Array(0); }
 
 
+let isNode = typeof Buffer !== 'undefined',
+    textDecoder = new TextDecoder(),
+    textEncoder = new TextEncoder();
+
+
+// Buffer/DataView abstraction — decided once at module load, no branching per call.
+
+let allocBuf: (n: number) => Uint8Array = isNode
+    ? Buffer.alloc.bind(Buffer) as (n: number) => Uint8Array
+    : (n) => new Uint8Array(n);
+
+let allocUnsafe: (n: number) => Uint8Array = isNode
+    ? Buffer.allocUnsafe.bind(Buffer) as (n: number) => Uint8Array
+    : (n) => new Uint8Array(n);
+
+let byteLen: (str: string) => number = isNode
+    ? Buffer.byteLength.bind(Buffer) as (str: string) => number
+    : (str) => textEncoder.encode(str).length;
+
+let copyBuf: (src: Uint8Array, dst: Uint8Array, dstOffset: number, srcStart: number, srcEnd: number) => void = isNode
+    ? (src, dst, dstOffset, srcStart, srcEnd) => (src as Buffer).copy(dst as Buffer, dstOffset, srcStart, srcEnd)
+    : (src, dst, dstOffset, srcStart, srcEnd) => dst.set(src.subarray(srcStart, srcEnd), dstOffset);
+
+let fromUtf8: (str: string) => Uint8Array = isNode
+    ? (str) => Buffer.from(str, 'utf8')
+    : (str) => textEncoder.encode(str);
+
+// Instance methods — use .call(buf, ...) at call sites. No wrappers.
+// Reads: readF64.call(buf, off). Writes: writeF64.call(buf, val, off).
+let readBI64: ((off: number) => bigint) = isNode
+    ? Buffer.prototype.readBigInt64LE
+    : function (this: Uint8Array, off: number) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getBigInt64(off, true); };
+
+let readF64: ((off: number) => number) = isNode
+    ? Buffer.prototype.readDoubleLE
+    : function (this: Uint8Array, off: number) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getFloat64(off, true); };
+
+let readI16: ((off: number) => number) = isNode
+    ? Buffer.prototype.readInt16LE
+    : function (this: Uint8Array, off: number) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getInt16(off, true); };
+
+let readI32: ((off: number) => number) = isNode
+    ? Buffer.prototype.readInt32LE
+    : function (this: Uint8Array, off: number) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getInt32(off, true); };
+
+let readU16: ((off: number) => number) = isNode
+    ? Buffer.prototype.readUInt16LE
+    : function (this: Uint8Array, off: number) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getUint16(off, true); };
+
+let readU32: ((off: number) => number) = isNode
+    ? Buffer.prototype.readUInt32LE
+    : function (this: Uint8Array, off: number) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getUint32(off, true); };
+
+let readUtf8: ((start: number, end: number) => string) = isNode
+    ? (Buffer.prototype as unknown as { utf8Slice: (start: number, end: number) => string }).utf8Slice
+    : function (this: Uint8Array, start: number, end: number) { return textDecoder.decode(this.subarray(start, end)); };
+
+let toUtf8: (buf: Uint8Array) => string = isNode
+    ? (buf) => Buffer.from(buf).toString('utf8')
+    : (buf) => textDecoder.decode(buf);
+
+let writeBI64: ((val: bigint, off: number) => void) = isNode
+    ? Buffer.prototype.writeBigInt64LE as unknown as (val: bigint, off: number) => void
+    : function (this: Uint8Array, val: bigint, off: number) { new DataView(this.buffer, this.byteOffset, this.byteLength).setBigInt64(off, val, true); };
+
+let writeF64: ((val: number, off: number) => void) = isNode
+    ? Buffer.prototype.writeDoubleLE as unknown as (val: number, off: number) => void
+    : function (this: Uint8Array, val: number, off: number) { new DataView(this.buffer, this.byteOffset, this.byteLength).setFloat64(off, val, true); };
+
+let writeI16: ((val: number, off: number) => void) = isNode
+    ? Buffer.prototype.writeInt16LE as unknown as (val: number, off: number) => void
+    : function (this: Uint8Array, val: number, off: number) { new DataView(this.buffer, this.byteOffset, this.byteLength).setInt16(off, val, true); };
+
+let writeI32: ((val: number, off: number) => void) = isNode
+    ? Buffer.prototype.writeInt32LE as unknown as (val: number, off: number) => void
+    : function (this: Uint8Array, val: number, off: number) { new DataView(this.buffer, this.byteOffset, this.byteLength).setInt32(off, val, true); };
+
+let writeU16: ((val: number, off: number) => void) = isNode
+    ? Buffer.prototype.writeUInt16LE as unknown as (val: number, off: number) => void
+    : function (this: Uint8Array, val: number, off: number) { new DataView(this.buffer, this.byteOffset, this.byteLength).setUint16(off, val, true); };
+
+let writeU32: ((val: number, off: number) => void) = isNode
+    ? Buffer.prototype.writeUInt32LE as unknown as (val: number, off: number) => void
+    : function (this: Uint8Array, val: number, off: number) { new DataView(this.buffer, this.byteOffset, this.byteLength).setUint32(off, val, true); };
+
+let writeUtf8: ((str: string, off: number, len: number) => number) = isNode
+    ? (Buffer.prototype as unknown as { utf8Write: (str: string, off: number, len: number) => number }).utf8Write
+    : function (this: Uint8Array, str: string, off: number, len: number) { return textEncoder.encodeInto(str, this.subarray(off, off + len)).written!; };
+
+
+// Codegen expression helpers — emit direct Buffer calls on Node, helper calls on browser.
+// This ensures zero overhead on the Node path (V8 inlines Buffer methods).
+
+function cgReadBI64(off: string): string {
+    if (isNode) {
+        return 'buf.readBigInt64LE(' + off + ')';
+    }
+
+    return '$rbi64(buf,' + off + ')';
+}
+
+function cgReadF64(off: string): string {
+    if (isNode) {
+        return 'buf.readDoubleLE(' + off + ')';
+    }
+
+    return '$rf64(buf,' + off + ')';
+}
+
+function cgReadI16(off: string): string {
+    if (isNode) {
+        return 'buf.readInt16LE(' + off + ')';
+    }
+
+    return '$ri16(buf,' + off + ')';
+}
+
+function cgReadI32(off: string): string {
+    if (isNode) {
+        return 'buf.readInt32LE(' + off + ')';
+    }
+
+    return '$ri32(buf,' + off + ')';
+}
+
+function cgReadU16(off: string): string {
+    if (isNode) {
+        return 'buf.readUInt16LE(' + off + ')';
+    }
+
+    return '$ru16(buf,' + off + ')';
+}
+
+function cgReadU32(off: string): string {
+    if (isNode) {
+        return 'buf.readUInt32LE(' + off + ')';
+    }
+
+    return '$ru32(buf,' + off + ')';
+}
+
+function cgReadUtf8(start: string, end: string): string {
+    if (isNode) {
+        return 'buf.utf8Slice(' + start + ',' + end + ')';
+    }
+
+    return '$utf8r(buf,' + start + ',' + end + ')';
+}
+
+function cgWriteBI64(off: string, val: string): string {
+    if (isNode) {
+        return 'buf.writeBigInt64LE(' + val + ',' + off + ')';
+    }
+
+    return '$wbi64(buf,' + off + ',' + val + ')';
+}
+
+function cgWriteF64(off: string, val: string): string {
+    if (isNode) {
+        return 'buf.writeDoubleLE(' + val + ',' + off + ')';
+    }
+
+    return '$wf64(buf,' + off + ',' + val + ')';
+}
+
+function cgWriteI16(off: string, val: string): string {
+    if (isNode) {
+        return 'buf.writeInt16LE(' + val + ',' + off + ')';
+    }
+
+    return '$wi16(buf,' + off + ',' + val + ')';
+}
+
+function cgWriteI32(off: string, val: string): string {
+    if (isNode) {
+        return 'buf.writeInt32LE(' + val + ',' + off + ')';
+    }
+
+    return '$wi32(buf,' + off + ',' + val + ')';
+}
+
+function cgWriteU16(off: string, val: string): string {
+    if (isNode) {
+        return 'buf.writeUInt16LE(' + val + ',' + off + ')';
+    }
+
+    return '$wu16(buf,' + off + ',' + val + ')';
+}
+
+function cgWriteU32(off: string, val: string): string {
+    if (isNode) {
+        return 'buf.writeUInt32LE(' + val + ',' + off + ')';
+    }
+
+    return '$wu32(buf,' + off + ',' + val + ')';
+}
+
+function cgWriteUtf8(str: string, off: string, len: string): string {
+    if (isNode) {
+        return 'buf.utf8Write(' + str + ',' + off + ',' + len + ')';
+    }
+
+    return '$utf8w(buf,' + str + ',' + off + ',' + len + ')';
+}
+
+function cgByteLen(str: string): string {
+    if (isNode) {
+        return 'Buffer.byteLength(' + str + ')';
+    }
+
+    return '$byteLen(' + str + ')';
+}
+
+
 interface SchemaStoreInterface {
     get(hash: number): Schema | null;
     has(hash: number): boolean;
@@ -46,11 +260,11 @@ type NullableFieldType = { inner: FieldType; kind: 'nullable' };
 type ObjectFieldType = { kind: 'object'; schemaId: number };
 
 interface Schema {
-    compressedDecodeFn: ((buf: Buffer, pos: number) => unknown) | null;
-    compressedEncodeFn: ((obj: unknown, buf: Buffer, pos: number) => number) | null;
+    compressedDecodeFn: ((buf: Uint8Array, pos: number) => unknown) | null;
+    compressedEncodeFn: ((obj: unknown, buf: Uint8Array, pos: number) => number) | null;
     compressible: boolean;
-    decodeFn: ((buf: Buffer, pos: number) => unknown) | null;
-    encodeFn: ((obj: unknown, buf: Buffer, pos: number) => number) | null;
+    decodeFn: ((buf: Uint8Array, pos: number) => unknown) | null;
+    encodeFn: ((obj: unknown, buf: Uint8Array, pos: number) => number) | null;
     fields: FieldDef[];
     fixedSize: number;
     hash: number;
@@ -59,8 +273,12 @@ interface Schema {
 }
 
 interface SchemaRegistry {
+    constructorCache: WeakMap<Function, Schema>;
+    lastFieldKey: string;
+    lastSchema: Schema | null;
     nextId: number;
     schemas: Map<number, Schema>;
+    schemasByCount: Map<number, Schema[]>;
     schemasByHash: Map<number, Schema>;
 }
 
@@ -146,7 +364,7 @@ function isSignedIntType(type: string): boolean {
     return type === 'int16' || type === 'int32';
 }
 
-function readVarint(buf: Buffer, pos: number): void {
+function readVarint(buf: Uint8Array, pos: number): void {
     let byte = buf[pos]!,
         result = byte & 0x7F,
         shift = 7;
@@ -161,14 +379,14 @@ function readVarint(buf: Buffer, pos: number): void {
     varintResult.value = result;
 }
 
-function readZigzag(buf: Buffer, pos: number): void {
+function readZigzag(buf: Uint8Array, pos: number): void {
     readVarint(buf, pos);
     let v = varintResult.value;
 
     varintResult.value = (v >>> 1) ^ -(v & 1);
 }
 
-function writeVarint(buf: Buffer, pos: number, value: number): number {
+function writeVarint(buf: Uint8Array, pos: number, value: number): number {
     value = value >>> 0;
 
     while (value > 0x7F) {
@@ -181,11 +399,17 @@ function writeVarint(buf: Buffer, pos: number, value: number): number {
     return pos;
 }
 
-function writeZigzag(buf: Buffer, pos: number, value: number): number {
+function writeZigzag(buf: Uint8Array, pos: number, value: number): number {
     return writeVarint(buf, pos, (value << 1) ^ (value >> 31));
 }
 
-function compileCompressedDecoder(schema: Schema, registry: SchemaRegistry, helpers?: { decodeSbc?: (buf: Buffer, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Buffer, pos: number) => number }, internFields?: Set<string>, internDecode?: (buf: Buffer, pos: number) => string): (buf: Buffer, pos: number) => unknown {
+// Browser-only helpers bound into compiled functions (not used on Node)
+let browserDecoderBindArgs: unknown[] = isNode ? [] : [readF64, readU16, readU32, readI16, readI32, readBI64, readUtf8],
+    browserDecoderParams: string = isNode ? '' : '$rf64,$ru16,$ru32,$ri16,$ri32,$rbi64,$utf8r,',
+    browserEncoderBindArgs: unknown[] = isNode ? [] : [writeF64, writeU16, writeU32, writeI16, writeI32, writeBI64, writeUtf8, byteLen],
+    browserEncoderParams: string = isNode ? '' : '$wf64,$wu16,$wu32,$wi16,$wi32,$wbi64,$utf8w,$byteLen,';
+
+function compileCompressedDecoder(schema: Schema, registry: SchemaRegistry, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, internFields?: Set<string>, internDecode?: (buf: Uint8Array, pos: number) => string): (buf: Uint8Array, pos: number) => unknown {
     let boolFields: FieldDef[] = [],
         float64Fields: FieldDef[] = [],
         intFields: FieldDef[] = [],
@@ -279,7 +503,7 @@ function compileCompressedDecoder(schema: Schema, registry: SchemaRegistry, help
 
         lines.push('let ' + f + 'F=buf[' + vp + '++]');
         lines.push('let ' + f);
-        lines.push('if(' + f + 'F===0){$rz(buf,' + vp + ');' + f + '=$vr.value;' + vp + '=$vr.pos}else{' + f + '=buf.readDoubleLE(' + vp + ');' + vp + '+=8}');
+        lines.push('if(' + f + 'F===0){$rz(buf,' + vp + ');' + f + '=$vr.value;' + vp + '=$vr.pos}else{' + f + '=' + cgReadF64(vp) + ';' + vp + '+=8}');
     }
 
     for (let i = 0, n = schema.fields.length; i < n; i++) {
@@ -309,16 +533,16 @@ function compileCompressedDecoder(schema: Schema, registry: SchemaRegistry, help
     lines.push('return{' + allFields.map((f) => f.name).join(',') + '}');
 
     let body = lines.join(';');
-    let $d = helpers?.decodeSbc ?? ((_buf: Buffer, _offset: number, _len: number) => null);
+    let $d = helpers?.decodeSbc ?? ((_buf: Uint8Array, _offset: number, _len: number) => null);
 
     if (internFields && internFields.size > 0 && internDecode) {
-        return new Function('$d', '$rv', '$rz', '$vr', '$sd', 'buf', 'pos', body).bind(null, $d, readVarint, readZigzag, varintResult, internDecode) as (buf: Buffer, pos: number) => unknown;
+        return new Function('$d', '$rv', '$rz', '$vr', '$sd', browserDecoderParams + 'buf', 'pos', body).bind(null, $d, readVarint, readZigzag, varintResult, internDecode, ...browserDecoderBindArgs) as (buf: Uint8Array, pos: number) => unknown;
     }
 
-    return new Function('$d', '$rv', '$rz', '$vr', 'buf', 'pos', body).bind(null, $d, readVarint, readZigzag, varintResult) as (buf: Buffer, pos: number) => unknown;
+    return new Function('$d', '$rv', '$rz', '$vr', browserDecoderParams + 'buf', 'pos', body).bind(null, $d, readVarint, readZigzag, varintResult, ...browserDecoderBindArgs) as (buf: Uint8Array, pos: number) => unknown;
 }
 
-function compileCompressedEncoder(schema: Schema, registry: SchemaRegistry, helpers?: { decodeSbc?: (buf: Buffer, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Buffer, pos: number) => number }, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Buffer, pos: number) => number): (obj: unknown, buf: Buffer, pos: number) => number {
+function compileCompressedEncoder(schema: Schema, registry: SchemaRegistry, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Uint8Array, pos: number) => number): (obj: unknown, buf: Uint8Array, pos: number) => number {
     let boolFields: FieldDef[] = [],
         float64Fields: FieldDef[] = [],
         intFields: FieldDef[] = [],
@@ -400,7 +624,7 @@ function compileCompressedEncoder(schema: Schema, registry: SchemaRegistry, help
         let f = float64Fields[i]!.name;
 
         lines.push('let ' + f + 'I=obj.' + f + '===(obj.' + f + '|0)');
-        lines.push('if(' + f + 'I){buf[' + vp + ']=0;' + vp + '++;' + vp + '=$wz(buf,' + vp + ',obj.' + f + ')}else{buf[' + vp + ']=1;' + vp + '++;buf.writeDoubleLE(obj.' + f + ',' + vp + ');' + vp + '+=8}');
+        lines.push('if(' + f + 'I){buf[' + vp + ']=0;' + vp + '++;' + vp + '=$wz(buf,' + vp + ',obj.' + f + ')}else{buf[' + vp + ']=1;' + vp + '++;' + cgWriteF64(vp, 'obj.' + f) + ';' + vp + '+=8}');
     }
 
     for (let i = 0, n = schema.fields.length; i < n; i++) {
@@ -444,26 +668,26 @@ function compileCompressedEncoder(schema: Schema, registry: SchemaRegistry, help
     lines.push('return ' + vp);
 
     let body = lines.join(';');
-    let $e = helpers?.encodeSbc ?? ((_value: unknown, buf: Buffer, pos: number) => { buf[pos] = 0; return pos + 1; });
+    let $e = helpers?.encodeSbc ?? ((_value: unknown, buf: Uint8Array, pos: number) => { buf[pos] = 0; return pos + 1; });
 
     if (internFields && internFields.size > 0 && internEncode) {
-        return new Function('$e', '$wv', '$wz', '$si', 'obj', 'buf', 'pos', body).bind(null, $e, writeVarint, writeZigzag, internEncode) as (obj: unknown, buf: Buffer, pos: number) => number;
+        return new Function('$e', '$wv', '$wz', '$si', browserEncoderParams + 'obj', 'buf', 'pos', body).bind(null, $e, writeVarint, writeZigzag, internEncode, ...browserEncoderBindArgs) as (obj: unknown, buf: Uint8Array, pos: number) => number;
     }
 
-    return new Function('$e', '$wv', '$wz', 'obj', 'buf', 'pos', body).bind(null, $e, writeVarint, writeZigzag) as (obj: unknown, buf: Buffer, pos: number) => number;
+    return new Function('$e', '$wv', '$wz', browserEncoderParams + 'obj', 'buf', 'pos', body).bind(null, $e, writeVarint, writeZigzag, ...browserEncoderBindArgs) as (obj: unknown, buf: Uint8Array, pos: number) => number;
 }
 
 function emitDecoderFixedExpr(field: FieldDef, off: string): string {
     switch (field.type) {
-        case 'bigint': return 'buf.readBigInt64LE(' + off + ')';
-        case 'date': return 'new Date(buf.readDoubleLE(' + off + '))';
-        case 'float64': return 'buf.readDoubleLE(' + off + ')';
+        case 'bigint': return cgReadBI64(off);
+        case 'date': return 'new Date(' + cgReadF64(off) + ')';
+        case 'float64': return cgReadF64(off);
         case 'int8': return '(buf[' + off + ']<<24>>24)';
-        case 'int16': return 'buf.readInt16LE(' + off + ')';
-        case 'int32': return 'buf.readInt32LE(' + off + ')';
+        case 'int16': return cgReadI16(off);
+        case 'int32': return cgReadI32(off);
         case 'uint8': return 'buf[' + off + ']';
-        case 'uint16': return 'buf.readUInt16LE(' + off + ')';
-        case 'uint32': return 'buf.readUInt32LE(' + off + ')';
+        case 'uint16': return cgReadU16(off);
+        case 'uint32': return cgReadU32(off);
         default: return '0';
     }
 }
@@ -471,7 +695,7 @@ function emitDecoderFixedExpr(field: FieldDef, off: string): string {
 function emitDeltaArrayDecoder(lines: string[], field: FieldDef, vp: string): void {
     let n = field.name;
 
-    lines.push('let ' + n + 'C=buf.readUInt16LE(' + vp + ')');
+    lines.push('let ' + n + 'C=' + cgReadU16(vp));
     lines.push(vp + '+=2');
     lines.push('let ' + n + '=new Array(' + n + 'C)');
     lines.push('if(' + n + 'C>0){$rv(buf,' + vp + ')');
@@ -487,7 +711,7 @@ function emitDeltaArrayEncoder(lines: string[], field: FieldDef, vp: string): vo
 
     lines.push('let ' + n + 'A=' + val);
     lines.push('let ' + n + 'C=' + n + 'A.length');
-    lines.push('buf.writeUInt16LE(' + n + 'C,' + vp + ')');
+    lines.push(cgWriteU16(vp, n + 'C'));
     lines.push(vp + '+=2');
     lines.push('if(' + n + 'C>0){' + vp + '=$wv(buf,' + vp + ',' + n + 'A[0])');
     lines.push('for(let j=1;j<' + n + 'C;j++){' + vp + '=$wz(buf,' + vp + ',' + n + 'A[j]-' + n + 'A[j-1])}}');
@@ -498,31 +722,31 @@ function emitEncoderFixedAtOffset(lines: string[], field: FieldDef, off: string)
 
     switch (field.type) {
         case 'bigint':
-            lines.push('buf.writeBigInt64LE(' + val + ',' + off + ')');
+            lines.push(cgWriteBI64(off, val));
             break;
         case 'date':
-            lines.push('buf.writeDoubleLE(' + val + '.getTime(),' + off + ')');
+            lines.push(cgWriteF64(off, val + '.getTime()'));
             break;
         case 'float64':
-            lines.push('buf.writeDoubleLE(' + val + ',' + off + ')');
+            lines.push(cgWriteF64(off, val));
             break;
         case 'int8':
             lines.push('buf[' + off + ']=(' + val + ')&0xFF');
             break;
         case 'int16':
-            lines.push('buf.writeInt16LE(' + val + ',' + off + ')');
+            lines.push(cgWriteI16(off, val));
             break;
         case 'int32':
-            lines.push('buf.writeInt32LE(' + val + ',' + off + ')');
+            lines.push(cgWriteI32(off, val));
             break;
         case 'uint8':
             lines.push('buf[' + off + ']=' + val);
             break;
         case 'uint16':
-            lines.push('buf.writeUInt16LE(' + val + ',' + off + ')');
+            lines.push(cgWriteU16(off, val));
             break;
         case 'uint32':
-            lines.push('buf.writeUInt32LE(' + val + ',' + off + ')');
+            lines.push(cgWriteU32(off, val));
             break;
     }
 }
@@ -530,7 +754,7 @@ function emitEncoderFixedAtOffset(lines: string[], field: FieldDef, off: string)
 function emitFloat64ArrayCompressedDecoder(lines: string[], field: FieldDef, vp: string): void {
     let n = field.name;
 
-    lines.push('let ' + n + 'C=buf.readUInt16LE(' + vp + ')');
+    lines.push('let ' + n + 'C=' + cgReadU16(vp));
     lines.push(vp + '+=2');
     lines.push('let ' + n + '=new Array(' + n + 'C)');
     lines.push('if(' + n + 'C>0){let _flg=buf[' + vp + '++]');
@@ -539,7 +763,7 @@ function emitFloat64ArrayCompressedDecoder(lines: string[], field: FieldDef, vp:
     lines.push(vp + '=$vr.pos');
     lines.push(n + '[0]=_base');
     lines.push('for(let j=1;j<' + n + 'C;j++){$rz(buf,' + vp + ');_base+=$vr.value;' + vp + '=$vr.pos;' + n + '[j]=_base}');
-    lines.push('}else{for(let j=0;j<' + n + 'C;j++){' + n + '[j]=buf.readDoubleLE(' + vp + ');' + vp + '+=8}}}');
+    lines.push('}else{for(let j=0;j<' + n + 'C;j++){' + n + '[j]=' + cgReadF64(vp) + ';' + vp + '+=8}}}');
 }
 
 function emitFloat64ArrayCompressedEncoder(lines: string[], field: FieldDef, vp: string): void {
@@ -548,7 +772,7 @@ function emitFloat64ArrayCompressedEncoder(lines: string[], field: FieldDef, vp:
 
     lines.push('let ' + n + 'A=' + val);
     lines.push('let ' + n + 'C=' + n + 'A.length');
-    lines.push('buf.writeUInt16LE(' + n + 'C,' + vp + ')');
+    lines.push(cgWriteU16(vp, n + 'C'));
     lines.push(vp + '+=2');
     lines.push('if(' + n + 'C>0){let _allInt=true');
     lines.push('for(let j=0;j<' + n + 'C;j++){if(' + n + 'A[j]!==(' + n + 'A[j]|0)){_allInt=false;break}}');
@@ -556,7 +780,7 @@ function emitFloat64ArrayCompressedEncoder(lines: string[], field: FieldDef, vp:
     lines.push(vp + '=$wv(buf,' + vp + ',' + n + 'A[0])');
     lines.push('for(let j=1;j<' + n + 'C;j++){' + vp + '=$wz(buf,' + vp + ',' + n + 'A[j]-' + n + 'A[j-1])}');
     lines.push('}else{buf[' + vp + '++]=1');
-    lines.push('for(let j=0;j<' + n + 'C;j++){buf.writeDoubleLE(' + n + 'A[j],' + vp + ');' + vp + '+=8}}}');
+    lines.push('for(let j=0;j<' + n + 'C;j++){' + cgWriteF64(vp, n + 'A[j]') + ';' + vp + '+=8}}}');
 }
 
 function emitDecoderFixed(lines: string[], field: FieldDef): void {
@@ -564,34 +788,34 @@ function emitDecoderFixed(lines: string[], field: FieldDef): void {
 
     switch (field.type) {
         case 'bigint':
-            lines.push('let ' + field.name + '=buf.readBigInt64LE(' + off + ')');
+            lines.push('let ' + field.name + '=' + cgReadBI64(off));
             break;
         case 'boolean':
             lines.push('let ' + field.name + '=!!buf[' + off + ']');
             break;
         case 'date':
-            lines.push('let ' + field.name + '=new Date(buf.readDoubleLE(' + off + '))');
+            lines.push('let ' + field.name + '=new Date(' + cgReadF64(off) + ')');
             break;
         case 'float64':
-            lines.push('let ' + field.name + '=buf.readDoubleLE(' + off + ')');
+            lines.push('let ' + field.name + '=' + cgReadF64(off));
             break;
         case 'int8':
             lines.push('let ' + field.name + '=(buf[' + off + ']<<24>>24)');
             break;
         case 'int16':
-            lines.push('let ' + field.name + '=buf.readInt16LE(' + off + ')');
+            lines.push('let ' + field.name + '=' + cgReadI16(off));
             break;
         case 'int32':
-            lines.push('let ' + field.name + '=buf.readInt32LE(' + off + ')');
+            lines.push('let ' + field.name + '=' + cgReadI32(off));
             break;
         case 'uint8':
             lines.push('let ' + field.name + '=buf[' + off + ']');
             break;
         case 'uint16':
-            lines.push('let ' + field.name + '=buf.readUInt16LE(' + off + ')');
+            lines.push('let ' + field.name + '=' + cgReadU16(off));
             break;
         case 'uint32':
-            lines.push('let ' + field.name + '=buf.readUInt32LE(' + off + ')');
+            lines.push('let ' + field.name + '=' + cgReadU32(off));
             break;
     }
 }
@@ -602,22 +826,22 @@ function emitDecoderVar(lines: string[], field: FieldDef, vp: string, internFiel
     if (typeof type === 'string') {
         switch (type) {
             case 'bytes':
-                lines.push('let ' + field.name + 'L=buf.readUInt32LE(' + vp + ')');
+                lines.push('let ' + field.name + 'L=' + cgReadU32(vp));
                 lines.push(vp + '+=4');
                 lines.push('let ' + field.name + '=buf.subarray(' + vp + ',' + vp + '+' + field.name + 'L)');
                 lines.push(vp + '+=' + field.name + 'L');
                 break;
             case 'string':
                 if (internFields && internFields.has(field.name)) {
-                    lines.push('let ' + field.name + 'L=buf.readUInt32LE(' + vp + ')');
+                    lines.push('let ' + field.name + 'L=' + cgReadU32(vp));
                     lines.push(vp + '+=4');
                     lines.push('let ' + field.name);
-                    lines.push('if(' + field.name + 'L===0xFFFFFFFF){' + field.name + '=$sd(buf,' + vp + ');' + vp + '+=4}else{' + field.name + '=buf.utf8Slice(' + vp + ',' + vp + '+' + field.name + 'L);' + vp + '+=' + field.name + 'L}');
+                    lines.push('if(' + field.name + 'L===0xFFFFFFFF){' + field.name + '=$sd(buf,' + vp + ');' + vp + '+=4}else{' + field.name + '=' + cgReadUtf8(vp, vp + '+' + field.name + 'L') + ';' + vp + '+=' + field.name + 'L}');
                 }
                 else {
-                    lines.push('let ' + field.name + 'L=buf.readUInt32LE(' + vp + ')');
+                    lines.push('let ' + field.name + 'L=' + cgReadU32(vp));
                     lines.push(vp + '+=4');
-                    lines.push('let ' + field.name + '=buf.utf8Slice(' + vp + ',' + vp + '+' + field.name + 'L)');
+                    lines.push('let ' + field.name + '=' + cgReadUtf8(vp, vp + '+' + field.name + 'L'));
                     lines.push(vp + '+=' + field.name + 'L');
                 }
                 break;
@@ -638,7 +862,7 @@ function emitDecoderVar(lines: string[], field: FieldDef, vp: string, internFiel
 
     if (type.kind === 'object') {
         // Nested object: read u16 length prefix, decode via decodeSbc
-        lines.push('let ' + field.name + 'L=buf.readUInt16LE(' + vp + ')');
+        lines.push('let ' + field.name + 'L=' + cgReadU16(vp));
         lines.push(vp + '+=2');
         lines.push('let ' + field.name + '=$d(buf,' + vp + ',' + field.name + 'L)');
         lines.push(vp + '+=' + field.name + 'L');
@@ -649,34 +873,34 @@ function emitDecoderVar(lines: string[], field: FieldDef, vp: string, internFiel
     if (type.kind === 'array') {
         let elem = type.element;
 
-        lines.push('let ' + field.name + 'C=buf.readUInt16LE(' + vp + ')');
+        lines.push('let ' + field.name + 'C=' + cgReadU16(vp));
         lines.push(vp + '+=2');
         lines.push('let ' + field.name + '=new Array(' + field.name + 'C)');
 
         if (typeof elem === 'string' && elem === 'mixed') {
             // Mixed-type array: each element has u32 length + SBC-tagged data
-            lines.push('for(let j=0;j<' + field.name + 'C;j++){let el=buf.readUInt32LE(' + vp + ');' + vp + '+=4;' + field.name + '[j]=$d(buf,' + vp + ',el);' + vp + '+=el}');
+            lines.push('for(let j=0;j<' + field.name + 'C;j++){let el=' + cgReadU32(vp) + ';' + vp + '+=4;' + field.name + '[j]=$d(buf,' + vp + ',el);' + vp + '+=el}');
         }
         else if (typeof elem === 'object' && elem.kind === 'object') {
             // Array of objects: each element has u16 length + schema_id + fields
-            lines.push('for(let j=0;j<' + field.name + 'C;j++){let el=buf.readUInt16LE(' + vp + ');' + vp + '+=2;' + field.name + '[j]=$d(buf,' + vp + ',el);' + vp + '+=el}');
+            lines.push('for(let j=0;j<' + field.name + 'C;j++){let el=' + cgReadU16(vp) + ';' + vp + '+=2;' + field.name + '[j]=$d(buf,' + vp + ',el);' + vp + '+=el}');
         }
         else if (typeof elem === 'string') {
             switch (elem) {
                 case 'float64':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=buf.readDoubleLE(' + vp + ');' + vp + '+=8}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=' + cgReadF64(vp) + ';' + vp + '+=8}');
                     break;
                 case 'int32':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=buf.readInt32LE(' + vp + ');' + vp + '+=4}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=' + cgReadI32(vp) + ';' + vp + '+=4}');
                     break;
                 case 'string':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){let l=buf.readUInt32LE(' + vp + ');' + vp + '+=4;' + field.name + '[j]=buf.utf8Slice(' + vp + ',' + vp + '+l);' + vp + '+=l}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){let l=' + cgReadU32(vp) + ';' + vp + '+=4;' + field.name + '[j]=' + cgReadUtf8(vp, vp + '+l') + ';' + vp + '+=l}');
                     break;
                 case 'uint16':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=buf.readUInt16LE(' + vp + ');' + vp + '+=2}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=' + cgReadU16(vp) + ';' + vp + '+=2}');
                     break;
                 case 'uint32':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=buf.readUInt32LE(' + vp + ');' + vp + '+=4}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=' + cgReadU32(vp) + ';' + vp + '+=4}');
                     break;
                 case 'uint8':
                     lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=buf[' + vp + '++]}');
@@ -692,20 +916,20 @@ function emitDecoderVarInner(lines: string[], name: string, type: FieldType, vp:
     if (typeof type === 'string') {
         switch (type) {
             case 'string':
-                lines.push('let ' + name + 'L=buf.readUInt32LE(' + vp + ')');
+                lines.push('let ' + name + 'L=' + cgReadU32(vp));
                 lines.push(vp + '+=4');
-                lines.push(name + '=buf.utf8Slice(' + vp + ',' + vp + '+' + name + 'L)');
+                lines.push(name + '=' + cgReadUtf8(vp, vp + '+' + name + 'L'));
                 lines.push(vp + '+=' + name + 'L');
                 break;
             case 'uint8':
                 lines.push(name + '=buf[' + vp + '++]');
                 break;
             case 'uint32':
-                lines.push(name + '=buf.readUInt32LE(' + vp + ')');
+                lines.push(name + '=' + cgReadU32(vp));
                 lines.push(vp + '+=4');
                 break;
             case 'float64':
-                lines.push(name + '=buf.readDoubleLE(' + vp + ')');
+                lines.push(name + '=' + cgReadF64(vp));
                 lines.push(vp + '+=8');
                 break;
             case 'boolean':
@@ -721,34 +945,34 @@ function emitEncoderFixed(lines: string[], field: FieldDef): void {
 
     switch (field.type) {
         case 'bigint':
-            lines.push('buf.writeBigInt64LE(' + val + ',' + off + ')');
+            lines.push(cgWriteBI64(off, val));
             break;
         case 'boolean':
             lines.push('buf[' + off + ']=' + val + '?1:0');
             break;
         case 'date':
-            lines.push('buf.writeDoubleLE(' + val + '.getTime(),' + off + ')');
+            lines.push(cgWriteF64(off, val + '.getTime()'));
             break;
         case 'float64':
-            lines.push('buf.writeDoubleLE(' + val + ',' + off + ')');
+            lines.push(cgWriteF64(off, val));
             break;
         case 'int8':
             lines.push('buf[' + off + ']=(' + val + ')&0xFF');
             break;
         case 'int16':
-            lines.push('buf.writeInt16LE(' + val + ',' + off + ')');
+            lines.push(cgWriteI16(off, val));
             break;
         case 'int32':
-            lines.push('buf.writeInt32LE(' + val + ',' + off + ')');
+            lines.push(cgWriteI32(off, val));
             break;
         case 'uint8':
             lines.push('buf[' + off + ']=' + val);
             break;
         case 'uint16':
-            lines.push('buf.writeUInt16LE(' + val + ',' + off + ')');
+            lines.push(cgWriteU16(off, val));
             break;
         case 'uint32':
-            lines.push('buf.writeUInt32LE(' + val + ',' + off + ')');
+            lines.push(cgWriteU32(off, val));
             break;
     }
 }
@@ -761,7 +985,7 @@ function emitEncoderVar(lines: string[], field: FieldDef, vp: string, internFiel
         switch (type) {
             case 'bytes':
                 lines.push('let ' + field.name + 'L=' + val + '.length');
-                lines.push('buf.writeUInt32LE(' + field.name + 'L,' + vp + ')');
+                lines.push(cgWriteU32(vp, field.name + 'L'));
                 lines.push(vp + '+=4');
                 lines.push('buf.set(' + val + ',' + vp + ')');
                 lines.push(vp + '+=' + field.name + 'L');
@@ -771,10 +995,10 @@ function emitEncoderVar(lines: string[], field: FieldDef, vp: string, internFiel
                     lines.push(vp + '=$si(\'' + field.name + '\',' + val + ',buf,' + vp + ')');
                 }
                 else {
-                    lines.push('let ' + field.name + 'L=Buffer.byteLength(' + val + ')');
-                    lines.push('buf.writeUInt32LE(' + field.name + 'L,' + vp + ')');
+                    lines.push('let ' + field.name + 'L=' + cgByteLen(val));
+                    lines.push(cgWriteU32(vp, field.name + 'L'));
                     lines.push(vp + '+=4');
-                    lines.push(vp + '+=buf.utf8Write(' + val + ',' + vp + ',' + field.name + 'L)');
+                    lines.push(vp + '+=' + cgWriteUtf8(val, vp, field.name + 'L'));
                 }
                 break;
         }
@@ -796,7 +1020,7 @@ function emitEncoderVar(lines: string[], field: FieldDef, vp: string, internFiel
         lines.push('let ' + field.name + 'S=' + vp);
         lines.push(vp + '+=2');
         lines.push(vp + '=$e(' + val + ',buf,' + vp + ')');
-        lines.push('buf.writeUInt16LE(' + vp + '-' + field.name + 'S-2,' + field.name + 'S)');
+        lines.push(cgWriteU16(field.name + 'S', vp + '-' + field.name + 'S-2'));
 
         return;
     }
@@ -806,33 +1030,33 @@ function emitEncoderVar(lines: string[], field: FieldDef, vp: string, internFiel
 
         lines.push('let ' + field.name + 'A=' + val);
         lines.push('let ' + field.name + 'C=' + field.name + 'A.length');
-        lines.push('buf.writeUInt16LE(' + field.name + 'C,' + vp + ')');
+        lines.push(cgWriteU16(vp, field.name + 'C'));
         lines.push(vp + '+=2');
 
         if (typeof elem === 'string' && elem === 'mixed') {
             // Mixed-type array: each element gets u32 length + SBC-tagged data
-            lines.push('for(let j=0;j<' + field.name + 'C;j++){let es=' + vp + ';' + vp + '+=4;' + vp + '=$e(' + field.name + 'A[j],buf,' + vp + ');buf.writeUInt32LE(' + vp + '-es-4,es)}');
+            lines.push('for(let j=0;j<' + field.name + 'C;j++){let es=' + vp + ';' + vp + '+=4;' + vp + '=$e(' + field.name + 'A[j],buf,' + vp + ');' + cgWriteU32('es', vp + '-es-4') + '}');
         }
         else if (typeof elem === 'object' && elem.kind === 'object') {
             // Array of objects: each element gets u16 length + $e(element)
-            lines.push('for(let j=0;j<' + field.name + 'C;j++){let es=' + vp + ';' + vp + '+=2;' + vp + '=$e(' + field.name + 'A[j],buf,' + vp + ');buf.writeUInt16LE(' + vp + '-es-2,es)}');
+            lines.push('for(let j=0;j<' + field.name + 'C;j++){let es=' + vp + ';' + vp + '+=2;' + vp + '=$e(' + field.name + 'A[j],buf,' + vp + ');' + cgWriteU16('es', vp + '-es-2') + '}');
         }
         else if (typeof elem === 'string') {
             switch (elem) {
                 case 'float64':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){buf.writeDoubleLE(' + field.name + 'A[j],' + vp + ');' + vp + '+=8}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + cgWriteF64(vp, field.name + 'A[j]') + ';' + vp + '+=8}');
                     break;
                 case 'int32':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){buf.writeInt32LE(' + field.name + 'A[j],' + vp + ');' + vp + '+=4}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + cgWriteI32(vp, field.name + 'A[j]') + ';' + vp + '+=4}');
                     break;
                 case 'string':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){let l=Buffer.byteLength(' + field.name + 'A[j]);buf.writeUInt32LE(l,' + vp + ');' + vp + '+=4;' + vp + '+=buf.utf8Write(' + field.name + 'A[j],' + vp + ',l)}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){let l=' + cgByteLen(field.name + 'A[j]') + ';' + cgWriteU32(vp, 'l') + ';' + vp + '+=4;' + vp + '+=' + cgWriteUtf8(field.name + 'A[j]', vp, 'l') + '}');
                     break;
                 case 'uint16':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){buf.writeUInt16LE(' + field.name + 'A[j],' + vp + ');' + vp + '+=2}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + cgWriteU16(vp, field.name + 'A[j]') + ';' + vp + '+=2}');
                     break;
                 case 'uint32':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){buf.writeUInt32LE(' + field.name + 'A[j],' + vp + ');' + vp + '+=4}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + cgWriteU32(vp, field.name + 'A[j]') + ';' + vp + '+=4}');
                     break;
                 case 'uint8':
                     lines.push('for(let j=0;j<' + field.name + 'C;j++){buf[' + vp + '++]=' + field.name + 'A[j]}');
@@ -848,20 +1072,20 @@ function emitEncoderVarInner(lines: string[], val: string, type: FieldType, vp: 
     if (typeof type === 'string') {
         switch (type) {
             case 'string':
-                lines.push('let _nl=Buffer.byteLength(' + val + ')');
-                lines.push('buf.writeUInt32LE(_nl,' + vp + ')');
+                lines.push('let _nl=' + cgByteLen(val));
+                lines.push(cgWriteU32(vp, '_nl'));
                 lines.push(vp + '+=4');
-                lines.push(vp + '+=buf.utf8Write(' + val + ',' + vp + ',_nl)');
+                lines.push(vp + '+=' + cgWriteUtf8(val, vp, '_nl'));
                 break;
             case 'uint8':
                 lines.push('buf[' + vp + '++]=' + val);
                 break;
             case 'uint32':
-                lines.push('buf.writeUInt32LE(' + val + ',' + vp + ')');
+                lines.push(cgWriteU32(vp, val));
                 lines.push(vp + '+=4');
                 break;
             case 'float64':
-                lines.push('buf.writeDoubleLE(' + val + ',' + vp + ')');
+                lines.push(cgWriteF64(vp, val));
                 lines.push(vp + '+=8');
                 break;
             case 'boolean':
@@ -871,7 +1095,7 @@ function emitEncoderVarInner(lines: string[], val: string, type: FieldType, vp: 
     }
 }
 
-function compileDecoder(schema: Schema, registry: SchemaRegistry, helpers?: { decodeSbc?: (buf: Buffer, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Buffer, pos: number) => number }, internFields?: Set<string>, internDecode?: (buf: Buffer, pos: number) => string): (buf: Buffer, pos: number) => unknown {
+function compileDecoder(schema: Schema, registry: SchemaRegistry, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, internFields?: Set<string>, internDecode?: (buf: Uint8Array, pos: number) => string): (buf: Uint8Array, pos: number) => unknown {
     let lines: string[] = [];
     let vp = 'vp';
     let hasNullable = schema.nullableCount > 0;
@@ -928,16 +1152,16 @@ function compileDecoder(schema: Schema, registry: SchemaRegistry, helpers?: { de
     lines.push('return{' + allFields.map((f) => f.name).join(',') + '}');
 
     let body = lines.join(';');
-    let $d = helpers?.decodeSbc ?? ((_buf: Buffer, _offset: number, _len: number) => null);
+    let $d = helpers?.decodeSbc ?? ((_buf: Uint8Array, _offset: number, _len: number) => null);
 
     if (internFields && internFields.size > 0 && internDecode) {
-        return new Function('$d', '$sd', 'buf', 'pos', body).bind(null, $d, internDecode) as (buf: Buffer, pos: number) => unknown;
+        return new Function('$d', '$sd', browserDecoderParams + 'buf', 'pos', body).bind(null, $d, internDecode, ...browserDecoderBindArgs) as (buf: Uint8Array, pos: number) => unknown;
     }
 
-    return new Function('$d', 'buf', 'pos', body).bind(null, $d) as (buf: Buffer, pos: number) => unknown;
+    return new Function('$d', browserDecoderParams + 'buf', 'pos', body).bind(null, $d, ...browserDecoderBindArgs) as (buf: Uint8Array, pos: number) => unknown;
 }
 
-function compileEncoder(schema: Schema, registry: SchemaRegistry, helpers?: { decodeSbc?: (buf: Buffer, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Buffer, pos: number) => number }, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Buffer, pos: number) => number): (obj: unknown, buf: Buffer, pos: number) => number {
+function compileEncoder(schema: Schema, registry: SchemaRegistry, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Uint8Array, pos: number) => number): (obj: unknown, buf: Uint8Array, pos: number) => number {
     let lines: string[] = [];
     let vp = 'vp';
     let hasNullable = schema.nullableCount > 0;
@@ -995,16 +1219,16 @@ function compileEncoder(schema: Schema, registry: SchemaRegistry, helpers?: { de
     lines.push('return ' + (hasVar ? vp : 'pos+' + schema.fixedSize));
 
     let body = lines.join(';');
-    let $e = helpers?.encodeSbc ?? ((_value: unknown, buf: Buffer, pos: number) => { buf[pos] = 0; return pos + 1; });
+    let $e = helpers?.encodeSbc ?? ((_value: unknown, buf: Uint8Array, pos: number) => { buf[pos] = 0; return pos + 1; });
 
     if (internFields && internFields.size > 0 && internEncode) {
-        return new Function('$e', '$si', 'obj', 'buf', 'pos', body).bind(null, $e, internEncode) as (obj: unknown, buf: Buffer, pos: number) => number;
+        return new Function('$e', '$si', browserEncoderParams + 'obj', 'buf', 'pos', body).bind(null, $e, internEncode, ...browserEncoderBindArgs) as (obj: unknown, buf: Uint8Array, pos: number) => number;
     }
 
-    return new Function('$e', 'obj', 'buf', 'pos', body).bind(null, $e) as (obj: unknown, buf: Buffer, pos: number) => number;
+    return new Function('$e', browserEncoderParams + 'obj', 'buf', 'pos', body).bind(null, $e, ...browserEncoderBindArgs) as (obj: unknown, buf: Uint8Array, pos: number) => number;
 }
 
-function compileSchema(schema: Schema, registry?: SchemaRegistry, helpers?: { decodeSbc?: (buf: Buffer, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Buffer, pos: number) => number }, compression?: boolean, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Buffer, pos: number) => number, internDecode?: (buf: Buffer, pos: number) => string): void {
+function compileSchema(schema: Schema, registry?: SchemaRegistry, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, compression?: boolean, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Uint8Array, pos: number) => number, internDecode?: (buf: Uint8Array, pos: number) => string): void {
     let reg = registry || createRegistry();
 
     schema.decodeFn = compileDecoder(schema, reg, helpers, internFields, internDecode);
@@ -1043,8 +1267,12 @@ function computeFieldOffsets(fields: FieldDef[]): number {
 
 function createRegistry(): SchemaRegistry {
     return {
+        constructorCache: new WeakMap(),
+        lastFieldKey: '',
+        lastSchema: null,
         nextId: 1,
         schemas: new Map(),
+        schemasByCount: new Map(),
         schemasByHash: new Map(),
     };
 }
@@ -1079,12 +1307,31 @@ function deserializeRegistry(data: unknown[]): SchemaRegistry {
         registry.schemas.set(schema.id, schema);
         registry.schemasByHash.set(schema.hash, schema);
 
+        // Maintain field-count bucket map
+        let count = schema.fields.length,
+            bucket = registry.schemasByCount.get(count);
+
+        if (bucket) {
+            bucket.push(schema);
+        }
+        else {
+            registry.schemasByCount.set(count, [schema]);
+        }
+
         if (schema.id > maxId) {
             maxId = schema.id;
         }
     }
 
     registry.nextId = maxId + 1;
+
+    // Set monomorphic state if exactly 1 schema
+    if (registry.schemas.size === 1) {
+        let only = registry.schemas.values().next().value as Schema;
+
+        registry.lastSchema = only;
+        registry.lastFieldKey = schemaFieldKey(only);
+    }
 
     return registry;
 }
@@ -1214,10 +1461,50 @@ function parseFieldType(str: string): FieldType {
     return str as FieldType;
 }
 
+function schemaFieldKey(schema: Schema): string {
+    let cached = fieldKeyCache.get(schema.hash);
+
+    if (cached !== undefined) {
+        return cached;
+    }
+
+    let names: string[] = [];
+
+    for (let i = 0, n = schema.fields.length; i < n; i++) {
+        names.push(schema.fields[i]!.name);
+    }
+
+    let key = names.sort().join(',');
+
+    fieldKeyCache.set(schema.hash, key);
+
+    return key;
+}
+
 function registerSchema(schema: Schema, registry: SchemaRegistry): void {
     schema.id = registry.nextId++;
     registry.schemas.set(schema.id, schema);
     registry.schemasByHash.set(schema.hash, schema);
+
+    // Maintain field-count bucket map
+    let count = schema.fields.length,
+        bucket = registry.schemasByCount.get(count);
+
+    if (bucket) {
+        bucket.push(schema);
+    }
+    else {
+        registry.schemasByCount.set(count, [schema]);
+    }
+
+    // Maintain monomorphic state
+    if (registry.schemas.size === 1) {
+        registry.lastSchema = schema;
+        registry.lastFieldKey = schemaFieldKey(schema);
+    }
+    else {
+        registry.lastSchema = null;
+    }
 }
 
 function serializeFieldType(type: FieldType): string {
@@ -1256,9 +1543,29 @@ function serializeRegistry(registry: SchemaRegistry): unknown[] {
 }
 
 
-const lookupSchema = (obj: Record<string, unknown>, registry: SchemaRegistry): Schema | null => {
-    let keys = Object.keys(obj).sort();
-    let hashParts: string[] = [];
+let fieldKeyCache = new Map<number, string>(),
+    objFieldKeyCount = 0; // Out-param of computeObjFieldKey — read immediately after call
+
+function computeObjFieldKey(obj: Record<string, unknown>): string {
+    let count = 0,
+        keys = Object.keys(obj).sort(),
+        parts: string[] = [];
+
+    for (let i = 0, n = keys.length; i < n; i++) {
+        if (obj[keys[i]!] !== undefined) {
+            parts.push(keys[i]!);
+            count++;
+        }
+    }
+
+    objFieldKeyCount = count;
+
+    return parts.join(',');
+}
+
+function computeSchemaHash(obj: Record<string, unknown>): number {
+    let keys = Object.keys(obj).sort(),
+        hashParts: string[] = [];
 
     for (let i = 0, n = keys.length; i < n; i++) {
         let key = keys[i]!;
@@ -1267,14 +1574,79 @@ const lookupSchema = (obj: Record<string, unknown>, registry: SchemaRegistry): S
             continue;
         }
 
-        let type = inferFieldType(obj[key]);
-
-        hashParts.push(key + ':' + serializeFieldType(type));
+        hashParts.push(key + ':' + serializeFieldType(inferFieldType(obj[key])));
     }
 
-    let hash = fnv1a(hashParts.join(','));
+    return fnv1a(hashParts.join(','));
+}
 
-    return registry.schemasByHash.get(hash) ?? null;
+const lookupSchema = (obj: Record<string, unknown>, registry: SchemaRegistry): Schema | null => {
+    // Tier 1: Constructor-keyed cache (non-plain objects only)
+    let ctor = obj.constructor;
+
+    if (ctor !== Object && ctor !== undefined) {
+        let cached = registry.constructorCache.get(ctor);
+
+        if (cached) {
+            return cached;
+        }
+    }
+
+    // Tier 2: Monomorphic fast path — single schema, verify field names match
+    if (registry.lastSchema !== null) {
+        let fieldKey = computeObjFieldKey(obj);
+
+        if (fieldKey === registry.lastFieldKey) {
+            let schema = registry.lastSchema;
+
+            if (ctor !== Object && ctor !== undefined) {
+                registry.constructorCache.set(ctor, schema);
+            }
+
+            return schema;
+        }
+
+        // lastSchema non-null iff exactly 1 schema registered; mismatch = no match possible
+        return null;
+    }
+
+    // Tier 3: Field-count prefilter — narrow candidates by field count
+    let fieldKey = computeObjFieldKey(obj),
+        bucket = registry.schemasByCount.get(objFieldKeyCount);
+
+    if (!bucket) {
+        return null;
+    }
+
+    if (bucket.length === 1) {
+        // Single candidate — verify field names match
+        let schema = bucket[0]!;
+
+        if (fieldKey === schemaFieldKey(schema)) {
+            if (ctor !== Object && ctor !== undefined) {
+                registry.constructorCache.set(ctor, schema);
+            }
+
+            return schema;
+        }
+
+        return null;
+    }
+
+    // Multiple schemas with same field count — full hash lookup + collision check
+    let hash = computeSchemaHash(obj),
+        schema = registry.schemasByHash.get(hash) ?? null;
+
+    if (schema && fieldKey !== schemaFieldKey(schema)) {
+        // FNV-1a collision — different field names, same hash
+        return null;
+    }
+
+    if (schema && ctor !== Object && ctor !== undefined) {
+        registry.constructorCache.set(ctor, schema);
+    }
+
+    return schema;
 };
 
 const resolveSchema = (obj: Record<string, unknown>, registry: SchemaRegistry): Schema => {
@@ -1287,6 +1659,13 @@ const resolveSchema = (obj: Record<string, unknown>, registry: SchemaRegistry): 
     let schema = inferSchema(obj, registry);
 
     registerSchema(schema, registry);
+
+    // Populate constructor cache for the newly registered schema
+    let ctor = obj.constructor;
+
+    if (ctor !== Object && ctor !== undefined) {
+        registry.constructorCache.set(ctor, schema);
+    }
 
     return schema;
 };
@@ -1365,11 +1744,11 @@ function encodeFieldDefs(defs: { name: string; type: string }[]): Uint8Array {
 const createSchemaStore = (db: { getBinary(key: unknown): Uint8Array | undefined; putSync(key: unknown, value: unknown): boolean; transactionSync<T>(fn: () => T): T }, prefix?: string): SchemaStoreInterface => {
     let cache = new Map<number, Schema>(),
         helpers = {
-            decodeSbc: null as unknown as (buf: Buffer, offset: number, len: number) => unknown,
-            encodeSbc: null as unknown as (value: unknown, buf: Buffer, pos: number) => number,
+            decodeSbc: null as unknown as (buf: Uint8Array, offset: number, len: number) => unknown,
+            encodeSbc: null as unknown as (value: unknown, buf: Uint8Array, pos: number) => number,
         },
-        internDecode = undefined as ((buf: Buffer, pos: number) => string) | undefined,
-        internEncode = undefined as ((field: string, value: string, buf: Buffer, pos: number) => number) | undefined,
+        internDecode = undefined as ((buf: Uint8Array, pos: number) => string) | undefined,
+        internEncode = undefined as ((field: string, value: string, buf: Uint8Array, pos: number) => number) | undefined,
         internFields = undefined as Set<string> | undefined,
         keyPrefix = prefix ? prefix + ':' : '',
         reg = createRegistry();
@@ -1493,13 +1872,13 @@ const createSchemaStore = (db: { getBinary(key: unknown): Uint8Array | undefined
             internEncode = pool.encode;
             internFields = pool.fields;
         },
-    } as SchemaStoreInterface & { _setHelpers(h: { decodeSbc: (buf: Buffer, offset: number, len: number) => unknown; encodeSbc: (value: unknown, buf: Buffer, pos: number) => number }): void; _setIntern(pool: InternPool): void };
+    } as SchemaStoreInterface & { _setHelpers(h: { decodeSbc: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc: (value: unknown, buf: Uint8Array, pos: number) => number }): void; _setIntern(pool: InternPool): void };
 };
 
 
 interface InternPool {
-    decode: (buf: Buffer, pos: number) => string;
-    encode: (field: string, value: string, buf: Buffer, pos: number) => number;
+    decode: (buf: Uint8Array, pos: number) => string;
+    encode: (field: string, value: string, buf: Uint8Array, pos: number) => number;
     fields: Set<string>;
     load: () => void;
 }
@@ -1529,7 +1908,7 @@ const createInternPool = (db: InternDb, fieldNames: string[], prefix?: string): 
         idToString.set(id, value);
         stringToId.set(value, id);
 
-        let encoded = Buffer.from(value, 'utf8');
+        let encoded = fromUtf8(value);
 
         try {
             db.transactionSync(() => {
@@ -1555,27 +1934,27 @@ const createInternPool = (db: InternDb, fieldNames: string[], prefix?: string): 
     return {
         fields,
 
-        encode(_field: string, value: string, buf: Buffer, pos: number): number {
-            let byteLen = Buffer.byteLength(value);
+        encode(_field: string, value: string, buf: Uint8Array, pos: number): number {
+            let bLen = byteLen(value);
 
-            if (byteLen < 5) {
-                buf.writeUInt32LE(byteLen, pos);
+            if (bLen < 5) {
+                writeU32.call(buf, bLen, pos);
                 pos += 4;
-                pos += (buf as unknown as { utf8Write(str: string, offset: number, length: number): number }).utf8Write(value, pos, byteLen);
+                pos += writeUtf8.call(buf, value, pos, bLen);
 
                 return pos;
             }
 
             let id = internString(value);
 
-            buf.writeUInt32LE(0xFFFFFFFF, pos);
-            buf.writeUInt32LE(id, pos + 4);
+            writeU32.call(buf, 0xFFFFFFFF, pos);
+            writeU32.call(buf, id, pos + 4);
 
             return pos + 8;
         },
 
-        decode(buf: Buffer, pos: number): string {
-            let id = buf.readUInt32LE(pos);
+        decode(buf: Uint8Array, pos: number): string {
+            let id = readU32.call(buf, pos);
             let cached = idToString.get(id);
 
             if (cached !== undefined) {
@@ -1596,7 +1975,7 @@ const createInternPool = (db: InternDb, fieldNames: string[], prefix?: string): 
                 return '';
             }
 
-            let str = Buffer.from(bytes).toString('utf8');
+            let str = toUtf8(bytes);
 
             idToString.set(id, str);
             stringToId.set(str, id);
@@ -1622,7 +2001,7 @@ const createInternPool = (db: InternDb, fieldNames: string[], prefix?: string): 
                         continue;
                     }
 
-                    let str = Buffer.from(entry.value as Uint8Array).toString('utf8');
+                    let str = toUtf8(entry.value as Uint8Array);
 
                     idToString.set(id, str);
                     stringToId.set(str, id);
@@ -1642,13 +2021,94 @@ const createInternPool = (db: InternDb, fieldNames: string[], prefix?: string): 
 };
 
 
-const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression?: boolean }, internPool?: InternPool): { decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Buffer, offset: number): unknown; encode(value: unknown): Uint8Array } => {
+function estimateSbcSize(value: unknown): number {
+    if (value === null || value === undefined) {
+        return 1;
+    }
+
+    switch (typeof value) {
+        case 'bigint':
+            return 9;
+        case 'boolean':
+            return 2;
+        case 'number':
+            return 9;
+        case 'string':
+            return 5 + value.length * 3;
+        case 'object': {
+            if (value instanceof Date) {
+                return 9;
+            }
+
+            if (ArrayBuffer.isView(value)) {
+                return 5 + (value as Uint8Array).byteLength;
+            }
+
+            if (Array.isArray(value)) {
+                let s = 3;
+
+                for (let i = 0, n = value.length; i < n; i++) {
+                    s += estimateSbcSize(value[i]);
+                }
+
+                return s;
+            }
+
+            if (value instanceof Map) {
+                let s = 3;
+
+                (value as Map<unknown, unknown>).forEach((v, k) => {
+                    s += 3 + estimateSbcSize(k) + estimateSbcSize(v);
+                });
+
+                return s;
+            }
+
+            if (value instanceof Set) {
+                let s = 3;
+
+                (value as Set<unknown>).forEach((v) => {
+                    s += estimateSbcSize(v);
+                });
+
+                return s;
+            }
+
+            // Plain object — 9 (header) + field estimates + nullable bitmap
+            let keys = Object.keys(value as Record<string, unknown>),
+                obj = value as Record<string, unknown>,
+                s = 9;
+
+            for (let i = 0, n = keys.length; i < n; i++) {
+                let v = obj[keys[i]!];
+
+                if (v === undefined) {
+                    continue;
+                }
+
+                if (typeof v === 'string') {
+                    s += 4 + v.length * 3;
+                }
+                else {
+                    s += estimateSbcSize(v);
+                }
+            }
+
+            return s + Math.ceil(keys.length / 8);
+        }
+        default:
+            return 9;
+    }
+}
+
+
+const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression?: boolean }, internPool?: InternPool): { decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; encode(value: unknown): Uint8Array } => {
     let compression = options?.compression ?? false,
-        encodeBuf = Buffer.alloc(65536),
+        encodeBuf = allocBuf(65536),
         registry = createRegistry(),
         sbcHelpers = {
-            decodeSbc: (buf: Buffer, offset: number, len: number): unknown => decodeSbc(buf, offset, len),
-            encodeSbc: (value: unknown, buf: Buffer, pos: number): number => encodeSbc(value, buf, pos),
+            decodeSbc: (buf: Uint8Array, offset: number, len: number): unknown => decodeSbc(buf, offset, len),
+            encodeSbc: (value: unknown, buf: Uint8Array, pos: number): number => encodeSbc(value, buf, pos),
         };
 
     let internDecode = internPool?.decode,
@@ -1670,7 +2130,7 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
     // 249 = array, 250 = date, 251 = boolean, 252 = number,
     // 253 = string, 254 = bytes (Uint8Array)
 
-    function decodeSbc(buf: Buffer, offset: number, len: number): unknown {
+    function decodeSbc(buf: Uint8Array, offset: number, len: number): unknown {
         if (len === 0) {
             return undefined;
         }
@@ -1682,10 +2142,10 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                 return null;
 
             case 248:
-                return buf.readBigInt64LE(offset + 1);
+                return readBI64.call(buf, offset + 1);
 
             case 249: {
-                let count = buf.readUInt16LE(offset + 1);
+                let count = readU16.call(buf, offset + 1);
                 let arr = new Array(count);
                 let p = offset + 3;
 
@@ -1701,29 +2161,34 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
             }
 
             case 250:
-                return new Date(buf.readDoubleLE(offset + 1));
+                return new Date(readF64.call(buf, offset + 1));
 
             case 251:
                 return !!buf[offset + 1];
 
             case 252:
-                return buf.readDoubleLE(offset + 1);
+                return readF64.call(buf, offset + 1);
 
             case 253: {
-                let sLen = buf.readUInt32LE(offset + 1);
+                let sLen = readU32.call(buf, offset + 1);
 
-                return (buf as unknown as { utf8Slice(start: number, end: number): string }).utf8Slice(offset + 5, offset + 5 + sLen);
+                return readUtf8.call(buf, offset + 5, offset + 5 + sLen);
             }
 
             case 254: {
-                let bLen = buf.readUInt32LE(offset + 1);
+                let bLen = readU32.call(buf, offset + 1);
+                let slice = buf.subarray(offset + 5, offset + 5 + bLen);
 
-                return Buffer.from(buf.subarray(offset + 5, offset + 5 + bLen));
+                if (isNode) {
+                    return Buffer.from(slice);
+                }
+
+                return new Uint8Array(slice);
             }
 
             case 245: {
                 // Compressed hash-referenced object: [245][u32 hash][u32 len][compressed_field_values...]
-                let hash = buf.readUInt32LE(offset + 1);
+                let hash = readU32.call(buf, offset + 1);
                 let schema = schemaStore ? schemaStore.get(hash) : registry.schemasByHash.get(hash);
 
                 if (!schema) {
@@ -1747,7 +2212,7 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
 
             case 246: {
                 // Hash-referenced object: [246][u32 hash][u32 len][field_values...]
-                let hash = buf.readUInt32LE(offset + 1);
+                let hash = readU32.call(buf, offset + 1);
                 let schema = schemaStore ? schemaStore.get(hash) : registry.schemasByHash.get(hash);
 
                 if (!schema || !schema.decodeFn) {
@@ -1762,19 +2227,19 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
         }
     }
 
-    function decodeTagEnd(buf: Buffer, offset: number, tag: number): number {
+    function decodeTagEnd(buf: Uint8Array, offset: number, tag: number): number {
         switch (tag) {
             case 0: return offset + 1;
-            case 245: return offset + 9 + buf.readUInt32LE(offset + 5);
+            case 245: return offset + 9 + readU32.call(buf, offset + 5);
             case 248: return offset + 9;
             case 250: return offset + 9;
             case 251: return offset + 2;
             case 252: return offset + 9;
-            case 253: return offset + 5 + buf.readUInt32LE(offset + 1);
-            case 254: return offset + 5 + buf.readUInt32LE(offset + 1);
-            case 246: return offset + 9 + buf.readUInt32LE(offset + 5);
+            case 253: return offset + 5 + readU32.call(buf, offset + 1);
+            case 254: return offset + 5 + readU32.call(buf, offset + 1);
+            case 246: return offset + 9 + readU32.call(buf, offset + 5);
             case 249: {
-                let count = buf.readUInt16LE(offset + 1);
+                let count = readU16.call(buf, offset + 1);
                 let p = offset + 3;
 
                 for (let i = 0; i < count; i++) {
@@ -1785,12 +2250,12 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
             }
             default: {
                 // Schema object with u32 length prefix: [tag(1)][u32 len(4)][fields...]
-                return offset + 5 + buf.readUInt32LE(offset + 1);
+                return offset + 5 + readU32.call(buf, offset + 1);
             }
         }
     }
 
-    function encodeSbc(value: unknown, buf: Buffer, pos: number): number {
+    function encodeSbc(value: unknown, buf: Uint8Array, pos: number): number {
         if (value === null || value === undefined) {
             buf[pos] = 0;
 
@@ -1800,7 +2265,7 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
         switch (typeof value) {
             case 'bigint':
                 buf[pos] = 248;
-                buf.writeBigInt64LE(value, pos + 1);
+                writeBI64.call(buf, value, pos + 1);
 
                 return pos + 9;
 
@@ -1812,17 +2277,17 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
 
             case 'number':
                 buf[pos] = 252;
-                buf.writeDoubleLE(value, pos + 1);
+                writeF64.call(buf, value, pos + 1);
 
                 return pos + 9;
 
             case 'string': {
                 buf[pos] = 253;
 
-                let sLen = Buffer.byteLength(value);
+                let sLen = byteLen(value);
 
-                buf.writeUInt32LE(sLen, pos + 1);
-                (buf as unknown as { utf8Write(str: string, offset: number, length: number): number }).utf8Write(value, pos + 5, sLen);
+                writeU32.call(buf, sLen, pos + 1);
+                writeUtf8.call(buf, value, pos + 5, sLen);
 
                 return pos + 5 + sLen;
             }
@@ -1830,7 +2295,7 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
             case 'object': {
                 if (value instanceof Date) {
                     buf[pos] = 250;
-                    buf.writeDoubleLE(value.getTime(), pos + 1);
+                    writeF64.call(buf, value.getTime(), pos + 1);
 
                     return pos + 9;
                 }
@@ -1847,7 +2312,7 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
 
                 if (value instanceof Uint8Array) {
                     buf[pos] = 254;
-                    buf.writeUInt32LE(value.length, pos + 1);
+                    writeU32.call(buf, value.length, pos + 1);
                     buf.set(value, pos + 5);
 
                     return pos + 5 + value.length;
@@ -1855,7 +2320,7 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
 
                 if (Array.isArray(value)) {
                     buf[pos] = 249;
-                    buf.writeUInt16LE(value.length, pos + 1);
+                    writeU16.call(buf, value.length, pos + 1);
 
                     let p = pos + 3;
 
@@ -1871,14 +2336,14 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                     let entries = Array.from(value as Map<unknown, unknown>);
 
                     buf[pos] = 249;
-                    buf.writeUInt16LE(entries.length, pos + 1);
+                    writeU16.call(buf, entries.length, pos + 1);
 
                     let p = pos + 3;
 
                     for (let i = 0, n = entries.length; i < n; i++) {
                         // Each entry as a 2-element array [key, value]
                         buf[p] = 249;
-                        buf.writeUInt16LE(2, p + 1);
+                        writeU16.call(buf, 2, p + 1);
                         p += 3;
                         p = encodeSbc(entries[i]![0], buf, p);
                         p = encodeSbc(entries[i]![1], buf, p);
@@ -1892,7 +2357,7 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                     let arr = Array.from(value as Set<unknown>);
 
                     buf[pos] = 249;
-                    buf.writeUInt16LE(arr.length, pos + 1);
+                    writeU16.call(buf, arr.length, pos + 1);
 
                     let p = pos + 3;
 
@@ -1921,21 +2386,21 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                 // Use compressed path if available
                 if (compression && schema.compressedEncodeFn) {
                     buf[pos] = 245;
-                    buf.writeUInt32LE(schema.hash, pos + 1);
+                    writeU32.call(buf, schema.hash, pos + 1);
 
                     let end = schema.compressedEncodeFn(obj, buf, pos + 9);
 
-                    buf.writeUInt32LE(end - pos - 9, pos + 5);
+                    writeU32.call(buf, end - pos - 9, pos + 5);
 
                     return end;
                 }
 
                 buf[pos] = 246;
-                buf.writeUInt32LE(schema.hash, pos + 1);
+                writeU32.call(buf, schema.hash, pos + 1);
 
                 let end = schema.encodeFn!(obj, buf, pos + 9);
 
-                buf.writeUInt32LE(end - pos - 9, pos + 5);
+                writeU32.call(buf, end - pos - 9, pos + 5);
 
                 return end;
             }
@@ -1945,6 +2410,21 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
 
                 return pos + 1;
         }
+    }
+
+    function encodeValue(value: unknown): Uint8Array {
+        let estimate = estimateSbcSize(value);
+
+        if (estimate > encodeBuf.length) {
+            encodeBuf = allocBuf(Math.max(estimate * 2, encodeBuf.length * 2));
+        }
+
+        let end = encodeSbc(value, encodeBuf, 0);
+        let result = allocUnsafe(end);
+
+        copyBuf(encodeBuf, result, 0, 0, end);
+
+        return result;
     }
 
     return {
@@ -1959,49 +2439,35 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                 let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
 
                 if (schemaStore.has(hash)) {
-                    return decodeSbc(buffer as Buffer, 0, len);
+                    return decodeSbc(buffer, 0, len);
                 }
             }
             else if (len > 0 && buffer[0] !== 245 && buffer[0] !== 246) {
                 // Non-object primitives (string, number, etc.) never trigger schema lookup
-                return decodeSbc(buffer as Buffer, 0, len);
+                return decodeSbc(buffer, 0, len);
             }
 
             // Slow path: copy buffer to protect against clobbering during schema lookup
-            let buf = Buffer.allocUnsafe(len);
+            let buf = allocUnsafe(len);
 
-            (buffer instanceof Buffer ? buffer : Buffer.from(buffer.buffer, buffer.byteOffset, len)).copy(buf, 0, 0, len);
+            if (isNode) {
+                (buffer instanceof Buffer ? buffer : Buffer.from(buffer.buffer, buffer.byteOffset, len)).copy(buf as Buffer, 0, 0, len);
+            }
+            else {
+                buf.set(buffer.subarray(0, len));
+            }
 
             return decodeSbc(buf, 0, len);
         },
 
-        decodeAt(buffer: Buffer, offset: number): unknown {
+        decodeAt(buffer: Uint8Array, offset: number): unknown {
             return decodeSbc(buffer, offset, buffer.length - offset);
         },
 
-        encode(value: unknown): Uint8Array {
-            let end: number;
-
-            try {
-                end = encodeSbc(value, encodeBuf, 0);
-            }
-            catch {
-                // Buffer overflow — grow to at least 4x or 1MB, whichever is larger
-                let newSize = Math.max(encodeBuf.length * 4, 1048576);
-
-                encodeBuf = Buffer.alloc(newSize);
-                end = encodeSbc(value, encodeBuf, 0);
-            }
-
-            let result = Buffer.allocUnsafe(end);
-
-            encodeBuf.copy(result as Buffer, 0, 0, end);
-
-            return result;
-        },
+        encode: encodeValue,
     };
 };
 
 
-export { compileSchema, createCodec, createRegistry, deserializeRegistry, inferFieldType, inferSchema, lookupSchema, parseFieldType, registerSchema, resolveSchema, serializeFieldType, serializeRegistry };
-export type { ArrayFieldType, FieldDef, FieldType, NullableFieldType, ObjectFieldType, Schema, SchemaRegistry };
+export { compileSchema, createCodec, createInternPool, createRegistry, createSchemaStore, deserializeRegistry, inferFieldType, inferSchema, lookupSchema, parseFieldType, registerSchema, resolveSchema, serializeFieldType, serializeRegistry };
+export type { ArrayFieldType, FieldDef, FieldType, InternPool, NullableFieldType, ObjectFieldType, Schema, SchemaRegistry, SchemaStoreInterface };

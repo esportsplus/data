@@ -45,7 +45,7 @@ let arrayData = { items: Array.from({ length: 100 }, (_, i) => i) },
     simpleData = { name: 'Alice' };
 
 
-// Pre-encode for proto decode benchmarks
+// Pre-encode for decode benchmarks
 
 let protoArrayEncoded = protoArray.encode(arrayData),
     protoLargeEncoded = protoLarge.encode(largeData),
@@ -54,7 +54,7 @@ let protoArrayEncoded = protoArray.encode(arrayData),
     protoSimpleEncoded = protoSimple.encode(simpleData);
 
 
-// Warm up SBC (first encode infers schema + compiles encode/decode functions)
+// Warm up SBC (first encode infers schema + compiles)
 
 let sbcArrayEncoded = sbcCodec.encode(arrayData),
     sbcLargeEncoded = sbcCodec.encode(largeData),
@@ -63,124 +63,87 @@ let sbcArrayEncoded = sbcCodec.encode(arrayData),
     sbcSimpleEncoded = sbcCodec.encode(simpleData);
 
 
-// Verify SBC roundtrip before benchmarking
+// Extra warmup — run each path 1000 times to stabilize JIT
 
-let sbcSimpleDecoded = sbcCodec.decode(sbcSimpleEncoded) as { name: string },
-    sbcMultiDecoded = sbcCodec.decode(sbcMultiEncoded) as { active: boolean; age: number; name: string },
-    sbcNestedDecoded = sbcCodec.decode(sbcNestedEncoded) as { address: { city: string; zip: string }; name: string },
-    sbcArrayDecoded = sbcCodec.decode(sbcArrayEncoded) as { items: number[] },
-    sbcLargeDecoded = sbcCodec.decode(sbcLargeEncoded) as { active: boolean; age: number; email: string; name: string; role: string; score: number };
+for (let i = 0; i < 1000; i++) {
+    protoSimple.encode(simpleData);
+    protoSimple.decode(protoSimpleEncoded);
+    sbcCodec.encode(simpleData);
+    sbcCodec.decode(sbcSimpleEncoded);
+    protoMulti.encode(multiData);
+    protoMulti.decode(protoMultiEncoded);
+    sbcCodec.encode(multiData);
+    sbcCodec.decode(sbcMultiEncoded);
+    protoLarge.encode(largeData);
+    protoLarge.decode(protoLargeEncoded);
+    sbcCodec.encode(largeData);
+    sbcCodec.decode(sbcLargeEncoded);
+}
 
-console.log('SBC roundtrip check — simple:', JSON.stringify(sbcSimpleDecoded));
-console.log('SBC roundtrip check — multi:', JSON.stringify(sbcMultiDecoded));
-console.log('SBC roundtrip check — nested:', JSON.stringify(sbcNestedDecoded));
-console.log('SBC roundtrip check — array[0..2]:', JSON.stringify(sbcArrayDecoded.items.slice(0, 3)));
-console.log('SBC roundtrip check — large:', JSON.stringify(sbcLargeDecoded));
+
+// Wire sizes
+
+console.log('\n--- Wire Size Comparison (bytes) ---');
+console.log(`Simple   { name }              — Proto: ${protoSimpleEncoded.length}  SBC: ${sbcSimpleEncoded.length}`);
+console.log(`Multi    { active, age, name }  — Proto: ${protoMultiEncoded.length}  SBC: ${sbcMultiEncoded.length}`);
+console.log(`Nested   { address, name }      — Proto: ${protoNestedEncoded.length}  SBC: ${sbcNestedEncoded.length}`);
+console.log(`Array    { items: number[100] } — Proto: ${protoArrayEncoded.length}  SBC: ${sbcArrayEncoded.length}`);
+console.log(`Large    { 6 fields }           — Proto: ${protoLargeEncoded.length}  SBC: ${sbcLargeEncoded.length}`);
+console.log('');
 
 
-describe('Simple String Object: { name }', () => {
-    bench('proto encode', () => {
-        protoSimple.encode(simpleData);
-    });
+// Benchmarks — each scenario in its own describe block with warmup iterations
+// The { warmupIterations, warmupTime } ensure JIT is hot before measurement
 
-    bench('sbc encode', () => {
-        sbcCodec.encode(simpleData);
-    });
+let opts = { warmupIterations: 1000, warmupTime: 500 };
 
-    bench('proto decode', () => {
-        protoSimple.decode(protoSimpleEncoded);
-    });
 
-    bench('sbc decode', () => {
-        sbcCodec.decode(sbcSimpleEncoded);
-    });
+describe('Encode: Simple { name }', () => {
+    bench('proto', () => { protoSimple.encode(simpleData); }, opts);
+    bench('sbc', () => { sbcCodec.encode(simpleData); }, opts);
 });
 
-
-describe('Multi-Field Object: { active, age, name }', () => {
-    bench('proto encode', () => {
-        protoMulti.encode(multiData);
-    });
-
-    bench('sbc encode', () => {
-        sbcCodec.encode(multiData);
-    });
-
-    bench('proto decode', () => {
-        protoMulti.decode(protoMultiEncoded);
-    });
-
-    bench('sbc decode', () => {
-        sbcCodec.decode(sbcMultiEncoded);
-    });
+describe('Decode: Simple { name }', () => {
+    bench('proto', () => { protoSimple.decode(protoSimpleEncoded); }, opts);
+    bench('sbc', () => { sbcCodec.decode(sbcSimpleEncoded); }, opts);
 });
 
-
-describe('Nested Object: { address: { city, zip }, name }', () => {
-    bench('proto encode', () => {
-        protoNested.encode(nestedData);
-    });
-
-    bench('sbc encode', () => {
-        sbcCodec.encode(nestedData);
-    });
-
-    bench('proto decode', () => {
-        protoNested.decode(protoNestedEncoded);
-    });
-
-    bench('sbc decode', () => {
-        sbcCodec.decode(sbcNestedEncoded);
-    });
+describe('Encode: Multi-Field { active, age, name }', () => {
+    bench('proto', () => { protoMulti.encode(multiData); }, opts);
+    bench('sbc', () => { sbcCodec.encode(multiData); }, opts);
 });
 
-
-describe('Number Array: { items: number[100] }', () => {
-    bench('proto encode', () => {
-        protoArray.encode(arrayData);
-    });
-
-    bench('sbc encode', () => {
-        sbcCodec.encode(arrayData);
-    });
-
-    bench('proto decode', () => {
-        protoArray.decode(protoArrayEncoded);
-    });
-
-    bench('sbc decode', () => {
-        sbcCodec.decode(sbcArrayEncoded);
-    });
+describe('Decode: Multi-Field { active, age, name }', () => {
+    bench('proto', () => { protoMulti.decode(protoMultiEncoded); }, opts);
+    bench('sbc', () => { sbcCodec.decode(sbcMultiEncoded); }, opts);
 });
 
-
-describe('Large Object: { active, age, email, name, role, score }', () => {
-    bench('proto encode', () => {
-        protoLarge.encode(largeData);
-    });
-
-    bench('sbc encode', () => {
-        sbcCodec.encode(largeData);
-    });
-
-    bench('proto decode', () => {
-        protoLarge.decode(protoLargeEncoded);
-    });
-
-    bench('sbc decode', () => {
-        sbcCodec.decode(sbcLargeEncoded);
-    });
+describe('Encode: Nested { address: { city, zip }, name }', () => {
+    bench('proto', () => { protoNested.encode(nestedData); }, opts);
+    bench('sbc', () => { sbcCodec.encode(nestedData); }, opts);
 });
 
+describe('Decode: Nested { address: { city, zip }, name }', () => {
+    bench('proto', () => { protoNested.decode(protoNestedEncoded); }, opts);
+    bench('sbc', () => { sbcCodec.decode(sbcNestedEncoded); }, opts);
+});
 
-describe('Wire Size Comparison', () => {
-    bench('wire sizes (logged only)', () => {
-        console.log(
-            'Simple — Proto:', protoSimpleEncoded.length, 'SBC:', sbcSimpleEncoded.length,
-            '| Multi — Proto:', protoMultiEncoded.length, 'SBC:', sbcMultiEncoded.length,
-            '| Nested — Proto:', protoNestedEncoded.length, 'SBC:', sbcNestedEncoded.length,
-            '| Array — Proto:', protoArrayEncoded.length, 'SBC:', sbcArrayEncoded.length,
-            '| Large — Proto:', protoLargeEncoded.length, 'SBC:', sbcLargeEncoded.length,
-        );
-    });
+describe('Encode: Array { items: number[100] }', () => {
+    bench('proto', () => { protoArray.encode(arrayData); }, opts);
+    bench('sbc', () => { sbcCodec.encode(arrayData); }, opts);
+});
+
+describe('Decode: Array { items: number[100] }', () => {
+    bench('proto', () => { protoArray.decode(protoArrayEncoded); }, opts);
+    bench('sbc', () => { sbcCodec.decode(sbcArrayEncoded); }, opts);
+});
+
+describe('Encode: Large { 6 fields }', () => {
+    bench('proto', () => { protoLarge.encode(largeData); }, opts);
+    bench('sbc', () => { sbcCodec.encode(largeData); }, opts);
+});
+
+describe('Decode: Large { 6 fields }', () => {
+    bench('proto', () => { protoLarge.decode(protoLargeEncoded); }, opts);
+    bench('sbc', () => { sbcCodec.decode(sbcLargeEncoded); }, opts);
 });
