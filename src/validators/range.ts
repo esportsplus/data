@@ -4,6 +4,7 @@ import type { ValidatorFunction } from '~/types';
 
 const range = (min: number, max: number, error?: string): ValidatorFunction<unknown> => {
     let arr = error || `must be between ${min} and ${max} items`,
+        big = error || `must be between ${min} and ${max}`,
         num = error || `must be between ${min} and ${max}`,
         str = error || `must be between ${min} and ${max} characters`;
 
@@ -11,6 +12,11 @@ const range = (min: number, max: number, error?: string): ValidatorFunction<unkn
         if (typeof value === 'number') {
             if (value > max || value < min) {
                 errors.push(num);
+            }
+        }
+        else if (typeof value === 'bigint') {
+            if (value < BigInt(min) || value > BigInt(max)) {
+                errors.push(big);
             }
         }
         else if (typeof value === 'string') {
@@ -24,7 +30,7 @@ const range = (min: number, max: number, error?: string): ValidatorFunction<unkn
             }
         }
         else {
-            throw new Error(`${PACKAGE_NAME}: range validator can only be applied to number, string, or array types`);
+            throw new Error(`${PACKAGE_NAME}: range validator can only be applied to number, bigint, string, or array types`);
         }
     };
 };

@@ -4,6 +4,7 @@ import type { ValidatorFunction } from '~/types';
 
 const min = (number: number, error?: string): ValidatorFunction<unknown> => {
     let arr = error || `must be at least ${number} items`,
+        big = error || `must be at least ${number}`,
         num = error || `must be at least ${number}`,
         str = error || `must be at least ${number} characters`;
 
@@ -11,6 +12,11 @@ const min = (number: number, error?: string): ValidatorFunction<unknown> => {
         if (typeof value === 'number') {
             if (value < number) {
                 errors.push(num);
+            }
+        }
+        else if (typeof value === 'bigint') {
+            if (value < BigInt(number)) {
+                errors.push(big);
             }
         }
         else if (typeof value === 'string') {
@@ -24,7 +30,7 @@ const min = (number: number, error?: string): ValidatorFunction<unknown> => {
             }
         }
         else {
-            throw new Error(`${PACKAGE_NAME}: min validator can only be applied to number, string, or array types`);
+            throw new Error(`${PACKAGE_NAME}: min validator can only be applied to number, bigint, string, or array types`);
         }
     };
 };

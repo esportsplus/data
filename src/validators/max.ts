@@ -4,6 +4,7 @@ import type { ValidatorFunction } from '~/types';
 
 const max = (number: number, error?: string): ValidatorFunction<unknown> => {
     let arr = error || `must be at most ${number} items`,
+        big = error || `must be at most ${number}`,
         num = error || `must be at most ${number}`,
         str = error || `must be at most ${number} characters`;
 
@@ -11,6 +12,11 @@ const max = (number: number, error?: string): ValidatorFunction<unknown> => {
         if (typeof value === 'number') {
             if (value > number) {
                 errors.push(num);
+            }
+        }
+        else if (typeof value === 'bigint') {
+            if (value > BigInt(number)) {
+                errors.push(big);
             }
         }
         else if (typeof value === 'string') {
@@ -24,7 +30,7 @@ const max = (number: number, error?: string): ValidatorFunction<unknown> => {
             }
         }
         else {
-            throw new Error(`${PACKAGE_NAME}: max validator can only be applied to number, string, or array types`);
+            throw new Error(`${PACKAGE_NAME}: max validator can only be applied to number, bigint, string, or array types`);
         }
     };
 };

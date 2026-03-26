@@ -89,7 +89,7 @@ describe('min Validator', () => {
         it('throws for unsupported type', () => {
             expect(() => {
                 validator({} as any, { push: () => {} });
-            }).toThrow('@esportsplus/data: min validator can only be applied to number, string, or array types');
+            }).toThrow('@esportsplus/data: min validator can only be applied to number, bigint, string, or array types');
         });
     });
 });
@@ -182,7 +182,7 @@ describe('max Validator', () => {
         it('throws for unsupported type', () => {
             expect(() => {
                 validator({} as any, { push: () => {} });
-            }).toThrow('@esportsplus/data: max validator can only be applied to number, string, or array types');
+            }).toThrow('@esportsplus/data: max validator can only be applied to number, bigint, string, or array types');
         });
     });
 });
@@ -302,7 +302,7 @@ describe('range Validator', () => {
         it('throws for unsupported type', () => {
             expect(() => {
                 validator({} as any, { push: () => {} });
-            }).toThrow('@esportsplus/data: range validator can only be applied to number, string, or array types');
+            }).toThrow('@esportsplus/data: range validator can only be applied to number, bigint, string, or array types');
         });
     });
 });
