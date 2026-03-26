@@ -1,13 +1,17 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
 let RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 
-const slug = (value: unknown, errors: ErrorType): void => {
-    if (typeof value !== 'string' || !RE.test(value)) {
-        errors.push('must be a valid slug');
-    }
+const slug = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must be a valid slug';
+
+    return (value, errors) => {
+        if (typeof value !== 'string' || !RE.test(value)) {
+            errors.push(msg);
+        }
+    };
 };
 
 

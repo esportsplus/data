@@ -1,22 +1,27 @@
 import type { ValidatorFunction } from '~/types';
 
 
-const unique: ValidatorFunction<unknown> = (value, errors) => {
-    if (!Array.isArray(value)) {
-        errors.push('must be an array');
-        return;
-    }
+const unique = (error?: string): ValidatorFunction<unknown> => {
+    let arrayMsg = error || 'must be an array',
+        uniqueMsg = error || 'must contain unique items';
 
-    let seen = new Set();
-
-    for (let i = 0, n = value.length; i < n; i++) {
-        if (seen.has(value[i])) {
-            errors.push('must contain unique items');
+    return (value, errors) => {
+        if (!Array.isArray(value)) {
+            errors.push(arrayMsg);
             return;
         }
 
-        seen.add(value[i]);
-    }
+        let seen = new Set();
+
+        for (let i = 0, n = value.length; i < n; i++) {
+            if (seen.has(value[i])) {
+                errors.push(uniqueMsg);
+                return;
+            }
+
+            seen.add(value[i]);
+        }
+    };
 };
 
 

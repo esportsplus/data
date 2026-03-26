@@ -1,4 +1,4 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
 let DIGITS_RE = /^[0-9]+$/,
@@ -27,17 +27,21 @@ function luhn(digits: string): boolean {
 }
 
 
-const cc = (value: unknown, errors: ErrorType): void => {
-    if (typeof value !== 'string') {
-        errors.push('must be a valid credit card number');
-        return;
-    }
+const cc = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must be a valid credit card number';
 
-    let stripped = value.replace(STRIP_RE, '');
+    return (value, errors) => {
+        if (typeof value !== 'string') {
+            errors.push(msg);
+            return;
+        }
 
-    if (stripped.length < 12 || stripped.length > 19 || !DIGITS_RE.test(stripped) || !luhn(stripped)) {
-        errors.push('must be a valid credit card number');
-    }
+        let stripped = value.replace(STRIP_RE, '');
+
+        if (stripped.length < 12 || stripped.length > 19 || !DIGITS_RE.test(stripped) || !luhn(stripped)) {
+            errors.push(msg);
+        }
+    };
 };
 
 

@@ -1,10 +1,14 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
-const dateString = (value: unknown, errors: ErrorType): void => {
-    if (typeof value !== 'string' || isNaN(new Date(value).getTime())) {
-        errors.push('must be a valid date string');
-    }
+const dateString = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must be a valid date string';
+
+    return (value, errors) => {
+        if (typeof value !== 'string' || isNaN(new Date(value).getTime())) {
+            errors.push(msg);
+        }
+    };
 };
 
 

@@ -1,4 +1,4 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
 let ISBN10_RE = /^\d{9}[\dX]$/,
@@ -29,22 +29,26 @@ function isbn13(value: string): boolean {
 }
 
 
-const isbn = (value: unknown, errors: ErrorType): void => {
-    if (typeof value !== 'string') {
-        errors.push('must be a valid ISBN');
-        return;
-    }
+const isbn = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must be a valid ISBN';
 
-    let stripped = value.replace(STRIP_RE, '');
+    return (value, errors) => {
+        if (typeof value !== 'string') {
+            errors.push(msg);
+            return;
+        }
 
-    if (
-        (ISBN10_RE.test(stripped) && isbn10(stripped)) ||
-        (ISBN13_RE.test(stripped) && isbn13(stripped))
-    ) {
-        return;
-    }
+        let stripped = value.replace(STRIP_RE, '');
 
-    errors.push('must be a valid ISBN');
+        if (
+            (ISBN10_RE.test(stripped) && isbn10(stripped)) ||
+            (ISBN13_RE.test(stripped) && isbn13(stripped))
+        ) {
+            return;
+        }
+
+        errors.push(msg);
+    };
 };
 
 

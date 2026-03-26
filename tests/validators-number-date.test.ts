@@ -41,37 +41,41 @@ function expectFail(fn: (value: unknown, errors: { push(msg: string): void }) =>
 
 describe('positive', () => {
     it('passes for positive number', () => {
-        expectPass(positive, 1);
-        expectPass(positive, 0.001);
-        expectPass(positive, Number.MAX_SAFE_INTEGER);
+        expectPass(positive(), 1);
+        expectPass(positive(), 0.001);
+        expectPass(positive(), Number.MAX_SAFE_INTEGER);
     });
 
     it('fails for zero', () => {
-        expectFail(positive, 0, 'must be positive');
+        expectFail(positive(), 0, 'must be positive');
     });
 
     it('fails for negative number', () => {
-        expectFail(positive, -1);
-        expectFail(positive, -0.001);
+        expectFail(positive(), -1);
+        expectFail(positive(), -0.001);
     });
 
     it('fails for non-number types', () => {
-        expectFail(positive, '5');
-        expectFail(positive, null);
-        expectFail(positive, undefined);
-        expectFail(positive, true);
+        expectFail(positive(), '5');
+        expectFail(positive(), null);
+        expectFail(positive(), undefined);
+        expectFail(positive(), true);
     });
 
     it('does not reject NaN (typeof check passes, comparison yields false)', () => {
-        expectPass(positive, NaN);
+        expectPass(positive(), NaN);
     });
 
     it('passes for Infinity', () => {
-        expectPass(positive, Infinity);
+        expectPass(positive(), Infinity);
     });
 
     it('fails for -Infinity', () => {
-        expectFail(positive, -Infinity);
+        expectFail(positive(), -Infinity);
+    });
+
+    it('uses custom error message', () => {
+        expectFail(positive('Custom error'), 0, 'Custom error');
     });
 });
 
@@ -81,35 +85,39 @@ describe('positive', () => {
 
 describe('negative', () => {
     it('passes for negative number', () => {
-        expectPass(negative, -1);
-        expectPass(negative, -0.001);
-        expectPass(negative, Number.MIN_SAFE_INTEGER);
+        expectPass(negative(), -1);
+        expectPass(negative(), -0.001);
+        expectPass(negative(), Number.MIN_SAFE_INTEGER);
     });
 
     it('fails for zero', () => {
-        expectFail(negative, 0, 'must be negative');
+        expectFail(negative(), 0, 'must be negative');
     });
 
     it('fails for positive number', () => {
-        expectFail(negative, 1);
-        expectFail(negative, 0.001);
+        expectFail(negative(), 1);
+        expectFail(negative(), 0.001);
     });
 
     it('fails for non-number types', () => {
-        expectFail(negative, '-5');
-        expectFail(negative, null);
+        expectFail(negative(), '-5');
+        expectFail(negative(), null);
     });
 
     it('does not reject NaN (typeof check passes, comparison yields false)', () => {
-        expectPass(negative, NaN);
+        expectPass(negative(), NaN);
     });
 
     it('passes for -Infinity', () => {
-        expectPass(negative, -Infinity);
+        expectPass(negative(), -Infinity);
     });
 
     it('fails for Infinity', () => {
-        expectFail(negative, Infinity);
+        expectFail(negative(), Infinity);
+    });
+
+    it('uses custom error message', () => {
+        expectFail(negative('Custom error'), 0, 'Custom error');
     });
 });
 
@@ -119,30 +127,34 @@ describe('negative', () => {
 
 describe('nonNegative', () => {
     it('passes for positive number', () => {
-        expectPass(nonNegative, 1);
-        expectPass(nonNegative, 0.001);
+        expectPass(nonNegative(), 1);
+        expectPass(nonNegative(), 0.001);
     });
 
     it('passes for zero', () => {
-        expectPass(nonNegative, 0);
+        expectPass(nonNegative(), 0);
     });
 
     it('fails for negative number', () => {
-        expectFail(nonNegative, -1, 'must be non-negative');
-        expectFail(nonNegative, -0.001);
+        expectFail(nonNegative(), -1, 'must be non-negative');
+        expectFail(nonNegative(), -0.001);
     });
 
     it('fails for non-number types', () => {
-        expectFail(nonNegative, '0');
-        expectFail(nonNegative, null);
+        expectFail(nonNegative(), '0');
+        expectFail(nonNegative(), null);
     });
 
     it('does not reject NaN (typeof check passes, comparison yields false)', () => {
-        expectPass(nonNegative, NaN);
+        expectPass(nonNegative(), NaN);
     });
 
     it('handles -0 as zero (passes)', () => {
-        expectPass(nonNegative, -0);
+        expectPass(nonNegative(), -0);
+    });
+
+    it('uses custom error message', () => {
+        expectFail(nonNegative('Custom error'), -1, 'Custom error');
     });
 });
 
@@ -152,30 +164,34 @@ describe('nonNegative', () => {
 
 describe('nonPositive', () => {
     it('passes for negative number', () => {
-        expectPass(nonPositive, -1);
-        expectPass(nonPositive, -0.001);
+        expectPass(nonPositive(), -1);
+        expectPass(nonPositive(), -0.001);
     });
 
     it('passes for zero', () => {
-        expectPass(nonPositive, 0);
+        expectPass(nonPositive(), 0);
     });
 
     it('fails for positive number', () => {
-        expectFail(nonPositive, 1, 'must be non-positive');
-        expectFail(nonPositive, 0.001);
+        expectFail(nonPositive(), 1, 'must be non-positive');
+        expectFail(nonPositive(), 0.001);
     });
 
     it('fails for non-number types', () => {
-        expectFail(nonPositive, '0');
-        expectFail(nonPositive, null);
+        expectFail(nonPositive(), '0');
+        expectFail(nonPositive(), null);
     });
 
     it('does not reject NaN (typeof check passes, comparison yields false)', () => {
-        expectPass(nonPositive, NaN);
+        expectPass(nonPositive(), NaN);
     });
 
     it('handles -0 as zero (passes)', () => {
-        expectPass(nonPositive, -0);
+        expectPass(nonPositive(), -0);
+    });
+
+    it('uses custom error message', () => {
+        expectFail(nonPositive('Custom error'), 1, 'Custom error');
     });
 });
 
@@ -185,32 +201,36 @@ describe('nonPositive', () => {
 
 describe('integer', () => {
     it('passes for integer values', () => {
-        expectPass(integer, 0);
-        expectPass(integer, 1);
-        expectPass(integer, -1);
-        expectPass(integer, 42);
-        expectPass(integer, Number.MAX_SAFE_INTEGER);
+        expectPass(integer(), 0);
+        expectPass(integer(), 1);
+        expectPass(integer(), -1);
+        expectPass(integer(), 42);
+        expectPass(integer(), Number.MAX_SAFE_INTEGER);
     });
 
     it('fails for floating point values', () => {
-        expectFail(integer, 1.5, 'must be an integer');
-        expectFail(integer, 0.1);
-        expectFail(integer, -3.14);
+        expectFail(integer(), 1.5, 'must be an integer');
+        expectFail(integer(), 0.1);
+        expectFail(integer(), -3.14);
     });
 
     it('fails for NaN', () => {
-        expectFail(integer, NaN);
+        expectFail(integer(), NaN);
     });
 
     it('fails for Infinity', () => {
-        expectFail(integer, Infinity);
-        expectFail(integer, -Infinity);
+        expectFail(integer(), Infinity);
+        expectFail(integer(), -Infinity);
     });
 
     it('fails for non-number types', () => {
-        expectFail(integer, '42');
-        expectFail(integer, null);
-        expectFail(integer, true);
+        expectFail(integer(), '42');
+        expectFail(integer(), null);
+        expectFail(integer(), true);
+    });
+
+    it('uses custom error message', () => {
+        expectFail(integer('Custom error'), 1.5, 'Custom error');
     });
 });
 
@@ -220,30 +240,34 @@ describe('integer', () => {
 
 describe('safeInteger', () => {
     it('passes for safe integer values', () => {
-        expectPass(safeInteger, 0);
-        expectPass(safeInteger, 1);
-        expectPass(safeInteger, -1);
-        expectPass(safeInteger, Number.MAX_SAFE_INTEGER);
-        expectPass(safeInteger, Number.MIN_SAFE_INTEGER);
+        expectPass(safeInteger(), 0);
+        expectPass(safeInteger(), 1);
+        expectPass(safeInteger(), -1);
+        expectPass(safeInteger(), Number.MAX_SAFE_INTEGER);
+        expectPass(safeInteger(), Number.MIN_SAFE_INTEGER);
     });
 
     it('fails for unsafe integer values', () => {
-        expectFail(safeInteger, Number.MAX_SAFE_INTEGER + 1, 'must be a safe integer');
-        expectFail(safeInteger, Number.MIN_SAFE_INTEGER - 1);
+        expectFail(safeInteger(), Number.MAX_SAFE_INTEGER + 1, 'must be a safe integer');
+        expectFail(safeInteger(), Number.MIN_SAFE_INTEGER - 1);
     });
 
     it('fails for floating point values', () => {
-        expectFail(safeInteger, 1.5);
+        expectFail(safeInteger(), 1.5);
     });
 
     it('fails for NaN and Infinity', () => {
-        expectFail(safeInteger, NaN);
-        expectFail(safeInteger, Infinity);
+        expectFail(safeInteger(), NaN);
+        expectFail(safeInteger(), Infinity);
     });
 
     it('fails for non-number types', () => {
-        expectFail(safeInteger, '42');
-        expectFail(safeInteger, null);
+        expectFail(safeInteger(), '42');
+        expectFail(safeInteger(), null);
+    });
+
+    it('uses custom error message', () => {
+        expectFail(safeInteger('Custom error'), 1.5, 'Custom error');
     });
 });
 
@@ -253,26 +277,30 @@ describe('safeInteger', () => {
 
 describe('finite', () => {
     it('passes for finite numbers', () => {
-        expectPass(finite, 0);
-        expectPass(finite, 1);
-        expectPass(finite, -1);
-        expectPass(finite, 3.14);
-        expectPass(finite, Number.MAX_SAFE_INTEGER);
+        expectPass(finite(), 0);
+        expectPass(finite(), 1);
+        expectPass(finite(), -1);
+        expectPass(finite(), 3.14);
+        expectPass(finite(), Number.MAX_SAFE_INTEGER);
     });
 
     it('fails for Infinity', () => {
-        expectFail(finite, Infinity, 'must be finite');
-        expectFail(finite, -Infinity);
+        expectFail(finite(), Infinity, 'must be finite');
+        expectFail(finite(), -Infinity);
     });
 
     it('fails for NaN', () => {
-        expectFail(finite, NaN);
+        expectFail(finite(), NaN);
     });
 
     it('fails for non-number types', () => {
-        expectFail(finite, '0');
-        expectFail(finite, null);
-        expectFail(finite, true);
+        expectFail(finite(), '0');
+        expectFail(finite(), null);
+        expectFail(finite(), true);
+    });
+
+    it('uses custom error message', () => {
+        expectFail(finite('Custom error'), Infinity, 'Custom error');
     });
 });
 
@@ -478,19 +506,23 @@ describe('range (bigint)', () => {
 
 describe('date.valid', () => {
     it('passes for valid date', () => {
-        expectPass(date.valid, new Date('2024-01-15'));
-        expectPass(date.valid, new Date());
+        expectPass(date.valid(), new Date('2024-01-15'));
+        expectPass(date.valid(), new Date());
     });
 
     it('fails for invalid date', () => {
-        expectFail(date.valid, new Date('invalid'), 'must be a valid date');
+        expectFail(date.valid(), new Date('invalid'), 'must be a valid date');
     });
 
     it('fails for non-date', () => {
-        expectFail(date.valid, '2024-01-15');
-        expectFail(date.valid, 1234567890);
-        expectFail(date.valid, null);
-        expectFail(date.valid, undefined);
+        expectFail(date.valid(), '2024-01-15');
+        expectFail(date.valid(), 1234567890);
+        expectFail(date.valid(), null);
+        expectFail(date.valid(), undefined);
+    });
+
+    it('uses custom error message', () => {
+        expectFail(date.valid('Custom error'), new Date('invalid'), 'Custom error');
     });
 });
 
@@ -551,43 +583,51 @@ describe('date.max', () => {
 
 describe('date.past', () => {
     it('passes for past date', () => {
-        expectPass(date.past, new Date('2000-01-01'));
-        expectPass(date.past, new Date(Date.now() - 10000));
+        expectPass(date.past(), new Date('2000-01-01'));
+        expectPass(date.past(), new Date(Date.now() - 10000));
     });
 
     it('fails for future date', () => {
-        expectFail(date.past, new Date(Date.now() + 100000), 'must be a past date');
+        expectFail(date.past(), new Date(Date.now() + 100000), 'must be a past date');
     });
 
     it('fails for invalid date', () => {
-        expectFail(date.past, new Date('invalid'));
+        expectFail(date.past(), new Date('invalid'));
     });
 
     it('fails for non-date', () => {
-        expectFail(date.past, '2000-01-01');
-        expectFail(date.past, null);
+        expectFail(date.past(), '2000-01-01');
+        expectFail(date.past(), null);
+    });
+
+    it('uses custom error message', () => {
+        expectFail(date.past('Custom error'), new Date(Date.now() + 100000), 'Custom error');
     });
 });
 
 
 describe('date.future', () => {
     it('passes for future date', () => {
-        expectPass(date.future, new Date(Date.now() + 100000));
-        expectPass(date.future, new Date('2099-01-01'));
+        expectPass(date.future(), new Date(Date.now() + 100000));
+        expectPass(date.future(), new Date('2099-01-01'));
     });
 
     it('fails for past date', () => {
-        expectFail(date.future, new Date('2000-01-01'), 'must be a future date');
-        expectFail(date.future, new Date(Date.now() - 10000));
+        expectFail(date.future(), new Date('2000-01-01'), 'must be a future date');
+        expectFail(date.future(), new Date(Date.now() - 10000));
     });
 
     it('fails for invalid date', () => {
-        expectFail(date.future, new Date('invalid'));
+        expectFail(date.future(), new Date('invalid'));
     });
 
     it('fails for non-date', () => {
-        expectFail(date.future, '2099-01-01');
-        expectFail(date.future, null);
+        expectFail(date.future(), '2099-01-01');
+        expectFail(date.future(), null);
+    });
+
+    it('uses custom error message', () => {
+        expectFail(date.future('Custom error'), new Date('2000-01-01'), 'Custom error');
     });
 });
 
@@ -597,53 +637,58 @@ describe('date.future', () => {
 
 describe('unique', () => {
     it('passes for array with unique items', () => {
-        expectPass(unique, [1, 2, 3]);
-        expectPass(unique, ['a', 'b', 'c']);
-        expectPass(unique, [1, 'a', true, null]);
+        expectPass(unique(), [1, 2, 3]);
+        expectPass(unique(), ['a', 'b', 'c']);
+        expectPass(unique(), [1, 'a', true, null]);
     });
 
     it('passes for empty array', () => {
-        expectPass(unique, []);
+        expectPass(unique(), []);
     });
 
     it('passes for single-element array', () => {
-        expectPass(unique, [42]);
+        expectPass(unique(), [42]);
     });
 
     it('fails for array with duplicate numbers', () => {
-        expectFail(unique, [1, 2, 3, 2], 'must contain unique items');
+        expectFail(unique(), [1, 2, 3, 2], 'must contain unique items');
     });
 
     it('fails for array with duplicate strings', () => {
-        expectFail(unique, ['a', 'b', 'a']);
+        expectFail(unique(), ['a', 'b', 'a']);
     });
 
     it('fails for array with duplicate null', () => {
-        expectFail(unique, [null, 1, null]);
+        expectFail(unique(), [null, 1, null]);
     });
 
     it('fails for array with duplicate undefined', () => {
-        expectFail(unique, [undefined, 1, undefined]);
+        expectFail(unique(), [undefined, 1, undefined]);
     });
 
     it('does not treat objects as duplicates (reference equality)', () => {
         let a = { x: 1 },
             b = { x: 1 };
 
-        expectPass(unique, [a, b]);
+        expectPass(unique(), [a, b]);
     });
 
     it('fails for duplicate object references', () => {
         let a = { x: 1 };
 
-        expectFail(unique, [a, a]);
+        expectFail(unique(), [a, a]);
     });
 
     it('fails for non-array', () => {
-        expectFail(unique, 'hello', 'must be an array');
-        expectFail(unique, 42);
-        expectFail(unique, null);
-        expectFail(unique, undefined);
-        expectFail(unique, { length: 3 });
+        expectFail(unique(), 'hello', 'must be an array');
+        expectFail(unique(), 42);
+        expectFail(unique(), null);
+        expectFail(unique(), undefined);
+        expectFail(unique(), { length: 3 });
+    });
+
+    it('uses custom error message', () => {
+        expectFail(unique('Custom error'), [1, 1], 'Custom error');
+        expectFail(unique('Custom error'), 'not-array', 'Custom error');
     });
 });

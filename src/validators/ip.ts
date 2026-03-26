@@ -1,7 +1,7 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
-type V = (value: unknown, errors: ErrorType) => void;
+type F = (error?: string) => ValidatorFunction<unknown>;
 
 let V4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/,
     V4_CIDR_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/,
@@ -57,42 +57,62 @@ function isValidV6Cidr(value: string): boolean {
 }
 
 
-let v4: V & { cidr: V } = Object.assign(
-    (value: unknown, errors: ErrorType): void => {
-        if (typeof value !== 'string' || !isValidV4(value)) {
-            errors.push('must be a valid IPv4 address');
-        }
+let v4: F & { cidr: F } = Object.assign(
+    (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid IPv4 address';
+
+        return (value, errors) => {
+            if (typeof value !== 'string' || !isValidV4(value)) {
+                errors.push(msg);
+            }
+        };
     },
     {
-        cidr: (value: unknown, errors: ErrorType): void => {
-            if (typeof value !== 'string' || !isValidV4Cidr(value)) {
-                errors.push('must be a valid IPv4 CIDR');
-            }
+        cidr: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must be a valid IPv4 CIDR';
+
+            return (value, errors) => {
+                if (typeof value !== 'string' || !isValidV4Cidr(value)) {
+                    errors.push(msg);
+                }
+            };
         },
     }
 );
 
-let v6: V & { cidr: V } = Object.assign(
-    (value: unknown, errors: ErrorType): void => {
-        if (typeof value !== 'string' || !isValidV6(value)) {
-            errors.push('must be a valid IPv6 address');
-        }
+let v6: F & { cidr: F } = Object.assign(
+    (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid IPv6 address';
+
+        return (value, errors) => {
+            if (typeof value !== 'string' || !isValidV6(value)) {
+                errors.push(msg);
+            }
+        };
     },
     {
-        cidr: (value: unknown, errors: ErrorType): void => {
-            if (typeof value !== 'string' || !isValidV6Cidr(value)) {
-                errors.push('must be a valid IPv6 CIDR');
-            }
+        cidr: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must be a valid IPv6 CIDR';
+
+            return (value, errors) => {
+                if (typeof value !== 'string' || !isValidV6Cidr(value)) {
+                    errors.push(msg);
+                }
+            };
         },
     }
 );
 
 
-const ip: V & { v4: V & { cidr: V }; v6: V & { cidr: V } } = Object.assign(
-    (value: unknown, errors: ErrorType): void => {
-        if (typeof value !== 'string' || (!isValidV4(value) && !isValidV6(value))) {
-            errors.push('must be a valid IP address');
-        }
+const ip: F & { v4: F & { cidr: F }; v6: F & { cidr: F } } = Object.assign(
+    (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid IP address';
+
+        return (value, errors) => {
+            if (typeof value !== 'string' || (!isValidV4(value) && !isValidV6(value))) {
+                errors.push(msg);
+            }
+        };
     },
     {
         v4,

@@ -1,10 +1,14 @@
 import type { ValidatorFunction } from '~/types';
 
 
-const integer: ValidatorFunction<unknown> = (value, errors) => {
-    if (typeof value !== 'number' || !Number.isInteger(value)) {
-        errors.push('must be an integer');
-    }
+const integer = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must be an integer';
+
+    return (value, errors) => {
+        if (typeof value !== 'number' || !Number.isInteger(value)) {
+            errors.push(msg);
+        }
+    };
 };
 
 

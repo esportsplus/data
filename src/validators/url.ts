@@ -1,30 +1,36 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
-type V = (value: unknown, errors: ErrorType) => void;
+type F = (error?: string) => ValidatorFunction<unknown>;
 
 let GENERAL_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s]+$/,
     HTTP_RE = /^https?:\/\/[^\s]+$/,
     HTTPS_RE = /^https:\/\/[^\s]+$/;
 
 
-function validate(value: unknown, errors: ErrorType, re: RegExp, error: string): void {
+function check(value: unknown, errors: { push(message: string): void }, re: RegExp, msg: string): void {
     if (typeof value !== 'string' || !re.test(value)) {
-        errors.push(error);
+        errors.push(msg);
     }
 }
 
 
-const url: V & { http: V; https: V } = Object.assign(
-    (value: unknown, errors: ErrorType): void => {
-        validate(value, errors, GENERAL_RE, 'must be a valid URL');
+const url: F & { http: F; https: F } = Object.assign(
+    (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid URL';
+
+        return (value, errors) => check(value, errors, GENERAL_RE, msg);
     },
     {
-        http: (value: unknown, errors: ErrorType): void => {
-            validate(value, errors, HTTP_RE, 'must be a valid HTTP URL');
+        http: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must be a valid HTTP URL';
+
+            return (value, errors) => check(value, errors, HTTP_RE, msg);
         },
-        https: (value: unknown, errors: ErrorType): void => {
-            validate(value, errors, HTTPS_RE, 'must be a valid HTTPS URL');
+        https: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must be a valid HTTPS URL';
+
+            return (value, errors) => check(value, errors, HTTPS_RE, msg);
         },
     }
 );

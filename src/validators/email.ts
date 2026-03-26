@@ -1,7 +1,7 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
-type V = (value: unknown, errors: ErrorType) => void;
+type F = (error?: string) => ValidatorFunction<unknown>;
 
 let GENERAL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
     HTML5_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/,
@@ -9,26 +9,34 @@ let GENERAL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
     UNICODE_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 
 
-function validate(value: unknown, errors: ErrorType, re: RegExp, error: string): void {
+function check(value: unknown, errors: { push(message: string): void }, re: RegExp, msg: string): void {
     if (typeof value !== 'string' || !re.test(value)) {
-        errors.push(error);
+        errors.push(msg);
     }
 }
 
 
-const email: V & { html5: V; rfc5322: V; unicode: V } = Object.assign(
-    (value: unknown, errors: ErrorType): void => {
-        validate(value, errors, GENERAL_RE, 'must be a valid email');
+const email: F & { html5: F; rfc5322: F; unicode: F } = Object.assign(
+    (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid email';
+
+        return (value, errors) => check(value, errors, GENERAL_RE, msg);
     },
     {
-        html5: (value: unknown, errors: ErrorType): void => {
-            validate(value, errors, HTML5_RE, 'must be a valid email');
+        html5: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must be a valid email';
+
+            return (value, errors) => check(value, errors, HTML5_RE, msg);
         },
-        rfc5322: (value: unknown, errors: ErrorType): void => {
-            validate(value, errors, RFC5322_RE, 'must be a valid email');
+        rfc5322: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must be a valid email';
+
+            return (value, errors) => check(value, errors, RFC5322_RE, msg);
         },
-        unicode: (value: unknown, errors: ErrorType): void => {
-            validate(value, errors, UNICODE_RE, 'must be a valid email');
+        unicode: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must be a valid email';
+
+            return (value, errors) => check(value, errors, UNICODE_RE, msg);
         },
     }
 );

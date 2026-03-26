@@ -1,4 +1,4 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
 let RE = /^\d{15}$/;
@@ -26,10 +26,14 @@ function luhn(digits: string): boolean {
 }
 
 
-const imei = (value: unknown, errors: ErrorType): void => {
-    if (typeof value !== 'string' || !RE.test(value) || !luhn(value)) {
-        errors.push('must be a valid IMEI number');
-    }
+const imei = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must be a valid IMEI number';
+
+    return (value, errors) => {
+        if (typeof value !== 'string' || !RE.test(value) || !luhn(value)) {
+            errors.push(msg);
+        }
+    };
 };
 
 

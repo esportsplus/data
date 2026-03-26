@@ -1,48 +1,60 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
-type V = (value: unknown, errors: ErrorType) => void;
+type F = (error?: string) => ValidatorFunction<unknown>;
 
-type VF = (d: Date, error?: string) => V;
+type PF = (d: Date, error?: string) => ValidatorFunction<unknown>;
 
 
-let date: { future: V; max: VF; min: VF; past: V; valid: V } = {
-    future: (value: unknown, errors: ErrorType): void => {
-        if (!(value instanceof Date) || isNaN(value.getTime()) || value.getTime() <= Date.now()) {
-            errors.push('must be a future date');
-        }
+let date: { future: F; max: PF; min: PF; past: F; valid: F } = {
+    future: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a future date';
+
+        return (value, errors) => {
+            if (!(value instanceof Date) || isNaN(value.getTime()) || value.getTime() <= Date.now()) {
+                errors.push(msg);
+            }
+        };
     },
 
-    max: (d: Date, error?: string) => {
+    max: (d: Date, error?: string): ValidatorFunction<unknown> => {
         let msg = error || `must be on or before ${d.toISOString()}`;
 
-        return (value: unknown, errors: ErrorType): void => {
+        return (value, errors) => {
             if (!(value instanceof Date) || isNaN(value.getTime()) || value.getTime() > d.getTime()) {
                 errors.push(msg);
             }
         };
     },
 
-    min: (d: Date, error?: string) => {
+    min: (d: Date, error?: string): ValidatorFunction<unknown> => {
         let msg = error || `must be on or after ${d.toISOString()}`;
 
-        return (value: unknown, errors: ErrorType): void => {
+        return (value, errors) => {
             if (!(value instanceof Date) || isNaN(value.getTime()) || value.getTime() < d.getTime()) {
                 errors.push(msg);
             }
         };
     },
 
-    past: (value: unknown, errors: ErrorType): void => {
-        if (!(value instanceof Date) || isNaN(value.getTime()) || value.getTime() >= Date.now()) {
-            errors.push('must be a past date');
-        }
+    past: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a past date';
+
+        return (value, errors) => {
+            if (!(value instanceof Date) || isNaN(value.getTime()) || value.getTime() >= Date.now()) {
+                errors.push(msg);
+            }
+        };
     },
 
-    valid: (value: unknown, errors: ErrorType): void => {
-        if (!(value instanceof Date) || isNaN(value.getTime())) {
-            errors.push('must be a valid date');
-        }
+    valid: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid date';
+
+        return (value, errors) => {
+            if (!(value instanceof Date) || isNaN(value.getTime())) {
+                errors.push(msg);
+            }
+        };
     },
 };
 

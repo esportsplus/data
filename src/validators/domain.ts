@@ -1,13 +1,17 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
 let RE = /^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
 
 
-const domain = (value: unknown, errors: ErrorType): void => {
-    if (typeof value !== 'string' || !RE.test(value)) {
-        errors.push('must be a valid domain');
-    }
+const domain = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must be a valid domain';
+
+    return (value, errors) => {
+        if (typeof value !== 'string' || !RE.test(value)) {
+            errors.push(msg);
+        }
+    };
 };
 
 

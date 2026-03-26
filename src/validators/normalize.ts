@@ -1,30 +1,46 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
-type V = (value: unknown, errors: ErrorType) => void;
+type F = (error?: string) => ValidatorFunction<unknown>;
 
 
-const normalize: V & { nfd: V; nfkc: V; nfkd: V } = Object.assign(
-    (value: unknown, errors: ErrorType): void => {
-        if (typeof value !== 'string' || value !== value.normalize('NFC')) {
-            errors.push('must be NFC normalized');
-        }
+const normalize: F & { nfd: F; nfkc: F; nfkd: F } = Object.assign(
+    (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be NFC normalized';
+
+        return (value, errors) => {
+            if (typeof value !== 'string' || value !== value.normalize('NFC')) {
+                errors.push(msg);
+            }
+        };
     },
     {
-        nfd: (value: unknown, errors: ErrorType): void => {
-            if (typeof value !== 'string' || value !== value.normalize('NFD')) {
-                errors.push('must be NFD normalized');
-            }
+        nfd: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must be NFD normalized';
+
+            return (value, errors) => {
+                if (typeof value !== 'string' || value !== value.normalize('NFD')) {
+                    errors.push(msg);
+                }
+            };
         },
-        nfkc: (value: unknown, errors: ErrorType): void => {
-            if (typeof value !== 'string' || value !== value.normalize('NFKC')) {
-                errors.push('must be NFKC normalized');
-            }
+        nfkc: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must be NFKC normalized';
+
+            return (value, errors) => {
+                if (typeof value !== 'string' || value !== value.normalize('NFKC')) {
+                    errors.push(msg);
+                }
+            };
         },
-        nfkd: (value: unknown, errors: ErrorType): void => {
-            if (typeof value !== 'string' || value !== value.normalize('NFKD')) {
-                errors.push('must be NFKD normalized');
-            }
+        nfkd: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must be NFKD normalized';
+
+            return (value, errors) => {
+                if (typeof value !== 'string' || value !== value.normalize('NFKD')) {
+                    errors.push(msg);
+                }
+            };
         }
     }
 );

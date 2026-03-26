@@ -1,13 +1,17 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
 let RE = /^[a-zA-Z]+$/;
 
 
-const alpha = (value: unknown, errors: ErrorType): void => {
-    if (typeof value !== 'string' || !RE.test(value)) {
-        errors.push('must contain only letters');
-    }
+const alpha = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must contain only letters';
+
+    return (value, errors) => {
+        if (typeof value !== 'string' || !RE.test(value)) {
+            errors.push(msg);
+        }
+    };
 };
 
 

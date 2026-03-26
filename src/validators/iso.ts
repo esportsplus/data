@@ -1,7 +1,7 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
-type V = (value: unknown, errors: ErrorType) => void;
+type F = (error?: string) => ValidatorFunction<unknown>;
 
 let DATE_RE = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/,
     DATE_TIME_RE = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?$/,
@@ -11,12 +11,11 @@ let DATE_RE = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/,
     WEEK_RE = /^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$/;
 
 
-function validate(value: unknown, errors: ErrorType, re: RegExp, error: string): void {
+function check(value: unknown, errors: { push(message: string): void }, re: RegExp, msg: string): void {
     if (typeof value !== 'string' || !re.test(value)) {
-        errors.push(error);
+        errors.push(msg);
     }
 }
-
 
 function isDurationValid(value: string): boolean {
     if (!DURATION_RE.test(value)) {
@@ -28,26 +27,40 @@ function isDurationValid(value: string): boolean {
 }
 
 
-const iso: { date: V; dateTime: V; duration: V; time: V; timestamp: V; week: V } = {
-    date: (value: unknown, errors: ErrorType): void => {
-        validate(value, errors, DATE_RE, 'must be a valid ISO date');
+const iso: { date: F; dateTime: F; duration: F; time: F; timestamp: F; week: F } = {
+    date: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid ISO date';
+
+        return (value, errors) => check(value, errors, DATE_RE, msg);
     },
-    dateTime: (value: unknown, errors: ErrorType): void => {
-        validate(value, errors, DATE_TIME_RE, 'must be a valid ISO date-time');
+    dateTime: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid ISO date-time';
+
+        return (value, errors) => check(value, errors, DATE_TIME_RE, msg);
     },
-    duration: (value: unknown, errors: ErrorType): void => {
-        if (typeof value !== 'string' || !isDurationValid(value)) {
-            errors.push('must be a valid ISO duration');
-        }
+    duration: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid ISO duration';
+
+        return (value, errors) => {
+            if (typeof value !== 'string' || !isDurationValid(value)) {
+                errors.push(msg);
+            }
+        };
     },
-    time: (value: unknown, errors: ErrorType): void => {
-        validate(value, errors, TIME_RE, 'must be a valid ISO time');
+    time: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid ISO time';
+
+        return (value, errors) => check(value, errors, TIME_RE, msg);
     },
-    timestamp: (value: unknown, errors: ErrorType): void => {
-        validate(value, errors, TIMESTAMP_RE, 'must be a valid ISO timestamp');
+    timestamp: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid ISO timestamp';
+
+        return (value, errors) => check(value, errors, TIMESTAMP_RE, msg);
     },
-    week: (value: unknown, errors: ErrorType): void => {
-        validate(value, errors, WEEK_RE, 'must be a valid ISO week');
+    week: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid ISO week';
+
+        return (value, errors) => check(value, errors, WEEK_RE, msg);
     },
 };
 

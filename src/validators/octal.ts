@@ -1,13 +1,17 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
 let RE = /^[0-7]+$/;
 
 
-const octal = (value: unknown, errors: ErrorType): void => {
-    if (typeof value !== 'string' || !RE.test(value)) {
-        errors.push('must be a valid octal number');
-    }
+const octal = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must be a valid octal number';
+
+    return (value, errors) => {
+        if (typeof value !== 'string' || !RE.test(value)) {
+            errors.push(msg);
+        }
+    };
 };
 
 

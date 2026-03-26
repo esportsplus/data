@@ -1,25 +1,37 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
-type V = (value: unknown, errors: ErrorType) => void;
+type F = (error?: string) => ValidatorFunction<unknown>;
 
 
-const trim: V & { end: V; start: V } = Object.assign(
-    (value: unknown, errors: ErrorType): void => {
-        if (typeof value !== 'string' || value !== value.trim()) {
-            errors.push('must be trimmed');
-        }
+const trim: F & { end: F; start: F } = Object.assign(
+    (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be trimmed';
+
+        return (value, errors) => {
+            if (typeof value !== 'string' || value !== value.trim()) {
+                errors.push(msg);
+            }
+        };
     },
     {
-        end: (value: unknown, errors: ErrorType): void => {
-            if (typeof value !== 'string' || value !== value.trimEnd()) {
-                errors.push('must have no trailing whitespace');
-            }
+        end: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must have no trailing whitespace';
+
+            return (value, errors) => {
+                if (typeof value !== 'string' || value !== value.trimEnd()) {
+                    errors.push(msg);
+                }
+            };
         },
-        start: (value: unknown, errors: ErrorType): void => {
-            if (typeof value !== 'string' || value !== value.trimStart()) {
-                errors.push('must have no leading whitespace');
-            }
+        start: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must have no leading whitespace';
+
+            return (value, errors) => {
+                if (typeof value !== 'string' || value !== value.trimStart()) {
+                    errors.push(msg);
+                }
+            };
         }
     }
 );

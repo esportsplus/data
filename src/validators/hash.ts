@@ -1,7 +1,7 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
-type V = (value: unknown, errors: ErrorType) => void;
+type F = (error?: string) => ValidatorFunction<unknown>;
 
 let MD5_RE = /^[0-9a-fA-F]{32}$/,
     SHA1_RE = /^[0-9a-fA-F]{40}$/,
@@ -10,28 +10,38 @@ let MD5_RE = /^[0-9a-fA-F]{32}$/,
     SHA512_RE = /^[0-9a-fA-F]{128}$/;
 
 
-function validate(value: unknown, errors: ErrorType, re: RegExp, error: string): void {
+function check(value: unknown, errors: { push(message: string): void }, re: RegExp, msg: string): void {
     if (typeof value !== 'string' || !re.test(value)) {
-        errors.push(error);
+        errors.push(msg);
     }
 }
 
 
-const hash: { md5: V; sha1: V; sha256: V; sha384: V; sha512: V } = {
-    md5: (value: unknown, errors: ErrorType): void => {
-        validate(value, errors, MD5_RE, 'must be a valid MD5 hash');
+const hash: { md5: F; sha1: F; sha256: F; sha384: F; sha512: F } = {
+    md5: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid MD5 hash';
+
+        return (value, errors) => check(value, errors, MD5_RE, msg);
     },
-    sha1: (value: unknown, errors: ErrorType): void => {
-        validate(value, errors, SHA1_RE, 'must be a valid SHA-1 hash');
+    sha1: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid SHA-1 hash';
+
+        return (value, errors) => check(value, errors, SHA1_RE, msg);
     },
-    sha256: (value: unknown, errors: ErrorType): void => {
-        validate(value, errors, SHA256_RE, 'must be a valid SHA-256 hash');
+    sha256: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid SHA-256 hash';
+
+        return (value, errors) => check(value, errors, SHA256_RE, msg);
     },
-    sha384: (value: unknown, errors: ErrorType): void => {
-        validate(value, errors, SHA384_RE, 'must be a valid SHA-384 hash');
+    sha384: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid SHA-384 hash';
+
+        return (value, errors) => check(value, errors, SHA384_RE, msg);
     },
-    sha512: (value: unknown, errors: ErrorType): void => {
-        validate(value, errors, SHA512_RE, 'must be a valid SHA-512 hash');
+    sha512: (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid SHA-512 hash';
+
+        return (value, errors) => check(value, errors, SHA512_RE, msg);
     },
 };
 

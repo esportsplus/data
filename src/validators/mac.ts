@@ -1,28 +1,40 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
-type V = (value: unknown, errors: ErrorType) => void;
+type F = (error?: string) => ValidatorFunction<unknown>;
 
 let V48_RE = /^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$/,
     V64_RE = /^([0-9a-fA-F]{2}[:-]){7}[0-9a-fA-F]{2}$/;
 
 
-const mac: V & { v48: V; v64: V } = Object.assign(
-    (value: unknown, errors: ErrorType): void => {
-        if (typeof value !== 'string' || (!V48_RE.test(value) && !V64_RE.test(value))) {
-            errors.push('must be a valid MAC address');
-        }
+const mac: F & { v48: F; v64: F } = Object.assign(
+    (error?: string): ValidatorFunction<unknown> => {
+        let msg = error || 'must be a valid MAC address';
+
+        return (value, errors) => {
+            if (typeof value !== 'string' || (!V48_RE.test(value) && !V64_RE.test(value))) {
+                errors.push(msg);
+            }
+        };
     },
     {
-        v48: (value: unknown, errors: ErrorType): void => {
-            if (typeof value !== 'string' || !V48_RE.test(value)) {
-                errors.push('must be a valid MAC-48 address');
-            }
+        v48: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must be a valid MAC-48 address';
+
+            return (value, errors) => {
+                if (typeof value !== 'string' || !V48_RE.test(value)) {
+                    errors.push(msg);
+                }
+            };
         },
-        v64: (value: unknown, errors: ErrorType): void => {
-            if (typeof value !== 'string' || !V64_RE.test(value)) {
-                errors.push('must be a valid MAC-64 address');
-            }
+        v64: (error?: string): ValidatorFunction<unknown> => {
+            let msg = error || 'must be a valid MAC-64 address';
+
+            return (value, errors) => {
+                if (typeof value !== 'string' || !V64_RE.test(value)) {
+                    errors.push(msg);
+                }
+            };
         },
     }
 );

@@ -45,7 +45,7 @@ describe('bytes', () => {
 
         it('counts multi-byte characters correctly', () => {
             // '€' is 3 bytes in UTF-8
-            expectPass(bytes(3), '€');
+            expectPass(bytes(3), '\u20AC');
         });
 
         it('fails for non-string', () => {
@@ -80,8 +80,8 @@ describe('bytes', () => {
 
         it('counts multi-byte characters', () => {
             // '€' is 3 bytes
-            expectPass(bytes.min(3), '€');
-            expectFail(bytes.min(4), '€');
+            expectPass(bytes.min(3), '\u20AC');
+            expectFail(bytes.min(4), '\u20AC');
         });
 
         it('fails for non-string', () => {
@@ -104,8 +104,8 @@ describe('bytes', () => {
 
         it('counts multi-byte characters', () => {
             // '€' is 3 bytes
-            expectPass(bytes.max(3), '€');
-            expectFail(bytes.max(2), '€');
+            expectPass(bytes.max(3), '\u20AC');
+            expectFail(bytes.max(2), '\u20AC');
         });
 
         it('fails for non-string', () => {
@@ -202,15 +202,15 @@ describe('graphemes', () => {
         });
 
         it('counts emoji as single grapheme', () => {
-            expectPass(graphemes(1), '👨‍👩‍👧‍👦');
+            expectPass(graphemes(1), '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}');
         });
 
         it('counts emoji with skin tone as single grapheme', () => {
-            expectPass(graphemes(1), '👋🏽');
+            expectPass(graphemes(1), '\u{1F44B}\u{1F3FD}');
         });
 
         it('counts multiple graphemes correctly', () => {
-            expectPass(graphemes(3), 'a👋🏽b');
+            expectPass(graphemes(3), 'a\u{1F44B}\u{1F3FD}b');
         });
 
         it('passes for empty string with 0', () => {
@@ -262,7 +262,7 @@ describe('graphemes', () => {
         });
 
         it('counts emoji as single grapheme for max', () => {
-            expectPass(graphemes.max(1), '👨‍👩‍👧‍👦');
+            expectPass(graphemes.max(1), '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}');
         });
 
         it('fails for non-string', () => {
@@ -289,8 +289,8 @@ describe('length', () => {
     });
 
     it('counts UTF-16 code units (not graphemes)', () => {
-        // '😀' is 2 UTF-16 code units
-        expectPass(length(2), '😀');
+        // '\u{1F600}' is 2 UTF-16 code units
+        expectPass(length(2), '\u{1F600}');
     });
 
     it('fails for non-string', () => {
@@ -483,67 +483,91 @@ describe('matches', () => {
 describe('trim', () => {
     describe('both', () => {
         it('passes for already trimmed string', () => {
-            expectPass(trim, 'hello');
+            expectPass(trim(), 'hello');
         });
 
         it('fails for leading whitespace', () => {
-            expectFail(trim, '  hello');
+            expectFail(trim(), '  hello');
         });
 
         it('fails for trailing whitespace', () => {
-            expectFail(trim, 'hello  ');
+            expectFail(trim(), 'hello  ');
         });
 
         it('fails for both leading and trailing whitespace', () => {
-            expectFail(trim, '  hello  ');
+            expectFail(trim(), '  hello  ');
         });
 
         it('passes for empty string', () => {
-            expectPass(trim, '');
+            expectPass(trim(), '');
         });
 
         it('passes for string with internal whitespace', () => {
-            expectPass(trim, 'hello world');
+            expectPass(trim(), 'hello world');
         });
 
         it('fails for non-string', () => {
-            expectFail(trim, 123);
+            expectFail(trim(), 123);
+        });
+
+        it('uses custom error message', () => {
+            let errors: string[] = [];
+
+            trim('Custom error')('  bad  ', { push: (m) => errors.push(m) });
+
+            expect(errors[0]).toBe('Custom error');
         });
     });
 
     describe('start', () => {
         it('passes for no leading whitespace', () => {
-            expectPass(trim.start, 'hello');
+            expectPass(trim.start(), 'hello');
         });
 
         it('fails for leading whitespace', () => {
-            expectFail(trim.start, '  hello');
+            expectFail(trim.start(), '  hello');
         });
 
         it('passes for trailing whitespace only', () => {
-            expectPass(trim.start, 'hello  ');
+            expectPass(trim.start(), 'hello  ');
         });
 
         it('fails for non-string', () => {
-            expectFail(trim.start, 123);
+            expectFail(trim.start(), 123);
+        });
+
+        it('uses custom error message', () => {
+            let errors: string[] = [];
+
+            trim.start('Custom error')('  bad', { push: (m) => errors.push(m) });
+
+            expect(errors[0]).toBe('Custom error');
         });
     });
 
     describe('end', () => {
         it('passes for no trailing whitespace', () => {
-            expectPass(trim.end, 'hello');
+            expectPass(trim.end(), 'hello');
         });
 
         it('fails for trailing whitespace', () => {
-            expectFail(trim.end, 'hello  ');
+            expectFail(trim.end(), 'hello  ');
         });
 
         it('passes for leading whitespace only', () => {
-            expectPass(trim.end, '  hello');
+            expectPass(trim.end(), '  hello');
         });
 
         it('fails for non-string', () => {
-            expectFail(trim.end, 123);
+            expectFail(trim.end(), 123);
+        });
+
+        it('uses custom error message', () => {
+            let errors: string[] = [];
+
+            trim.end('Custom error')('bad  ', { push: (m) => errors.push(m) });
+
+            expect(errors[0]).toBe('Custom error');
         });
     });
 });
@@ -555,23 +579,31 @@ describe('trim', () => {
 describe('normalize', () => {
     describe('nfc (default)', () => {
         it('passes for NFC normalized string', () => {
-            expectPass(normalize, 'hello');
+            expectPass(normalize(), 'hello');
         });
 
         it('passes for already NFC string', () => {
-            let nfc = '\u00e9'; // é as single code point (NFC)
+            let nfc = '\u00e9'; // e with acute as single code point (NFC)
 
-            expectPass(normalize, nfc);
+            expectPass(normalize(), nfc);
         });
 
         it('fails for NFD decomposed string', () => {
             let nfd = '\u0065\u0301'; // e + combining acute accent (NFD)
 
-            expectFail(normalize, nfd);
+            expectFail(normalize(), nfd);
         });
 
         it('fails for non-string', () => {
-            expectFail(normalize, 123);
+            expectFail(normalize(), 123);
+        });
+
+        it('uses custom error message', () => {
+            let errors: string[] = [];
+
+            normalize('Custom error')('\u0065\u0301', { push: (m) => errors.push(m) });
+
+            expect(errors[0]).toBe('Custom error');
         });
     });
 
@@ -579,53 +611,77 @@ describe('normalize', () => {
         it('passes for NFD normalized string', () => {
             let nfd = '\u0065\u0301'; // e + combining acute accent
 
-            expectPass(normalize.nfd, nfd);
+            expectPass(normalize.nfd(), nfd);
         });
 
         it('fails for NFC composed string', () => {
-            let nfc = '\u00e9'; // é as single code point
+            let nfc = '\u00e9'; // e with acute as single code point
 
-            expectFail(normalize.nfd, nfc);
+            expectFail(normalize.nfd(), nfc);
         });
 
         it('passes for ASCII (same in all forms)', () => {
-            expectPass(normalize.nfd, 'hello');
+            expectPass(normalize.nfd(), 'hello');
         });
 
         it('fails for non-string', () => {
-            expectFail(normalize.nfd, 123);
+            expectFail(normalize.nfd(), 123);
+        });
+
+        it('uses custom error message', () => {
+            let errors: string[] = [];
+
+            normalize.nfd('Custom error')('\u00e9', { push: (m) => errors.push(m) });
+
+            expect(errors[0]).toBe('Custom error');
         });
     });
 
     describe('nfkc', () => {
         it('passes for NFKC normalized string', () => {
-            expectPass(normalize.nfkc, 'hello');
+            expectPass(normalize.nfkc(), 'hello');
         });
 
         it('fails for compatibility character not in NFKC', () => {
             let compat = '\ufb01'; // fi ligature
 
-            expectFail(normalize.nfkc, compat);
+            expectFail(normalize.nfkc(), compat);
         });
 
         it('fails for non-string', () => {
-            expectFail(normalize.nfkc, 123);
+            expectFail(normalize.nfkc(), 123);
+        });
+
+        it('uses custom error message', () => {
+            let errors: string[] = [];
+
+            normalize.nfkc('Custom error')('\ufb01', { push: (m) => errors.push(m) });
+
+            expect(errors[0]).toBe('Custom error');
         });
     });
 
     describe('nfkd', () => {
         it('passes for NFKD normalized string', () => {
-            expectPass(normalize.nfkd, 'hello');
+            expectPass(normalize.nfkd(), 'hello');
         });
 
         it('fails for compatibility character not in NFKD', () => {
             let compat = '\ufb01'; // fi ligature
 
-            expectFail(normalize.nfkd, compat);
+            expectFail(normalize.nfkd(), compat);
         });
 
         it('fails for non-string', () => {
-            expectFail(normalize.nfkd, 123);
+            expectFail(normalize.nfkd(), 123);
+        });
+
+        it('uses custom error message', () => {
+            let errors: string[] = [];
+
+            normalize.nfkd('Custom error')('\ufb01', { push: (m) => errors.push(m) });
+
+            expect(errors[0]).toBe('Custom error');
         });
     });
 });

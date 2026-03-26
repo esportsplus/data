@@ -1,18 +1,22 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
-const jsonString = (value: unknown, errors: ErrorType): void => {
-    if (typeof value !== 'string') {
-        errors.push('must be a valid JSON string');
-        return;
-    }
+const jsonString = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must be a valid JSON string';
 
-    try {
-        JSON.parse(value);
-    }
-    catch {
-        errors.push('must be a valid JSON string');
-    }
+    return (value, errors) => {
+        if (typeof value !== 'string') {
+            errors.push(msg);
+            return;
+        }
+
+        try {
+            JSON.parse(value);
+        }
+        catch {
+            errors.push(msg);
+        }
+    };
 };
 
 

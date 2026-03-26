@@ -1,10 +1,14 @@
 import type { ValidatorFunction } from '~/types';
 
 
-const finite: ValidatorFunction<unknown> = (value, errors) => {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-        errors.push('must be finite');
-    }
+const finite = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must be finite';
+
+    return (value, errors) => {
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+            errors.push(msg);
+        }
+    };
 };
 
 

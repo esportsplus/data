@@ -1,13 +1,17 @@
-import type { ErrorType } from '~/types';
+import type { ValidatorFunction } from '~/types';
 
 
 let RE = /^[0-9]+$/;
 
 
-const numeric = (value: unknown, errors: ErrorType): void => {
-    if (typeof value !== 'string' || !RE.test(value)) {
-        errors.push('must contain only numbers');
-    }
+const numeric = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must contain only numbers';
+
+    return (value, errors) => {
+        if (typeof value !== 'string' || !RE.test(value)) {
+            errors.push(msg);
+        }
+    };
 };
 
 

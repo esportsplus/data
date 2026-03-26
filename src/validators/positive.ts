@@ -1,10 +1,14 @@
 import type { ValidatorFunction } from '~/types';
 
 
-const positive: ValidatorFunction<unknown> = (value, errors) => {
-    if (typeof value !== 'number' || value <= 0) {
-        errors.push('must be positive');
-    }
+const positive = (error?: string): ValidatorFunction<unknown> => {
+    let msg = error || 'must be positive';
+
+    return (value, errors) => {
+        if (typeof value !== 'number' || value <= 0) {
+            errors.push(msg);
+        }
+    };
 };
 
 
