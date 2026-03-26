@@ -1,7 +1,7 @@
-import type { ValidatorFunction } from '~/types';
+import type { ErrorType } from '~/types';
 
 
-const nonPositive = (error?: string): ValidatorFunction<unknown> => {
+export default (error?: string): (value: unknown, errors: ErrorType) => void => {
     let msg = error || 'must be non-positive';
 
     return (value, errors) => {
@@ -10,6 +10,3 @@ const nonPositive = (error?: string): ValidatorFunction<unknown> => {
         }
     };
 };
-
-
-export default nonPositive;

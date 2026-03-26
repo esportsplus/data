@@ -1,19 +1,20 @@
 import type { ErrorType } from '~/types';
 
 
-type V = (n: number, error?: string) => (value: unknown, errors: ErrorType) => void;
+type FN = (n: number, error?: string) => (value: unknown, errors: ErrorType) => void;
 
-let SPLIT_RE = /\s+/;
+
+let SPLIT_REGEX = /\s+/;
 
 
 function wordCount(value: string): number {
     let trimmed = value.trim();
 
-    return trimmed === '' ? 0 : trimmed.split(SPLIT_RE).length;
+    return trimmed === '' ? 0 : trimmed.split(SPLIT_REGEX).length;
 }
 
 
-const words: V & { max: V; min: V } = Object.assign(
+const words: FN & { max: FN; min: FN } = Object.assign(
     (n: number, error?: string): (value: unknown, errors: ErrorType) => void => {
         let msg = error || `must be exactly ${n} words`;
 

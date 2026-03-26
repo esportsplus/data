@@ -3,8 +3,8 @@ import type { ValidatorFunction } from '~/types';
 
 type F = (error?: string) => ValidatorFunction<unknown>;
 
-let COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/,
-    HEX_RE = /^[0-9a-fA-F]+$/;
+let COLOR_REGEX = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/,
+    HEX_REGEX = /^[0-9a-fA-F]+$/;
 
 
 const hex: F & { color: F } = Object.assign(
@@ -12,7 +12,7 @@ const hex: F & { color: F } = Object.assign(
         let msg = error || 'must be a valid hexadecimal string';
 
         return (value, errors) => {
-            if (typeof value !== 'string' || !HEX_RE.test(value)) {
+            if (typeof value !== 'string' || !HEX_REGEX.test(value)) {
                 errors.push(msg);
             }
         };
@@ -22,7 +22,7 @@ const hex: F & { color: F } = Object.assign(
             let msg = error || 'must be a valid hex color';
 
             return (value, errors) => {
-                if (typeof value !== 'string' || !COLOR_RE.test(value)) {
+                if (typeof value !== 'string' || !COLOR_REGEX.test(value)) {
                     errors.push(msg);
                 }
             };

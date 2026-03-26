@@ -1,7 +1,7 @@
-import type { ValidatorFunction } from '~/types';
+import type { ErrorType } from '~/types';
 
 
-const multipleOf = (n: number, error?: string): ValidatorFunction<unknown> => {
+export default (n: number, error?: string): (value: unknown, errors: ErrorType) => void => {
     let msg = error || `must be a multiple of ${n}`;
 
     return (value, errors) => {
@@ -10,6 +10,3 @@ const multipleOf = (n: number, error?: string): ValidatorFunction<unknown> => {
         }
     };
 };
-
-
-export default multipleOf;

@@ -1,8 +1,8 @@
 import { PACKAGE_NAME } from '~/constants';
-import type { ValidatorFunction } from '~/types';
+import type { ErrorType } from '~/types';
 
 
-const max = (number: number, error?: string): ValidatorFunction<unknown> => {
+export default (number: number, error?: string): (value: unknown, errors: ErrorType) => void => {
     let arr = error || `must be at most ${number} items`,
         big = error || `must be at most ${number}`,
         num = error || `must be at most ${number}`,
@@ -34,6 +34,3 @@ const max = (number: number, error?: string): ValidatorFunction<unknown> => {
         }
     };
 };
-
-
-export default max;

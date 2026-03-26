@@ -1,9 +1,10 @@
 import type { ValidatorFunction } from '~/types';
 
 
-type F = (error?: string) => ValidatorFunction<unknown>;
+type FN = (error?: string) => ValidatorFunction<unknown>;
 
-let GENERAL_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+let GENERAL_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 
 function check(value: unknown, errors: { push(message: string): void }, re: RegExp, msg: string): void {
@@ -12,7 +13,7 @@ function check(value: unknown, errors: { push(message: string): void }, re: RegE
     }
 }
 
-function versionFactory(version: string): F {
+function factory(version: string): FN {
     let re = new RegExp(`^[0-9a-f]{8}-[0-9a-f]{4}-${version}[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`, 'i');
 
     return (error?: string): ValidatorFunction<unknown> => {
@@ -23,21 +24,21 @@ function versionFactory(version: string): F {
 }
 
 
-const uuid: F & { v1: F; v2: F; v3: F; v4: F; v5: F; v6: F; v7: F; v8: F } = Object.assign(
+const uuid: FN & { v1: FN; v2: FN; v3: FN; v4: FN; v5: FN; v6: FN; v7: FN; v8: FN } = Object.assign(
     (error?: string): ValidatorFunction<unknown> => {
         let msg = error || 'must be a valid UUID';
 
-        return (value, errors) => check(value, errors, GENERAL_RE, msg);
+        return (value, errors) => check(value, errors, GENERAL_REGEX, msg);
     },
     {
-        v1: versionFactory('1'),
-        v2: versionFactory('2'),
-        v3: versionFactory('3'),
-        v4: versionFactory('4'),
-        v5: versionFactory('5'),
-        v6: versionFactory('6'),
-        v7: versionFactory('7'),
-        v8: versionFactory('8'),
+        v1: factory('1'),
+        v2: factory('2'),
+        v3: factory('3'),
+        v4: factory('4'),
+        v5: factory('5'),
+        v6: factory('6'),
+        v7: factory('7'),
+        v8: factory('8'),
     }
 );
 

@@ -1,18 +1,15 @@
-import type { ValidatorFunction } from '~/types';
+import type { ErrorType } from '~/types';
 
 
-let RE = /^[a-zA-Z0-9][a-zA-Z0-9!#$&\-^_]*\/[a-zA-Z0-9][a-zA-Z0-9!#$&\-^_.+]*$/;
+let REGEX = /^[a-zA-Z0-9][a-zA-Z0-9!#$&\-^_]*\/[a-zA-Z0-9][a-zA-Z0-9!#$&\-^_.+]*$/;
 
 
-const mime = (error?: string): ValidatorFunction<unknown> => {
+export default (error?: string): (value: unknown, errors: ErrorType) => void => {
     let msg = error || 'must be a valid MIME type';
 
     return (value, errors) => {
-        if (typeof value !== 'string' || !RE.test(value)) {
+        if (typeof value !== 'string' || !REGEX.test(value)) {
             errors.push(msg);
         }
     };
 };
-
-
-export default mime;

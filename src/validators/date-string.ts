@@ -1,7 +1,7 @@
-import type { ValidatorFunction } from '~/types';
+import type { ErrorType } from '~/types';
 
 
-const dateString = (error?: string): ValidatorFunction<unknown> => {
+export default (error?: string): (value: unknown, errors: ErrorType) => void => {
     let msg = error || 'must be a valid date string';
 
     return (value, errors) => {
@@ -10,6 +10,3 @@ const dateString = (error?: string): ValidatorFunction<unknown> => {
         }
     };
 };
-
-
-export default dateString;

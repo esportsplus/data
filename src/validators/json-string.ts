@@ -1,7 +1,7 @@
-import type { ValidatorFunction } from '~/types';
+import type { ErrorType } from '~/types';
 
 
-const jsonString = (error?: string): ValidatorFunction<unknown> => {
+export default (error?: string): (value: unknown, errors: ErrorType) => void => {
     let msg = error || 'must be a valid JSON string';
 
     return (value, errors) => {
@@ -18,6 +18,3 @@ const jsonString = (error?: string): ValidatorFunction<unknown> => {
         }
     };
 };
-
-
-export default jsonString;

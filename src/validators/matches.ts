@@ -1,7 +1,7 @@
 import type { ErrorType } from '~/types';
 
 
-const matches = (regex: RegExp, error?: string): (value: unknown, errors: ErrorType) => void => {
+export default (regex: RegExp, error?: string): (value: unknown, errors: ErrorType) => void => {
     let msg = error || `must match pattern ${regex}`;
 
     return (value, errors) => {
@@ -10,6 +10,3 @@ const matches = (regex: RegExp, error?: string): (value: unknown, errors: ErrorT
         }
     };
 };
-
-
-export default matches;

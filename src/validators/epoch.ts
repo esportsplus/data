@@ -1,18 +1,15 @@
-import type { ValidatorFunction } from '~/types';
+import type { ErrorType } from '~/types';
 
 
-let RE = /^\d+$/;
+let REGEX = /^\d+$/;
 
 
-const epoch = (error?: string): ValidatorFunction<unknown> => {
+export default (error?: string): (value: unknown, errors: ErrorType) => void => {
     let msg = error || 'must be a valid epoch timestamp';
 
     return (value, errors) => {
-        if (typeof value !== 'string' || !RE.test(value)) {
+        if (typeof value !== 'string' || !REGEX.test(value)) {
             errors.push(msg);
         }
     };
 };
-
-
-export default epoch;

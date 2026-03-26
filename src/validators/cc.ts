@@ -1,8 +1,8 @@
-import type { ValidatorFunction } from '~/types';
+import type { ErrorType } from '~/types';
 
 
-let DIGITS_RE = /^[0-9]+$/,
-    STRIP_RE = /[\s-]/g;
+let DIGITS_REGEX = /^[0-9]+$/,
+    STRIP_REGEX = /[\s-]/g;
 
 
 function luhn(digits: string): boolean {
@@ -27,7 +27,7 @@ function luhn(digits: string): boolean {
 }
 
 
-const cc = (error?: string): ValidatorFunction<unknown> => {
+export default (error?: string): (value: unknown, errors: ErrorType) => void => {
     let msg = error || 'must be a valid credit card number';
 
     return (value, errors) => {
@@ -36,13 +36,10 @@ const cc = (error?: string): ValidatorFunction<unknown> => {
             return;
         }
 
-        let stripped = value.replace(STRIP_RE, '');
+        let stripped = value.replace(STRIP_REGEX, '');
 
-        if (stripped.length < 12 || stripped.length > 19 || !DIGITS_RE.test(stripped) || !luhn(stripped)) {
+        if (stripped.length < 12 || stripped.length > 19 || !DIGITS_REGEX.test(stripped) || !luhn(stripped)) {
             errors.push(msg);
         }
     };
 };
-
-
-export default cc;

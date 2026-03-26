@@ -1,18 +1,15 @@
-import type { ValidatorFunction } from '~/types';
+import type { ErrorType } from '~/types';
 
 
-let RE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/;
+let REGEX = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/;
 
 
-const hostname = (error?: string): ValidatorFunction<unknown> => {
+export default (error?: string): (value: unknown, errors: ErrorType) => void => {
     let msg = error || 'must be a valid hostname';
 
     return (value, errors) => {
-        if (typeof value !== 'string' || value.length > 253 || !RE.test(value)) {
+        if (typeof value !== 'string' || value.length > 253 || !REGEX.test(value)) {
             errors.push(msg);
         }
     };
 };
-
-
-export default hostname;

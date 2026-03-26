@@ -1,7 +1,7 @@
 import type { ErrorType } from '~/types';
 
 
-const endsWith = (str: string, error?: string): (value: unknown, errors: ErrorType) => void => {
+export default (str: string, error?: string): (value: unknown, errors: ErrorType) => void => {
     let msg = error || `must end with '${str}'`;
 
     return (value, errors) => {
@@ -10,6 +10,3 @@ const endsWith = (str: string, error?: string): (value: unknown, errors: ErrorTy
         }
     };
 };
-
-
-export default endsWith;

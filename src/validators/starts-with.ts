@@ -1,7 +1,7 @@
 import type { ErrorType } from '~/types';
 
 
-const startsWith = (str: string, error?: string): (value: unknown, errors: ErrorType) => void => {
+export default (str: string, error?: string): (value: unknown, errors: ErrorType) => void => {
     let msg = error || `must start with '${str}'`;
 
     return (value, errors) => {
@@ -10,6 +10,3 @@ const startsWith = (str: string, error?: string): (value: unknown, errors: Error
         }
     };
 };
-
-
-export default startsWith;

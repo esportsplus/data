@@ -1,8 +1,8 @@
 import { PACKAGE_NAME } from '~/constants';
-import type { ValidatorFunction } from '~/types';
+import type { ErrorType } from '~/types';
 
 
-const range = (min: number, max: number, error?: string): ValidatorFunction<unknown> => {
+export default (min: number, max: number, error?: string): (value: unknown, errors: ErrorType) => void => {
     let arr = error || `must be between ${min} and ${max} items`,
         big = error || `must be between ${min} and ${max}`,
         num = error || `must be between ${min} and ${max}`,
@@ -34,6 +34,3 @@ const range = (min: number, max: number, error?: string): ValidatorFunction<unkn
         }
     };
 };
-
-
-export default range;

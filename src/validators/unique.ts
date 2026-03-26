@@ -1,7 +1,7 @@
-import type { ValidatorFunction } from '~/types';
+import type { ErrorType } from '~/types';
 
 
-const unique = (error?: string): ValidatorFunction<unknown> => {
+export default (error?: string): (value: unknown, errors: ErrorType) => void => {
     let arrayMsg = error || 'must be an array',
         uniqueMsg = error || 'must contain unique items';
 
@@ -23,6 +23,3 @@ const unique = (error?: string): ValidatorFunction<unknown> => {
         }
     };
 };
-
-
-export default unique;

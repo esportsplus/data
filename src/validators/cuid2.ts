@@ -1,18 +1,15 @@
-import type { ValidatorFunction } from '~/types';
+import type { ErrorType } from '~/types';
 
 
-let RE = /^[a-z][a-z0-9]{24,}$/;
+let REGEX = /^[a-z][a-z0-9]{24,}$/;
 
 
-const cuid2 = (error?: string): ValidatorFunction<unknown> => {
+export default (error?: string): (value: unknown, errors: ErrorType) => void => {
     let msg = error || 'must be a valid CUID2';
 
     return (value, errors) => {
-        if (typeof value !== 'string' || !RE.test(value)) {
+        if (typeof value !== 'string' || !REGEX.test(value)) {
             errors.push(msg);
         }
     };
 };
-
-
-export default cuid2;
