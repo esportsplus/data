@@ -96,128 +96,83 @@ let writeUtf8: ((str: string, off: number, len: number) => number) = isNode
     : function (this: Uint8Array, str: string, off: number, len: number) { return textEncoder.encodeInto(str, this.subarray(off, off + len)).written!; };
 
 
-// Codegen expression helpers — emit direct Buffer calls on Node, helper calls on browser.
-// This ensures zero overhead on the Node path (V8 inlines Buffer methods).
+// Codegen driver — emits environment-specific code strings for compiled encode/decode functions.
+// Node: direct Buffer method calls (zero overhead, V8 inlines them).
+// Browser: DataView preamble with reused view (one alloc per function call instead of per field).
 
-function cgReadBI64(off: string): string {
-    if (isNode) {
-        return 'buf.readBigInt64LE(' + off + ')';
-    }
-
-    return '$rbi64(buf,' + off + ')';
+interface CodegenDriver {
+    byteLen(str: string): string;
+    decoderBindArgs(): unknown[];
+    decoderParams(): string;
+    encoderBindArgs(): unknown[];
+    encoderParams(): string;
+    preamble(bufVar: string): string;
+    readBI64(off: string): string;
+    readF64(off: string): string;
+    readI16(off: string): string;
+    readI32(off: string): string;
+    readU16(off: string): string;
+    readU32(off: string): string;
+    readUtf8(start: string, end: string): string;
+    writeBI64(off: string, val: string): string;
+    writeF64(off: string, val: string): string;
+    writeI16(off: string, val: string): string;
+    writeI32(off: string, val: string): string;
+    writeU16(off: string, val: string): string;
+    writeU32(off: string, val: string): string;
+    writeUtf8(str: string, off: string, len: string): string;
 }
 
-function cgReadF64(off: string): string {
-    if (isNode) {
-        return 'buf.readDoubleLE(' + off + ')';
-    }
+let nodeDriver: CodegenDriver = {
+    byteLen: (str) => 'Buffer.byteLength(' + str + ')',
+    decoderBindArgs: () => [],
+    decoderParams: () => '',
+    encoderBindArgs: () => [],
+    encoderParams: () => '',
+    preamble: () => '',
+    readBI64: (off) => 'buf.readBigInt64LE(' + off + ')',
+    readF64: (off) => 'buf.readDoubleLE(' + off + ')',
+    readI16: (off) => 'buf.readInt16LE(' + off + ')',
+    readI32: (off) => 'buf.readInt32LE(' + off + ')',
+    readU16: (off) => 'buf.readUInt16LE(' + off + ')',
+    readU32: (off) => 'buf.readUInt32LE(' + off + ')',
+    readUtf8: (start, end) => 'buf.utf8Slice(' + start + ',' + end + ')',
+    writeBI64: (off, val) => 'buf.writeBigInt64LE(' + val + ',' + off + ')',
+    writeF64: (off, val) => 'buf.writeDoubleLE(' + val + ',' + off + ')',
+    writeI16: (off, val) => 'buf.writeInt16LE(' + val + ',' + off + ')',
+    writeI32: (off, val) => 'buf.writeInt32LE(' + val + ',' + off + ')',
+    writeU16: (off, val) => 'buf.writeUInt16LE(' + val + ',' + off + ')',
+    writeU32: (off, val) => 'buf.writeUInt32LE(' + val + ',' + off + ')',
+    writeUtf8: (str, off, len) => 'buf.utf8Write(' + str + ',' + off + ',' + len + ')',
+};
 
-    return '$rf64(buf,' + off + ')';
-}
+let browserUtf8Write = (buf: Uint8Array, str: string, off: number, len: number): number =>
+    textEncoder.encodeInto(str, buf.subarray(off, off + len)).written!;
 
-function cgReadI16(off: string): string {
-    if (isNode) {
-        return 'buf.readInt16LE(' + off + ')';
-    }
+let browserDriver: CodegenDriver = {
+    byteLen: (str) => '$byteLen(' + str + ')',
+    decoderBindArgs: () => [],
+    decoderParams: () => '',
+    encoderBindArgs: () => [byteLen, browserUtf8Write],
+    encoderParams: () => '$byteLen,$utf8w,',
+    preamble: (buf) => 'let _v=new DataView(' + buf + '.buffer,' + buf + '.byteOffset,' + buf + '.byteLength)',
+    readBI64: (off) => '_v.getBigInt64(' + off + ',true)',
+    readF64: (off) => '_v.getFloat64(' + off + ',true)',
+    readI16: (off) => '_v.getInt16(' + off + ',true)',
+    readI32: (off) => '_v.getInt32(' + off + ',true)',
+    readU16: (off) => '_v.getUint16(' + off + ',true)',
+    readU32: (off) => '_v.getUint32(' + off + ',true)',
+    readUtf8: (start, end) => 'new TextDecoder().decode(buf.subarray(' + start + ',' + end + '))',
+    writeBI64: (off, val) => '_v.setBigInt64(' + off + ',' + val + ',true)',
+    writeF64: (off, val) => '_v.setFloat64(' + off + ',' + val + ',true)',
+    writeI16: (off, val) => '_v.setInt16(' + off + ',' + val + ',true)',
+    writeI32: (off, val) => '_v.setInt32(' + off + ',' + val + ',true)',
+    writeU16: (off, val) => '_v.setUint16(' + off + ',' + val + ',true)',
+    writeU32: (off, val) => '_v.setUint32(' + off + ',' + val + ',true)',
+    writeUtf8: (str, off, len) => '$utf8w(' + str + ',' + off + ',' + len + ')',
+};
 
-    return '$ri16(buf,' + off + ')';
-}
-
-function cgReadI32(off: string): string {
-    if (isNode) {
-        return 'buf.readInt32LE(' + off + ')';
-    }
-
-    return '$ri32(buf,' + off + ')';
-}
-
-function cgReadU16(off: string): string {
-    if (isNode) {
-        return 'buf.readUInt16LE(' + off + ')';
-    }
-
-    return '$ru16(buf,' + off + ')';
-}
-
-function cgReadU32(off: string): string {
-    if (isNode) {
-        return 'buf.readUInt32LE(' + off + ')';
-    }
-
-    return '$ru32(buf,' + off + ')';
-}
-
-function cgReadUtf8(start: string, end: string): string {
-    if (isNode) {
-        return 'buf.utf8Slice(' + start + ',' + end + ')';
-    }
-
-    return '$utf8r(buf,' + start + ',' + end + ')';
-}
-
-function cgWriteBI64(off: string, val: string): string {
-    if (isNode) {
-        return 'buf.writeBigInt64LE(' + val + ',' + off + ')';
-    }
-
-    return '$wbi64(buf,' + off + ',' + val + ')';
-}
-
-function cgWriteF64(off: string, val: string): string {
-    if (isNode) {
-        return 'buf.writeDoubleLE(' + val + ',' + off + ')';
-    }
-
-    return '$wf64(buf,' + off + ',' + val + ')';
-}
-
-function cgWriteI16(off: string, val: string): string {
-    if (isNode) {
-        return 'buf.writeInt16LE(' + val + ',' + off + ')';
-    }
-
-    return '$wi16(buf,' + off + ',' + val + ')';
-}
-
-function cgWriteI32(off: string, val: string): string {
-    if (isNode) {
-        return 'buf.writeInt32LE(' + val + ',' + off + ')';
-    }
-
-    return '$wi32(buf,' + off + ',' + val + ')';
-}
-
-function cgWriteU16(off: string, val: string): string {
-    if (isNode) {
-        return 'buf.writeUInt16LE(' + val + ',' + off + ')';
-    }
-
-    return '$wu16(buf,' + off + ',' + val + ')';
-}
-
-function cgWriteU32(off: string, val: string): string {
-    if (isNode) {
-        return 'buf.writeUInt32LE(' + val + ',' + off + ')';
-    }
-
-    return '$wu32(buf,' + off + ',' + val + ')';
-}
-
-function cgWriteUtf8(str: string, off: string, len: string): string {
-    if (isNode) {
-        return 'buf.utf8Write(' + str + ',' + off + ',' + len + ')';
-    }
-
-    return '$utf8w(buf,' + str + ',' + off + ',' + len + ')';
-}
-
-function cgByteLen(str: string): string {
-    if (isNode) {
-        return 'Buffer.byteLength(' + str + ')';
-    }
-
-    return '$byteLen(' + str + ')';
-}
+let driver: CodegenDriver = isNode ? nodeDriver : browserDriver;
 
 
 interface SchemaStoreInterface {
@@ -263,6 +218,7 @@ interface Schema {
     compressedDecodeFn: ((buf: Uint8Array, pos: number) => unknown) | null;
     compressedEncodeFn: ((obj: unknown, buf: Uint8Array, pos: number) => number) | null;
     compressible: boolean;
+    computeSize: ((obj: unknown) => number) | null;
     decodeFn: ((buf: Uint8Array, pos: number) => unknown) | null;
     encodeFn: ((obj: unknown, buf: Uint8Array, pos: number) => number) | null;
     fields: FieldDef[];
@@ -274,7 +230,6 @@ interface Schema {
 
 interface SchemaRegistry {
     constructorCache: WeakMap<Function, Schema>;
-    lastFieldKey: string;
     lastSchema: Schema | null;
     nextId: number;
     schemas: Map<number, Schema>;
@@ -300,6 +255,92 @@ let FIELD_SIZES: Record<string, number> = {
 let varintResult = { pos: 0, value: 0 };
 
 
+function buildComputeSize(schema: Schema, registry?: SchemaRegistry): (obj: unknown) => number {
+    let bitmapBytes = Math.ceil(schema.nullableCount / 8),
+        fixedTotal = 9 + bitmapBytes + schema.fixedSize,
+        hasObjectFields = false,
+        lines: string[] = ['let s=' + fixedTotal];
+
+    for (let i = 0, n = schema.fields.length; i < n; i++) {
+        let f = schema.fields[i]!;
+
+        if (f.fixedSize > 0) {
+            continue;
+        }
+
+        let type = f.type,
+            val = 'obj.' + f.name;
+
+        if (typeof type === 'string') {
+            if (type === 'string') {
+                lines.push('s+=4+$bl(' + val + ')');
+            }
+            else if (type === 'bytes') {
+                lines.push('s+=4+' + val + '.length');
+            }
+        }
+        else if (type.kind === 'object') {
+            hasObjectFields = true;
+            lines.push('{let _i=$ls(' + val + ',$reg);if(!_i||!_i.computeSize)return -1;let _n=_i.computeSize(' + val + ');if(_n<0)return -1;s+=2+_n}');
+        }
+        else if (type.kind === 'array') {
+            let elem = type.element;
+
+            if (typeof elem === 'string') {
+                let elemSize = FIELD_SIZES[elem];
+
+                if (elemSize && elemSize > 0) {
+                    lines.push('s+=2+' + val + '.length*' + elemSize);
+                }
+                else if (elem === 'string') {
+                    lines.push('{let a=' + val + ';s+=2;for(let j=0,n=a.length;j<n;j++)s+=4+$bl(a[j])}');
+                }
+            }
+        }
+        else if (type.kind === 'nullable') {
+            let inner = type.inner;
+
+            if (typeof inner === 'string') {
+                if (inner === 'string') {
+                    lines.push('if(' + val + '!=null)s+=4+$bl(' + val + ')');
+                }
+                else if (inner === 'bytes') {
+                    lines.push('if(' + val + '!=null)s+=4+' + val + '.length');
+                }
+                else {
+                    let innerSize = FIELD_SIZES[inner];
+
+                    if (innerSize && innerSize > 0) {
+                        lines.push('if(' + val + '!=null)s+=' + innerSize);
+                    }
+                }
+            }
+            else if (typeof inner === 'object' && inner.kind === 'array') {
+                let elem = inner.element;
+
+                if (typeof elem === 'string') {
+                    let elemSize = FIELD_SIZES[elem];
+
+                    if (elemSize && elemSize > 0) {
+                        lines.push('if(' + val + '!=null)s+=2+' + val + '.length*' + elemSize);
+                    }
+                    else if (elem === 'string') {
+                        lines.push('if(' + val + '!=null){let a=' + val + ';s+=2;for(let j=0,n=a.length;j<n;j++)s+=4+$bl(a[j])}');
+                    }
+                }
+            }
+        }
+    }
+
+    lines.push('return s');
+
+    if (hasObjectFields) {
+        return new Function('$bl', '$ls', '$reg', 'obj', lines.join(';')).bind(null, byteLen, lookupSchema, registry) as (obj: unknown) => number;
+    }
+
+    return new Function('$bl', 'obj', lines.join(';')).bind(null, byteLen) as (obj: unknown) => number;
+}
+
 function buildSchemaFromDef(def: { fields: { fixedSize: number; name: string; type: string }[]; hash: number; id: number; nullableCount: number }): Schema {
     let fields: FieldDef[] = def.fields.map((f) => ({
         fixedSize: f.fixedSize,
@@ -313,6 +354,7 @@ function buildSchemaFromDef(def: { fields: { fixedSize: number; name: string; ty
         compressedDecodeFn: null,
         compressedEncodeFn: null,
         compressible: isCompressible(fields),
+        computeSize: null,
         decodeFn: null,
         encodeFn: null,
         fields,
@@ -360,6 +402,60 @@ function isIntegerType(type: FieldType): boolean {
     return type === 'int16' || type === 'int32' || type === 'uint16' || type === 'uint32';
 }
 
+function isSizeComputable(schema: Schema): boolean {
+    for (let i = 0, n = schema.fields.length; i < n; i++) {
+        let type = schema.fields[i]!.type;
+
+        if (typeof type === 'string') {
+            if (FIELD_SIZES[type] || type === 'bytes' || type === 'string') {
+                continue;
+            }
+
+            return false;
+        }
+
+        if (type.kind === 'object') {
+            continue;
+        }
+
+        if (type.kind === 'array') {
+            let elem = type.element;
+
+            if (typeof elem === 'string' && (FIELD_SIZES[elem] || elem === 'string')) {
+                continue;
+            }
+
+            return false;
+        }
+
+        if (type.kind === 'nullable') {
+            let inner = type.inner;
+
+            if (typeof inner === 'string') {
+                if (FIELD_SIZES[inner] || inner === 'bytes' || inner === 'string') {
+                    continue;
+                }
+
+                return false;
+            }
+
+            if (typeof inner === 'object' && inner.kind === 'array') {
+                let elem = inner.element;
+
+                if (typeof elem === 'string' && (FIELD_SIZES[elem] || elem === 'string')) {
+                    continue;
+                }
+
+                return false;
+            }
+
+            return false;
+        }
+    }
+
+    return true;
+}
+
 function isSignedIntType(type: string): boolean {
     return type === 'int16' || type === 'int32';
 }
@@ -403,11 +499,6 @@ function writeZigzag(buf: Uint8Array, pos: number, value: number): number {
     return writeVarint(buf, pos, (value << 1) ^ (value >> 31));
 }
 
-// Browser-only helpers bound into compiled functions (not used on Node)
-let browserDecoderBindArgs: unknown[] = isNode ? [] : [readF64, readU16, readU32, readI16, readI32, readBI64, readUtf8],
-    browserDecoderParams: string = isNode ? '' : '$rf64,$ru16,$ru32,$ri16,$ri32,$rbi64,$utf8r,',
-    browserEncoderBindArgs: unknown[] = isNode ? [] : [writeF64, writeU16, writeU32, writeI16, writeI32, writeBI64, writeUtf8, byteLen],
-    browserEncoderParams: string = isNode ? '' : '$wf64,$wu16,$wu32,$wi16,$wi32,$wbi64,$utf8w,$byteLen,';
 
 function compileCompressedDecoder(schema: Schema, registry: SchemaRegistry, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, internFields?: Set<string>, internDecode?: (buf: Uint8Array, pos: number) => string): (buf: Uint8Array, pos: number) => unknown {
     let boolFields: FieldDef[] = [],
@@ -503,7 +594,7 @@ function compileCompressedDecoder(schema: Schema, registry: SchemaRegistry, help
 
         lines.push('let ' + f + 'F=buf[' + vp + '++]');
         lines.push('let ' + f);
-        lines.push('if(' + f + 'F===0){$rz(buf,' + vp + ');' + f + '=$vr.value;' + vp + '=$vr.pos}else{' + f + '=' + cgReadF64(vp) + ';' + vp + '+=8}');
+        lines.push('if(' + f + 'F===0){$rz(buf,' + vp + ');' + f + '=$vr.value;' + vp + '=$vr.pos}else{' + f + '=' + driver.readF64(vp) + ';' + vp + '+=8}');
     }
 
     for (let i = 0, n = schema.fields.length; i < n; i++) {
@@ -532,14 +623,20 @@ function compileCompressedDecoder(schema: Schema, registry: SchemaRegistry, help
 
     lines.push('return{' + allFields.map((f) => f.name).join(',') + '}');
 
+    let preamble = driver.preamble('buf');
+
+    if (preamble) {
+        lines.unshift(preamble);
+    }
+
     let body = lines.join(';');
     let $d = helpers?.decodeSbc ?? ((_buf: Uint8Array, _offset: number, _len: number) => null);
 
     if (internFields && internFields.size > 0 && internDecode) {
-        return new Function('$d', '$rv', '$rz', '$vr', '$sd', browserDecoderParams + 'buf', 'pos', body).bind(null, $d, readVarint, readZigzag, varintResult, internDecode, ...browserDecoderBindArgs) as (buf: Uint8Array, pos: number) => unknown;
+        return new Function('$d', '$rv', '$rz', '$vr', '$sd', driver.decoderParams() + 'buf', 'pos', body).bind(null, $d, readVarint, readZigzag, varintResult, internDecode, ...driver.decoderBindArgs()) as (buf: Uint8Array, pos: number) => unknown;
     }
 
-    return new Function('$d', '$rv', '$rz', '$vr', browserDecoderParams + 'buf', 'pos', body).bind(null, $d, readVarint, readZigzag, varintResult, ...browserDecoderBindArgs) as (buf: Uint8Array, pos: number) => unknown;
+    return new Function('$d', '$rv', '$rz', '$vr', driver.decoderParams() + 'buf', 'pos', body).bind(null, $d, readVarint, readZigzag, varintResult, ...driver.decoderBindArgs()) as (buf: Uint8Array, pos: number) => unknown;
 }
 
 function compileCompressedEncoder(schema: Schema, registry: SchemaRegistry, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Uint8Array, pos: number) => number): (obj: unknown, buf: Uint8Array, pos: number) => number {
@@ -624,7 +721,7 @@ function compileCompressedEncoder(schema: Schema, registry: SchemaRegistry, help
         let f = float64Fields[i]!.name;
 
         lines.push('let ' + f + 'I=obj.' + f + '===(obj.' + f + '|0)');
-        lines.push('if(' + f + 'I){buf[' + vp + ']=0;' + vp + '++;' + vp + '=$wz(buf,' + vp + ',obj.' + f + ')}else{buf[' + vp + ']=1;' + vp + '++;' + cgWriteF64(vp, 'obj.' + f) + ';' + vp + '+=8}');
+        lines.push('if(' + f + 'I){buf[' + vp + ']=0;' + vp + '++;' + vp + '=$wz(buf,' + vp + ',obj.' + f + ')}else{buf[' + vp + ']=1;' + vp + '++;' + driver.writeF64(vp, 'obj.' + f) + ';' + vp + '+=8}');
     }
 
     for (let i = 0, n = schema.fields.length; i < n; i++) {
@@ -667,27 +764,33 @@ function compileCompressedEncoder(schema: Schema, registry: SchemaRegistry, help
 
     lines.push('return ' + vp);
 
+    let preamble = driver.preamble('buf');
+
+    if (preamble) {
+        lines.unshift(preamble);
+    }
+
     let body = lines.join(';');
     let $e = helpers?.encodeSbc ?? ((_value: unknown, buf: Uint8Array, pos: number) => { buf[pos] = 0; return pos + 1; });
 
     if (internFields && internFields.size > 0 && internEncode) {
-        return new Function('$e', '$wv', '$wz', '$si', browserEncoderParams + 'obj', 'buf', 'pos', body).bind(null, $e, writeVarint, writeZigzag, internEncode, ...browserEncoderBindArgs) as (obj: unknown, buf: Uint8Array, pos: number) => number;
+        return new Function('$e', '$wv', '$wz', '$si', driver.encoderParams() + 'obj', 'buf', 'pos', body).bind(null, $e, writeVarint, writeZigzag, internEncode, ...driver.encoderBindArgs()) as (obj: unknown, buf: Uint8Array, pos: number) => number;
     }
 
-    return new Function('$e', '$wv', '$wz', browserEncoderParams + 'obj', 'buf', 'pos', body).bind(null, $e, writeVarint, writeZigzag, ...browserEncoderBindArgs) as (obj: unknown, buf: Uint8Array, pos: number) => number;
+    return new Function('$e', '$wv', '$wz', driver.encoderParams() + 'obj', 'buf', 'pos', body).bind(null, $e, writeVarint, writeZigzag, ...driver.encoderBindArgs()) as (obj: unknown, buf: Uint8Array, pos: number) => number;
 }
 
 function emitDecoderFixedExpr(field: FieldDef, off: string): string {
     switch (field.type) {
-        case 'bigint': return cgReadBI64(off);
-        case 'date': return 'new Date(' + cgReadF64(off) + ')';
-        case 'float64': return cgReadF64(off);
+        case 'bigint': return driver.readBI64(off);
+        case 'date': return 'new Date(' + driver.readF64(off) + ')';
+        case 'float64': return driver.readF64(off);
         case 'int8': return '(buf[' + off + ']<<24>>24)';
-        case 'int16': return cgReadI16(off);
-        case 'int32': return cgReadI32(off);
+        case 'int16': return driver.readI16(off);
+        case 'int32': return driver.readI32(off);
         case 'uint8': return 'buf[' + off + ']';
-        case 'uint16': return cgReadU16(off);
-        case 'uint32': return cgReadU32(off);
+        case 'uint16': return driver.readU16(off);
+        case 'uint32': return driver.readU32(off);
         default: return '0';
     }
 }
@@ -695,7 +798,7 @@ function emitDecoderFixedExpr(field: FieldDef, off: string): string {
 function emitDeltaArrayDecoder(lines: string[], field: FieldDef, vp: string): void {
     let n = field.name;
 
-    lines.push('let ' + n + 'C=' + cgReadU16(vp));
+    lines.push('let ' + n + 'C=' + driver.readU16(vp));
     lines.push(vp + '+=2');
     lines.push('let ' + n + '=new Array(' + n + 'C)');
     lines.push('if(' + n + 'C>0){$rv(buf,' + vp + ')');
@@ -711,7 +814,7 @@ function emitDeltaArrayEncoder(lines: string[], field: FieldDef, vp: string): vo
 
     lines.push('let ' + n + 'A=' + val);
     lines.push('let ' + n + 'C=' + n + 'A.length');
-    lines.push(cgWriteU16(vp, n + 'C'));
+    lines.push(driver.writeU16(vp, n + 'C'));
     lines.push(vp + '+=2');
     lines.push('if(' + n + 'C>0){' + vp + '=$wv(buf,' + vp + ',' + n + 'A[0])');
     lines.push('for(let j=1;j<' + n + 'C;j++){' + vp + '=$wz(buf,' + vp + ',' + n + 'A[j]-' + n + 'A[j-1])}}');
@@ -722,31 +825,31 @@ function emitEncoderFixedAtOffset(lines: string[], field: FieldDef, off: string)
 
     switch (field.type) {
         case 'bigint':
-            lines.push(cgWriteBI64(off, val));
+            lines.push(driver.writeBI64(off, val));
             break;
         case 'date':
-            lines.push(cgWriteF64(off, val + '.getTime()'));
+            lines.push(driver.writeF64(off, val + '.getTime()'));
             break;
         case 'float64':
-            lines.push(cgWriteF64(off, val));
+            lines.push(driver.writeF64(off, val));
             break;
         case 'int8':
             lines.push('buf[' + off + ']=(' + val + ')&0xFF');
             break;
         case 'int16':
-            lines.push(cgWriteI16(off, val));
+            lines.push(driver.writeI16(off, val));
             break;
         case 'int32':
-            lines.push(cgWriteI32(off, val));
+            lines.push(driver.writeI32(off, val));
             break;
         case 'uint8':
             lines.push('buf[' + off + ']=' + val);
             break;
         case 'uint16':
-            lines.push(cgWriteU16(off, val));
+            lines.push(driver.writeU16(off, val));
             break;
         case 'uint32':
-            lines.push(cgWriteU32(off, val));
+            lines.push(driver.writeU32(off, val));
             break;
     }
 }
@@ -754,7 +857,7 @@ function emitEncoderFixedAtOffset(lines: string[], field: FieldDef, off: string)
 function emitFloat64ArrayCompressedDecoder(lines: string[], field: FieldDef, vp: string): void {
     let n = field.name;
 
-    lines.push('let ' + n + 'C=' + cgReadU16(vp));
+    lines.push('let ' + n + 'C=' + driver.readU16(vp));
     lines.push(vp + '+=2');
     lines.push('let ' + n + '=new Array(' + n + 'C)');
     lines.push('if(' + n + 'C>0){let _flg=buf[' + vp + '++]');
@@ -763,7 +866,7 @@ function emitFloat64ArrayCompressedDecoder(lines: string[], field: FieldDef, vp:
     lines.push(vp + '=$vr.pos');
     lines.push(n + '[0]=_base');
     lines.push('for(let j=1;j<' + n + 'C;j++){$rz(buf,' + vp + ');_base+=$vr.value;' + vp + '=$vr.pos;' + n + '[j]=_base}');
-    lines.push('}else{for(let j=0;j<' + n + 'C;j++){' + n + '[j]=' + cgReadF64(vp) + ';' + vp + '+=8}}}');
+    lines.push('}else{for(let j=0;j<' + n + 'C;j++){' + n + '[j]=' + driver.readF64(vp) + ';' + vp + '+=8}}}');
 }
 
 function emitFloat64ArrayCompressedEncoder(lines: string[], field: FieldDef, vp: string): void {
@@ -772,7 +875,7 @@ function emitFloat64ArrayCompressedEncoder(lines: string[], field: FieldDef, vp:
 
     lines.push('let ' + n + 'A=' + val);
     lines.push('let ' + n + 'C=' + n + 'A.length');
-    lines.push(cgWriteU16(vp, n + 'C'));
+    lines.push(driver.writeU16(vp, n + 'C'));
     lines.push(vp + '+=2');
     lines.push('if(' + n + 'C>0){let _allInt=true');
     lines.push('for(let j=0;j<' + n + 'C;j++){if(' + n + 'A[j]!==(' + n + 'A[j]|0)){_allInt=false;break}}');
@@ -780,7 +883,7 @@ function emitFloat64ArrayCompressedEncoder(lines: string[], field: FieldDef, vp:
     lines.push(vp + '=$wv(buf,' + vp + ',' + n + 'A[0])');
     lines.push('for(let j=1;j<' + n + 'C;j++){' + vp + '=$wz(buf,' + vp + ',' + n + 'A[j]-' + n + 'A[j-1])}');
     lines.push('}else{buf[' + vp + '++]=1');
-    lines.push('for(let j=0;j<' + n + 'C;j++){' + cgWriteF64(vp, n + 'A[j]') + ';' + vp + '+=8}}}');
+    lines.push('for(let j=0;j<' + n + 'C;j++){' + driver.writeF64(vp, n + 'A[j]') + ';' + vp + '+=8}}}');
 }
 
 function emitDecoderFixed(lines: string[], field: FieldDef): void {
@@ -788,34 +891,34 @@ function emitDecoderFixed(lines: string[], field: FieldDef): void {
 
     switch (field.type) {
         case 'bigint':
-            lines.push('let ' + field.name + '=' + cgReadBI64(off));
+            lines.push('let ' + field.name + '=' + driver.readBI64(off));
             break;
         case 'boolean':
             lines.push('let ' + field.name + '=!!buf[' + off + ']');
             break;
         case 'date':
-            lines.push('let ' + field.name + '=new Date(' + cgReadF64(off) + ')');
+            lines.push('let ' + field.name + '=new Date(' + driver.readF64(off) + ')');
             break;
         case 'float64':
-            lines.push('let ' + field.name + '=' + cgReadF64(off));
+            lines.push('let ' + field.name + '=' + driver.readF64(off));
             break;
         case 'int8':
             lines.push('let ' + field.name + '=(buf[' + off + ']<<24>>24)');
             break;
         case 'int16':
-            lines.push('let ' + field.name + '=' + cgReadI16(off));
+            lines.push('let ' + field.name + '=' + driver.readI16(off));
             break;
         case 'int32':
-            lines.push('let ' + field.name + '=' + cgReadI32(off));
+            lines.push('let ' + field.name + '=' + driver.readI32(off));
             break;
         case 'uint8':
             lines.push('let ' + field.name + '=buf[' + off + ']');
             break;
         case 'uint16':
-            lines.push('let ' + field.name + '=' + cgReadU16(off));
+            lines.push('let ' + field.name + '=' + driver.readU16(off));
             break;
         case 'uint32':
-            lines.push('let ' + field.name + '=' + cgReadU32(off));
+            lines.push('let ' + field.name + '=' + driver.readU32(off));
             break;
     }
 }
@@ -826,22 +929,22 @@ function emitDecoderVar(lines: string[], field: FieldDef, vp: string, internFiel
     if (typeof type === 'string') {
         switch (type) {
             case 'bytes':
-                lines.push('let ' + field.name + 'L=' + cgReadU32(vp));
+                lines.push('let ' + field.name + 'L=' + driver.readU32(vp));
                 lines.push(vp + '+=4');
                 lines.push('let ' + field.name + '=buf.subarray(' + vp + ',' + vp + '+' + field.name + 'L)');
                 lines.push(vp + '+=' + field.name + 'L');
                 break;
             case 'string':
                 if (internFields && internFields.has(field.name)) {
-                    lines.push('let ' + field.name + 'L=' + cgReadU32(vp));
+                    lines.push('let ' + field.name + 'L=' + driver.readU32(vp));
                     lines.push(vp + '+=4');
                     lines.push('let ' + field.name);
-                    lines.push('if(' + field.name + 'L===0xFFFFFFFF){' + field.name + '=$sd(buf,' + vp + ');' + vp + '+=4}else{' + field.name + '=' + cgReadUtf8(vp, vp + '+' + field.name + 'L') + ';' + vp + '+=' + field.name + 'L}');
+                    lines.push('if(' + field.name + 'L===0xFFFFFFFF){' + field.name + '=$sd(buf,' + vp + ');' + vp + '+=4}else{' + field.name + '=' + driver.readUtf8(vp, vp + '+' + field.name + 'L') + ';' + vp + '+=' + field.name + 'L}');
                 }
                 else {
-                    lines.push('let ' + field.name + 'L=' + cgReadU32(vp));
+                    lines.push('let ' + field.name + 'L=' + driver.readU32(vp));
                     lines.push(vp + '+=4');
-                    lines.push('let ' + field.name + '=' + cgReadUtf8(vp, vp + '+' + field.name + 'L'));
+                    lines.push('let ' + field.name + '=' + driver.readUtf8(vp, vp + '+' + field.name + 'L'));
                     lines.push(vp + '+=' + field.name + 'L');
                 }
                 break;
@@ -862,7 +965,7 @@ function emitDecoderVar(lines: string[], field: FieldDef, vp: string, internFiel
 
     if (type.kind === 'object') {
         // Nested object: read u16 length prefix, decode via decodeSbc
-        lines.push('let ' + field.name + 'L=' + cgReadU16(vp));
+        lines.push('let ' + field.name + 'L=' + driver.readU16(vp));
         lines.push(vp + '+=2');
         lines.push('let ' + field.name + '=$d(buf,' + vp + ',' + field.name + 'L)');
         lines.push(vp + '+=' + field.name + 'L');
@@ -873,34 +976,34 @@ function emitDecoderVar(lines: string[], field: FieldDef, vp: string, internFiel
     if (type.kind === 'array') {
         let elem = type.element;
 
-        lines.push('let ' + field.name + 'C=' + cgReadU16(vp));
+        lines.push('let ' + field.name + 'C=' + driver.readU16(vp));
         lines.push(vp + '+=2');
         lines.push('let ' + field.name + '=new Array(' + field.name + 'C)');
 
         if (typeof elem === 'string' && elem === 'mixed') {
             // Mixed-type array: each element has u32 length + SBC-tagged data
-            lines.push('for(let j=0;j<' + field.name + 'C;j++){let el=' + cgReadU32(vp) + ';' + vp + '+=4;' + field.name + '[j]=$d(buf,' + vp + ',el);' + vp + '+=el}');
+            lines.push('for(let j=0;j<' + field.name + 'C;j++){let el=' + driver.readU32(vp) + ';' + vp + '+=4;' + field.name + '[j]=$d(buf,' + vp + ',el);' + vp + '+=el}');
         }
         else if (typeof elem === 'object' && elem.kind === 'object') {
             // Array of objects: each element has u16 length + schema_id + fields
-            lines.push('for(let j=0;j<' + field.name + 'C;j++){let el=' + cgReadU16(vp) + ';' + vp + '+=2;' + field.name + '[j]=$d(buf,' + vp + ',el);' + vp + '+=el}');
+            lines.push('for(let j=0;j<' + field.name + 'C;j++){let el=' + driver.readU16(vp) + ';' + vp + '+=2;' + field.name + '[j]=$d(buf,' + vp + ',el);' + vp + '+=el}');
         }
         else if (typeof elem === 'string') {
             switch (elem) {
                 case 'float64':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=' + cgReadF64(vp) + ';' + vp + '+=8}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=' + driver.readF64(vp) + ';' + vp + '+=8}');
                     break;
                 case 'int32':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=' + cgReadI32(vp) + ';' + vp + '+=4}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=' + driver.readI32(vp) + ';' + vp + '+=4}');
                     break;
                 case 'string':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){let l=' + cgReadU32(vp) + ';' + vp + '+=4;' + field.name + '[j]=' + cgReadUtf8(vp, vp + '+l') + ';' + vp + '+=l}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){let l=' + driver.readU32(vp) + ';' + vp + '+=4;' + field.name + '[j]=' + driver.readUtf8(vp, vp + '+l') + ';' + vp + '+=l}');
                     break;
                 case 'uint16':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=' + cgReadU16(vp) + ';' + vp + '+=2}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=' + driver.readU16(vp) + ';' + vp + '+=2}');
                     break;
                 case 'uint32':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=' + cgReadU32(vp) + ';' + vp + '+=4}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=' + driver.readU32(vp) + ';' + vp + '+=4}');
                     break;
                 case 'uint8':
                     lines.push('for(let j=0;j<' + field.name + 'C;j++){' + field.name + '[j]=buf[' + vp + '++]}');
@@ -916,20 +1019,20 @@ function emitDecoderVarInner(lines: string[], name: string, type: FieldType, vp:
     if (typeof type === 'string') {
         switch (type) {
             case 'string':
-                lines.push('let ' + name + 'L=' + cgReadU32(vp));
+                lines.push('let ' + name + 'L=' + driver.readU32(vp));
                 lines.push(vp + '+=4');
-                lines.push(name + '=' + cgReadUtf8(vp, vp + '+' + name + 'L'));
+                lines.push(name + '=' + driver.readUtf8(vp, vp + '+' + name + 'L'));
                 lines.push(vp + '+=' + name + 'L');
                 break;
             case 'uint8':
                 lines.push(name + '=buf[' + vp + '++]');
                 break;
             case 'uint32':
-                lines.push(name + '=' + cgReadU32(vp));
+                lines.push(name + '=' + driver.readU32(vp));
                 lines.push(vp + '+=4');
                 break;
             case 'float64':
-                lines.push(name + '=' + cgReadF64(vp));
+                lines.push(name + '=' + driver.readF64(vp));
                 lines.push(vp + '+=8');
                 break;
             case 'boolean':
@@ -945,34 +1048,34 @@ function emitEncoderFixed(lines: string[], field: FieldDef): void {
 
     switch (field.type) {
         case 'bigint':
-            lines.push(cgWriteBI64(off, val));
+            lines.push(driver.writeBI64(off, val));
             break;
         case 'boolean':
             lines.push('buf[' + off + ']=' + val + '?1:0');
             break;
         case 'date':
-            lines.push(cgWriteF64(off, val + '.getTime()'));
+            lines.push(driver.writeF64(off, val + '.getTime()'));
             break;
         case 'float64':
-            lines.push(cgWriteF64(off, val));
+            lines.push(driver.writeF64(off, val));
             break;
         case 'int8':
             lines.push('buf[' + off + ']=(' + val + ')&0xFF');
             break;
         case 'int16':
-            lines.push(cgWriteI16(off, val));
+            lines.push(driver.writeI16(off, val));
             break;
         case 'int32':
-            lines.push(cgWriteI32(off, val));
+            lines.push(driver.writeI32(off, val));
             break;
         case 'uint8':
             lines.push('buf[' + off + ']=' + val);
             break;
         case 'uint16':
-            lines.push(cgWriteU16(off, val));
+            lines.push(driver.writeU16(off, val));
             break;
         case 'uint32':
-            lines.push(cgWriteU32(off, val));
+            lines.push(driver.writeU32(off, val));
             break;
     }
 }
@@ -985,7 +1088,7 @@ function emitEncoderVar(lines: string[], field: FieldDef, vp: string, internFiel
         switch (type) {
             case 'bytes':
                 lines.push('let ' + field.name + 'L=' + val + '.length');
-                lines.push(cgWriteU32(vp, field.name + 'L'));
+                lines.push(driver.writeU32(vp, field.name + 'L'));
                 lines.push(vp + '+=4');
                 lines.push('buf.set(' + val + ',' + vp + ')');
                 lines.push(vp + '+=' + field.name + 'L');
@@ -994,11 +1097,17 @@ function emitEncoderVar(lines: string[], field: FieldDef, vp: string, internFiel
                 if (internFields && internFields.has(field.name)) {
                     lines.push(vp + '=$si(\'' + field.name + '\',' + val + ',buf,' + vp + ')');
                 }
+                else if (isNode) {
+                    // Write string first at vp+4, then patch length prefix (single encode pass)
+                    lines.push('let ' + field.name + 'L=buf.utf8Write(' + val + ',' + vp + '+4)');
+                    lines.push(driver.writeU32(vp, field.name + 'L'));
+                    lines.push(vp + '+=4+' + field.name + 'L');
+                }
                 else {
-                    lines.push('let ' + field.name + 'L=' + cgByteLen(val));
-                    lines.push(cgWriteU32(vp, field.name + 'L'));
+                    lines.push('let ' + field.name + 'L=' + driver.byteLen(val));
+                    lines.push(driver.writeU32(vp, field.name + 'L'));
                     lines.push(vp + '+=4');
-                    lines.push(vp + '+=' + cgWriteUtf8(val, vp, field.name + 'L'));
+                    lines.push(vp + '+=' + driver.writeUtf8(val, vp, field.name + 'L'));
                 }
                 break;
         }
@@ -1020,7 +1129,7 @@ function emitEncoderVar(lines: string[], field: FieldDef, vp: string, internFiel
         lines.push('let ' + field.name + 'S=' + vp);
         lines.push(vp + '+=2');
         lines.push(vp + '=$e(' + val + ',buf,' + vp + ')');
-        lines.push(cgWriteU16(field.name + 'S', vp + '-' + field.name + 'S-2'));
+        lines.push(driver.writeU16(field.name + 'S', vp + '-' + field.name + 'S-2'));
 
         return;
     }
@@ -1030,33 +1139,38 @@ function emitEncoderVar(lines: string[], field: FieldDef, vp: string, internFiel
 
         lines.push('let ' + field.name + 'A=' + val);
         lines.push('let ' + field.name + 'C=' + field.name + 'A.length');
-        lines.push(cgWriteU16(vp, field.name + 'C'));
+        lines.push(driver.writeU16(vp, field.name + 'C'));
         lines.push(vp + '+=2');
 
         if (typeof elem === 'string' && elem === 'mixed') {
             // Mixed-type array: each element gets u32 length + SBC-tagged data
-            lines.push('for(let j=0;j<' + field.name + 'C;j++){let es=' + vp + ';' + vp + '+=4;' + vp + '=$e(' + field.name + 'A[j],buf,' + vp + ');' + cgWriteU32('es', vp + '-es-4') + '}');
+            lines.push('for(let j=0;j<' + field.name + 'C;j++){let es=' + vp + ';' + vp + '+=4;' + vp + '=$e(' + field.name + 'A[j],buf,' + vp + ');' + driver.writeU32('es', vp + '-es-4') + '}');
         }
         else if (typeof elem === 'object' && elem.kind === 'object') {
             // Array of objects: each element gets u16 length + $e(element)
-            lines.push('for(let j=0;j<' + field.name + 'C;j++){let es=' + vp + ';' + vp + '+=2;' + vp + '=$e(' + field.name + 'A[j],buf,' + vp + ');' + cgWriteU16('es', vp + '-es-2') + '}');
+            lines.push('for(let j=0;j<' + field.name + 'C;j++){let es=' + vp + ';' + vp + '+=2;' + vp + '=$e(' + field.name + 'A[j],buf,' + vp + ');' + driver.writeU16('es', vp + '-es-2') + '}');
         }
         else if (typeof elem === 'string') {
             switch (elem) {
                 case 'float64':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + cgWriteF64(vp, field.name + 'A[j]') + ';' + vp + '+=8}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + driver.writeF64(vp, field.name + 'A[j]') + ';' + vp + '+=8}');
                     break;
                 case 'int32':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + cgWriteI32(vp, field.name + 'A[j]') + ';' + vp + '+=4}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + driver.writeI32(vp, field.name + 'A[j]') + ';' + vp + '+=4}');
                     break;
                 case 'string':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){let l=' + cgByteLen(field.name + 'A[j]') + ';' + cgWriteU32(vp, 'l') + ';' + vp + '+=4;' + vp + '+=' + cgWriteUtf8(field.name + 'A[j]', vp, 'l') + '}');
+                    if (isNode) {
+                        lines.push('for(let j=0;j<' + field.name + 'C;j++){let l=buf.utf8Write(' + field.name + 'A[j],' + vp + '+4);' + driver.writeU32(vp, 'l') + ';' + vp + '+=4+l}');
+                    }
+                    else {
+                        lines.push('for(let j=0;j<' + field.name + 'C;j++){let l=' + driver.byteLen(field.name + 'A[j]') + ';' + driver.writeU32(vp, 'l') + ';' + vp + '+=4;' + vp + '+=' + driver.writeUtf8(field.name + 'A[j]', vp, 'l') + '}');
+                    }
                     break;
                 case 'uint16':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + cgWriteU16(vp, field.name + 'A[j]') + ';' + vp + '+=2}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + driver.writeU16(vp, field.name + 'A[j]') + ';' + vp + '+=2}');
                     break;
                 case 'uint32':
-                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + cgWriteU32(vp, field.name + 'A[j]') + ';' + vp + '+=4}');
+                    lines.push('for(let j=0;j<' + field.name + 'C;j++){' + driver.writeU32(vp, field.name + 'A[j]') + ';' + vp + '+=4}');
                     break;
                 case 'uint8':
                     lines.push('for(let j=0;j<' + field.name + 'C;j++){buf[' + vp + '++]=' + field.name + 'A[j]}');
@@ -1072,20 +1186,27 @@ function emitEncoderVarInner(lines: string[], val: string, type: FieldType, vp: 
     if (typeof type === 'string') {
         switch (type) {
             case 'string':
-                lines.push('let _nl=' + cgByteLen(val));
-                lines.push(cgWriteU32(vp, '_nl'));
-                lines.push(vp + '+=4');
-                lines.push(vp + '+=' + cgWriteUtf8(val, vp, '_nl'));
+                if (isNode) {
+                    lines.push('let _nl=buf.utf8Write(' + val + ',' + vp + '+4)');
+                    lines.push(driver.writeU32(vp, '_nl'));
+                    lines.push(vp + '+=4+_nl');
+                }
+                else {
+                    lines.push('let _nl=' + driver.byteLen(val));
+                    lines.push(driver.writeU32(vp, '_nl'));
+                    lines.push(vp + '+=4');
+                    lines.push(vp + '+=' + driver.writeUtf8(val, vp, '_nl'));
+                }
                 break;
             case 'uint8':
                 lines.push('buf[' + vp + '++]=' + val);
                 break;
             case 'uint32':
-                lines.push(cgWriteU32(vp, val));
+                lines.push(driver.writeU32(vp, val));
                 lines.push(vp + '+=4');
                 break;
             case 'float64':
-                lines.push(cgWriteF64(vp, val));
+                lines.push(driver.writeF64(vp, val));
                 lines.push(vp + '+=8');
                 break;
             case 'boolean':
@@ -1151,14 +1272,20 @@ function compileDecoder(schema: Schema, registry: SchemaRegistry, helpers?: { de
 
     lines.push('return{' + allFields.map((f) => f.name).join(',') + '}');
 
+    let preamble = driver.preamble('buf');
+
+    if (preamble) {
+        lines.unshift(preamble);
+    }
+
     let body = lines.join(';');
     let $d = helpers?.decodeSbc ?? ((_buf: Uint8Array, _offset: number, _len: number) => null);
 
     if (internFields && internFields.size > 0 && internDecode) {
-        return new Function('$d', '$sd', browserDecoderParams + 'buf', 'pos', body).bind(null, $d, internDecode, ...browserDecoderBindArgs) as (buf: Uint8Array, pos: number) => unknown;
+        return new Function('$d', '$sd', driver.decoderParams() + 'buf', 'pos', body).bind(null, $d, internDecode, ...driver.decoderBindArgs()) as (buf: Uint8Array, pos: number) => unknown;
     }
 
-    return new Function('$d', browserDecoderParams + 'buf', 'pos', body).bind(null, $d, ...browserDecoderBindArgs) as (buf: Uint8Array, pos: number) => unknown;
+    return new Function('$d', driver.decoderParams() + 'buf', 'pos', body).bind(null, $d, ...driver.decoderBindArgs()) as (buf: Uint8Array, pos: number) => unknown;
 }
 
 function compileEncoder(schema: Schema, registry: SchemaRegistry, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Uint8Array, pos: number) => number): (obj: unknown, buf: Uint8Array, pos: number) => number {
@@ -1218,14 +1345,20 @@ function compileEncoder(schema: Schema, registry: SchemaRegistry, helpers?: { de
 
     lines.push('return ' + (hasVar ? vp : 'pos+' + schema.fixedSize));
 
+    let preamble = driver.preamble('buf');
+
+    if (preamble) {
+        lines.unshift(preamble);
+    }
+
     let body = lines.join(';');
     let $e = helpers?.encodeSbc ?? ((_value: unknown, buf: Uint8Array, pos: number) => { buf[pos] = 0; return pos + 1; });
 
     if (internFields && internFields.size > 0 && internEncode) {
-        return new Function('$e', '$si', browserEncoderParams + 'obj', 'buf', 'pos', body).bind(null, $e, internEncode, ...browserEncoderBindArgs) as (obj: unknown, buf: Uint8Array, pos: number) => number;
+        return new Function('$e', '$si', driver.encoderParams() + 'obj', 'buf', 'pos', body).bind(null, $e, internEncode, ...driver.encoderBindArgs()) as (obj: unknown, buf: Uint8Array, pos: number) => number;
     }
 
-    return new Function('$e', browserEncoderParams + 'obj', 'buf', 'pos', body).bind(null, $e, ...browserEncoderBindArgs) as (obj: unknown, buf: Uint8Array, pos: number) => number;
+    return new Function('$e', driver.encoderParams() + 'obj', 'buf', 'pos', body).bind(null, $e, ...driver.encoderBindArgs()) as (obj: unknown, buf: Uint8Array, pos: number) => number;
 }
 
 function compileSchema(schema: Schema, registry?: SchemaRegistry, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, compression?: boolean, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Uint8Array, pos: number) => number, internDecode?: (buf: Uint8Array, pos: number) => string): void {
@@ -1233,6 +1366,10 @@ function compileSchema(schema: Schema, registry?: SchemaRegistry, helpers?: { de
 
     schema.decodeFn = compileDecoder(schema, reg, helpers, internFields, internDecode);
     schema.encodeFn = compileEncoder(schema, reg, helpers, internFields, internEncode);
+
+    if (!compression && isSizeComputable(schema)) {
+        schema.computeSize = buildComputeSize(schema, reg);
+    }
 
     if (compression && schema.compressible) {
         schema.compressedDecodeFn = compileCompressedDecoder(schema, reg, helpers, internFields, internDecode);
@@ -1268,7 +1405,6 @@ function computeFieldOffsets(fields: FieldDef[]): number {
 function createRegistry(): SchemaRegistry {
     return {
         constructorCache: new WeakMap(),
-        lastFieldKey: '',
         lastSchema: null,
         nextId: 1,
         schemas: new Map(),
@@ -1294,6 +1430,23 @@ function fnv1a(str: string): number {
     }
 
     return hash;
+}
+
+// Continue FNV-1a from a running hash state — feeds str char-by-char, no alloc
+function fnv1aFeed(hash: number, str: string): number {
+    for (let i = 0, n = str.length; i < n; i++) {
+        hash ^= str.charCodeAt(i);
+        hash = (hash * 0x01000193) >>> 0;
+    }
+
+    return hash;
+}
+
+// Feed a single char code into FNV-1a
+function fnv1aFeedChar(hash: number, ch: number): number {
+    hash ^= ch;
+
+    return (hash * 0x01000193) >>> 0;
 }
 
 function deserializeRegistry(data: unknown[]): SchemaRegistry {
@@ -1327,10 +1480,7 @@ function deserializeRegistry(data: unknown[]): SchemaRegistry {
 
     // Set monomorphic state if exactly 1 schema
     if (registry.schemas.size === 1) {
-        let only = registry.schemas.values().next().value as Schema;
-
-        registry.lastSchema = only;
-        registry.lastFieldKey = schemaFieldKey(only);
+        registry.lastSchema = registry.schemas.values().next().value as Schema;
     }
 
     return registry;
@@ -1435,6 +1585,7 @@ function inferSchema(obj: Record<string, unknown>, registry: SchemaRegistry): Sc
         compressedDecodeFn: null,
         compressedEncodeFn: null,
         compressible: isCompressible(fields),
+        computeSize: null,
         decodeFn: null,
         encodeFn: null,
         fields,
@@ -1461,24 +1612,17 @@ function parseFieldType(str: string): FieldType {
     return str as FieldType;
 }
 
-function schemaFieldKey(schema: Schema): string {
-    let cached = fieldKeyCache.get(schema.hash);
+// Verify all schema field names are defined in obj — N property lookups, no alloc
+function verifySchemaFields(obj: Record<string, unknown>, schema: Schema): boolean {
+    let fields = schema.fields;
 
-    if (cached !== undefined) {
-        return cached;
+    for (let i = 0, n = fields.length; i < n; i++) {
+        if (obj[fields[i]!.name] === undefined) {
+            return false;
+        }
     }
 
-    let names: string[] = [];
-
-    for (let i = 0, n = schema.fields.length; i < n; i++) {
-        names.push(schema.fields[i]!.name);
-    }
-
-    let key = names.sort().join(',');
-
-    fieldKeyCache.set(schema.hash, key);
-
-    return key;
+    return true;
 }
 
 function registerSchema(schema: Schema, registry: SchemaRegistry): void {
@@ -1500,7 +1644,6 @@ function registerSchema(schema: Schema, registry: SchemaRegistry): void {
     // Maintain monomorphic state
     if (registry.schemas.size === 1) {
         registry.lastSchema = schema;
-        registry.lastFieldKey = schemaFieldKey(schema);
     }
     else {
         registry.lastSchema = null;
@@ -1543,29 +1686,30 @@ function serializeRegistry(registry: SchemaRegistry): unknown[] {
 }
 
 
-let fieldKeyCache = new Map<number, string>(),
-    objFieldKeyCount = 0; // Out-param of computeObjFieldKey — read immediately after call
+let objShapeCount = 0,
+    objShapeKeys: string[] = [];
 
-function computeObjFieldKey(obj: Record<string, unknown>): string {
+// Computes defined field count from obj, caching sorted keys for lazy hash — no string alloc
+function computeObjShapeCount(obj: Record<string, unknown>): void {
     let count = 0,
-        keys = Object.keys(obj).sort(),
-        parts: string[] = [];
+        keys = Object.keys(obj).sort();
 
     for (let i = 0, n = keys.length; i < n; i++) {
         if (obj[keys[i]!] !== undefined) {
-            parts.push(keys[i]!);
             count++;
         }
     }
 
-    objFieldKeyCount = count;
-
-    return parts.join(',');
+    objShapeCount = count;
+    objShapeKeys = keys;
 }
 
-function computeSchemaHash(obj: Record<string, unknown>): number {
-    let keys = Object.keys(obj).sort(),
-        hashParts: string[] = [];
+// Computes schema hash using cached sorted keys — zero string alloc, feeds FNV-1a directly.
+// Produces identical hash to fnv1a(keys.map(k => k+':'+serializeFieldType(inferFieldType(obj[k]))).join(','))
+function computeObjShapeHash(obj: Record<string, unknown>): number {
+    let first = true,
+        hash = 0x811c9dc5,
+        keys = objShapeKeys;
 
     for (let i = 0, n = keys.length; i < n; i++) {
         let key = keys[i]!;
@@ -1574,10 +1718,24 @@ function computeSchemaHash(obj: Record<string, unknown>): number {
             continue;
         }
 
-        hashParts.push(key + ':' + serializeFieldType(inferFieldType(obj[key])));
+        // Separator between fields (comma between key:type pairs)
+        if (!first) {
+            hash = fnv1aFeedChar(hash, 44); // ','
+        }
+
+        first = false;
+
+        // Feed key name
+        hash = fnv1aFeed(hash, key);
+
+        // Feed ':' separator
+        hash = fnv1aFeedChar(hash, 58); // ':'
+
+        // Feed serialized type — serializeFieldType returns a string, feed it directly
+        hash = fnv1aFeed(hash, serializeFieldType(inferFieldType(obj[key])));
     }
 
-    return fnv1a(hashParts.join(','));
+    return hash;
 }
 
 const lookupSchema = (obj: Record<string, unknown>, registry: SchemaRegistry): Schema | null => {
@@ -1592,37 +1750,73 @@ const lookupSchema = (obj: Record<string, unknown>, registry: SchemaRegistry): S
         }
     }
 
-    // Tier 2: Monomorphic fast path — single schema, verify field names match
+    // Tier 2: Monomorphic fast path — single schema, verify via property lookups (no sort/join)
     if (registry.lastSchema !== null) {
-        let fieldKey = computeObjFieldKey(obj);
+        let schema = registry.lastSchema,
+            fields = schema.fields,
+            n = fields.length;
 
-        if (fieldKey === registry.lastFieldKey) {
-            let schema = registry.lastSchema;
+        // Verify all schema fields are defined in obj — N property lookups, no alloc
+        let match = true;
 
-            if (ctor !== Object && ctor !== undefined) {
-                registry.constructorCache.set(ctor, schema);
+        for (let i = 0; i < n; i++) {
+            if (obj[fields[i]!.name] === undefined) {
+                match = false;
+                break;
+            }
+        }
+
+        if (match) {
+            // Verify no extra defined fields
+            let keyCount = Object.keys(obj).length;
+
+            if (keyCount === n) {
+                if (ctor !== Object && ctor !== undefined) {
+                    registry.constructorCache.set(ctor, schema);
+                }
+
+                return schema;
             }
 
-            return schema;
+            // Rare: obj may have explicit undefined-valued keys — count defined ones
+            if (keyCount > n) {
+                let defined = 0,
+                    keys = Object.keys(obj);
+
+                for (let i = 0, kn = keys.length; i < kn; i++) {
+                    if (obj[keys[i]!] !== undefined) {
+                        defined++;
+                    }
+                }
+
+                if (defined === n) {
+                    if (ctor !== Object && ctor !== undefined) {
+                        registry.constructorCache.set(ctor, schema);
+                    }
+
+                    return schema;
+                }
+            }
         }
 
         // lastSchema non-null iff exactly 1 schema registered; mismatch = no match possible
         return null;
     }
 
-    // Tier 3: Field-count prefilter — narrow candidates by field count
-    let fieldKey = computeObjFieldKey(obj),
-        bucket = registry.schemasByCount.get(objFieldKeyCount);
+    // Tier 3: Field-count prefilter — narrow candidates by defined field count
+    computeObjShapeCount(obj);
+
+    let bucket = registry.schemasByCount.get(objShapeCount);
 
     if (!bucket) {
         return null;
     }
 
     if (bucket.length === 1) {
-        // Single candidate — verify field names match
+        // Single candidate — verify field names match via direct property lookups (no string alloc)
         let schema = bucket[0]!;
 
-        if (fieldKey === schemaFieldKey(schema)) {
+        if (verifySchemaFields(obj, schema)) {
             if (ctor !== Object && ctor !== undefined) {
                 registry.constructorCache.set(ctor, schema);
             }
@@ -1633,11 +1827,11 @@ const lookupSchema = (obj: Record<string, unknown>, registry: SchemaRegistry): S
         return null;
     }
 
-    // Multiple schemas with same field count — full hash lookup + collision check
-    let hash = computeSchemaHash(obj),
+    // Multiple schemas with same field count — hash lookup using cached keys (no re-sort, no string alloc)
+    let hash = computeObjShapeHash(obj),
         schema = registry.schemasByHash.get(hash) ?? null;
 
-    if (schema && fieldKey !== schemaFieldKey(schema)) {
+    if (schema && !verifySchemaFields(obj, schema)) {
         // FNV-1a collision — different field names, same hash
         return null;
     }
@@ -1813,6 +2007,7 @@ const createSchemaStore = (db: { getBinary(key: unknown): Uint8Array | undefined
                 compressedDecodeFn: null,
                 compressedEncodeFn: null,
                 compressible: isCompressible(fields),
+                computeSize: null,
                 decodeFn: null,
                 encodeFn: null,
                 fields,
@@ -2020,86 +2215,6 @@ const createInternPool = (db: InternDb, fieldNames: string[], prefix?: string): 
     };
 };
 
-
-function estimateSbcSize(value: unknown): number {
-    if (value === null || value === undefined) {
-        return 1;
-    }
-
-    switch (typeof value) {
-        case 'bigint':
-            return 9;
-        case 'boolean':
-            return 2;
-        case 'number':
-            return 9;
-        case 'string':
-            return 5 + value.length * 3;
-        case 'object': {
-            if (value instanceof Date) {
-                return 9;
-            }
-
-            if (ArrayBuffer.isView(value)) {
-                return 5 + (value as Uint8Array).byteLength;
-            }
-
-            if (Array.isArray(value)) {
-                let s = 3;
-
-                for (let i = 0, n = value.length; i < n; i++) {
-                    s += estimateSbcSize(value[i]);
-                }
-
-                return s;
-            }
-
-            if (value instanceof Map) {
-                let s = 3;
-
-                (value as Map<unknown, unknown>).forEach((v, k) => {
-                    s += 3 + estimateSbcSize(k) + estimateSbcSize(v);
-                });
-
-                return s;
-            }
-
-            if (value instanceof Set) {
-                let s = 3;
-
-                (value as Set<unknown>).forEach((v) => {
-                    s += estimateSbcSize(v);
-                });
-
-                return s;
-            }
-
-            // Plain object — 9 (header) + field estimates + nullable bitmap
-            let keys = Object.keys(value as Record<string, unknown>),
-                obj = value as Record<string, unknown>,
-                s = 9;
-
-            for (let i = 0, n = keys.length; i < n; i++) {
-                let v = obj[keys[i]!];
-
-                if (v === undefined) {
-                    continue;
-                }
-
-                if (typeof v === 'string') {
-                    s += 4 + v.length * 3;
-                }
-                else {
-                    s += estimateSbcSize(v);
-                }
-            }
-
-            return s + Math.ceil(keys.length / 8);
-        }
-        default:
-            return 9;
-    }
-}
 
 
 const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression?: boolean }, internPool?: InternPool): { decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; encode(value: unknown): Uint8Array } => {
@@ -2413,13 +2528,54 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
     }
 
     function encodeValue(value: unknown): Uint8Array {
-        let estimate = estimateSbcSize(value);
+        // Fast path: schema-compiled object with known size (non-compressed only)
+        if (!compression && value !== null && value !== undefined && typeof value === 'object'
+            && !(value instanceof Date) && !Array.isArray(value)
+            && !(value instanceof Map) && !(value instanceof Set)
+            && !ArrayBuffer.isView(value)) {
 
-        if (estimate > encodeBuf.length) {
-            encodeBuf = allocBuf(Math.max(estimate * 2, encodeBuf.length * 2));
+            let obj = value as Record<string, unknown>,
+                schema = lookupSchema(obj, registry);
+
+            if (schema?.computeSize && schema.encodeFn) {
+                let size = schema.computeSize(obj);
+
+                if (size > 0) {
+                    let result = allocUnsafe(size);
+
+                    result[0] = 246;
+                    writeU32.call(result, schema.hash, 1);
+
+                    let end = schema.encodeFn(obj, result, 9);
+
+                    writeU32.call(result, end - 9, 5);
+
+                    return result;
+                }
+            }
         }
 
-        let end = encodeSbc(value, encodeBuf, 0);
+        // Slow path: primitives, nested objects, compressed, unknown schema
+        let end: number;
+
+        try {
+            end = encodeSbc(value, encodeBuf, 0);
+        }
+        catch {
+            encodeBuf = allocBuf(encodeBuf.length * 2);
+            end = encodeSbc(value, encodeBuf, 0);
+
+            while (end > encodeBuf.length) {
+                encodeBuf = allocBuf(end * 2);
+                end = encodeSbc(value, encodeBuf, 0);
+            }
+        }
+
+        if (end > encodeBuf.length) {
+            encodeBuf = allocBuf(end * 2);
+            end = encodeSbc(value, encodeBuf, 0);
+        }
+
         let result = allocUnsafe(end);
 
         copyBuf(encodeBuf, result, 0, 0, end);
@@ -2431,23 +2587,46 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
         decode(buffer: Uint8Array, length?: number): unknown {
             let len = length ?? buffer.length;
 
-            // Fast path: if root tag is a hash-referenced object (246) and the
-            // schema is already cached, decode directly without copying. The copy
-            // is only needed when schemaStore.get() triggers getBinary (cache miss),
-            // which clobbers the shared getValueBytes buffer.
-            if (len >= 9 && (buffer[0] === 245 || buffer[0] === 246) && schemaStore) {
+            if (len >= 9 && (buffer[0] === 245 || buffer[0] === 246)) {
                 let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
 
-                if (schemaStore.has(hash)) {
-                    return decodeSbc(buffer, 0, len);
+                if (schemaStore) {
+                    if (schemaStore.has(hash)) {
+                        let schema = schemaStore.get(hash);
+
+                        if (schema) {
+                            if (buffer[0] === 245 && schema.compressedDecodeFn) {
+                                return schema.compressedDecodeFn(buffer, 9);
+                            }
+
+                            if (schema.decodeFn) {
+                                return schema.decodeFn(buffer, 9);
+                            }
+                        }
+                    }
+                }
+                else {
+                    // Standalone codec — no buffer clobbering risk
+                    let schema = registry.schemasByHash.get(hash);
+
+                    if (schema) {
+                        if (buffer[0] === 245 && schema.compressedDecodeFn) {
+                            return schema.compressedDecodeFn(buffer, 9);
+                        }
+
+                        if (schema.decodeFn) {
+                            return schema.decodeFn(buffer, 9);
+                        }
+                    }
                 }
             }
-            else if (len > 0 && buffer[0] !== 245 && buffer[0] !== 246) {
-                // Non-object primitives (string, number, etc.) never trigger schema lookup
+
+            if (len > 0 && buffer[0] !== 245 && buffer[0] !== 246) {
+                // Primitive — no schema involvement, no clobbering risk
                 return decodeSbc(buffer, 0, len);
             }
 
-            // Slow path: copy buffer to protect against clobbering during schema lookup
+            // Slow path: schema not in cache, need DB lookup (may clobber buffer)
             let buf = allocUnsafe(len);
 
             if (isNode) {
