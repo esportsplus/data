@@ -599,13 +599,17 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
                 // Plain object → schema-compiled path
                 let obj = value as Record<string, unknown>,
-                    schema = matchSchema(obj);
+                    schema = weakCache.get(obj) ?? null;
 
                 if (!schema) {
-                    schema = inferAndRegister(obj, registry, helpers);
-                }
+                    schema = matchSchema(obj);
 
-                setCache(schema, obj);
+                    if (!schema) {
+                        schema = inferAndRegister(obj, registry, helpers);
+                    }
+
+                    setCache(schema, obj);
+                }
 
                 let h = schema.hash;
 
@@ -701,13 +705,17 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
         // Fast path: plain object
         if (typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof Uint8Array)) {
             let obj = value as Record<string, unknown>,
-                schema = matchSchema(obj);
+                schema = weakCache.get(obj) ?? null;
 
             if (!schema) {
-                schema = inferAndRegister(obj, registry, helpers);
-            }
+                schema = matchSchema(obj);
 
-            setCache(schema, obj);
+                if (!schema) {
+                    schema = inferAndRegister(obj, registry, helpers);
+                }
+
+                setCache(schema, obj);
+            }
 
             let end = schema.encodeFn!(obj, encodeBuf, 9),
                 h = schema.hash;
