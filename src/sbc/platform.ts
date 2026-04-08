@@ -225,29 +225,48 @@ let fromUtf8: (str: string) => Uint8Array = isNode
 
 // Instance methods — use .call(buf, ...) at call sites. No wrappers.
 // Reads: readF64.call(buf, off). Writes: writeF64.call(buf, val, off).
+// Browser path caches DataView per ArrayBuffer to avoid per-field allocation.
+let dvCache: WeakMap<ArrayBuffer, DataView>;
+
+function getDv(buf: Uint8Array): DataView {
+    let ab = buf.buffer as ArrayBuffer,
+        dv = dvCache.get(ab);
+
+    if (!dv || dv.byteLength !== ab.byteLength) {
+        dv = new DataView(ab);
+        dvCache.set(ab, dv);
+    }
+
+    return dv;
+}
+
+if (!isNode) {
+    dvCache = new WeakMap();
+}
+
 let readBI64: ((off: number) => bigint) = isNode
     ? Buffer.prototype.readBigInt64LE
-    : function (this: Uint8Array, off: number) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getBigInt64(off, true); };
+    : function (this: Uint8Array, off: number) { return getDv(this).getBigInt64(this.byteOffset + off, true); };
 
 let readF64: ((off: number) => number) = isNode
     ? Buffer.prototype.readDoubleLE
-    : function (this: Uint8Array, off: number) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getFloat64(off, true); };
+    : function (this: Uint8Array, off: number) { return getDv(this).getFloat64(this.byteOffset + off, true); };
 
 let readI16: ((off: number) => number) = isNode
     ? Buffer.prototype.readInt16LE
-    : function (this: Uint8Array, off: number) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getInt16(off, true); };
+    : function (this: Uint8Array, off: number) { return getDv(this).getInt16(this.byteOffset + off, true); };
 
 let readI32: ((off: number) => number) = isNode
     ? Buffer.prototype.readInt32LE
-    : function (this: Uint8Array, off: number) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getInt32(off, true); };
+    : function (this: Uint8Array, off: number) { return getDv(this).getInt32(this.byteOffset + off, true); };
 
 let readU16: ((off: number) => number) = isNode
     ? Buffer.prototype.readUInt16LE
-    : function (this: Uint8Array, off: number) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getUint16(off, true); };
+    : function (this: Uint8Array, off: number) { return getDv(this).getUint16(this.byteOffset + off, true); };
 
 let readU32: ((off: number) => number) = isNode
     ? Buffer.prototype.readUInt32LE
-    : function (this: Uint8Array, off: number) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getUint32(off, true); };
+    : function (this: Uint8Array, off: number) { return getDv(this).getUint32(this.byteOffset + off, true); };
 
 let readUtf8: ((start: number, end: number) => string) = isNode
     ? (Buffer.prototype as BufferInternal).utf8Slice
@@ -259,27 +278,27 @@ let toUtf8: (buf: Uint8Array) => string = isNode
 
 let writeBI64: ((val: bigint, off: number) => void) = isNode
     ? Buffer.prototype.writeBigInt64LE as unknown as (val: bigint, off: number) => void
-    : function (this: Uint8Array, val: bigint, off: number) { new DataView(this.buffer, this.byteOffset, this.byteLength).setBigInt64(off, val, true); };
+    : function (this: Uint8Array, val: bigint, off: number) { getDv(this).setBigInt64(this.byteOffset + off, val, true); };
 
 let writeF64: ((val: number, off: number) => void) = isNode
     ? Buffer.prototype.writeDoubleLE as unknown as (val: number, off: number) => void
-    : function (this: Uint8Array, val: number, off: number) { new DataView(this.buffer, this.byteOffset, this.byteLength).setFloat64(off, val, true); };
+    : function (this: Uint8Array, val: number, off: number) { getDv(this).setFloat64(this.byteOffset + off, val, true); };
 
 let writeI16: ((val: number, off: number) => void) = isNode
     ? Buffer.prototype.writeInt16LE as unknown as (val: number, off: number) => void
-    : function (this: Uint8Array, val: number, off: number) { new DataView(this.buffer, this.byteOffset, this.byteLength).setInt16(off, val, true); };
+    : function (this: Uint8Array, val: number, off: number) { getDv(this).setInt16(this.byteOffset + off, val, true); };
 
 let writeI32: ((val: number, off: number) => void) = isNode
     ? Buffer.prototype.writeInt32LE as unknown as (val: number, off: number) => void
-    : function (this: Uint8Array, val: number, off: number) { new DataView(this.buffer, this.byteOffset, this.byteLength).setInt32(off, val, true); };
+    : function (this: Uint8Array, val: number, off: number) { getDv(this).setInt32(this.byteOffset + off, val, true); };
 
 let writeU16: ((val: number, off: number) => void) = isNode
     ? Buffer.prototype.writeUInt16LE as unknown as (val: number, off: number) => void
-    : function (this: Uint8Array, val: number, off: number) { new DataView(this.buffer, this.byteOffset, this.byteLength).setUint16(off, val, true); };
+    : function (this: Uint8Array, val: number, off: number) { getDv(this).setUint16(this.byteOffset + off, val, true); };
 
 let writeU32: ((val: number, off: number) => void) = isNode
     ? Buffer.prototype.writeUInt32LE as unknown as (val: number, off: number) => void
-    : function (this: Uint8Array, val: number, off: number) { new DataView(this.buffer, this.byteOffset, this.byteLength).setUint32(off, val, true); };
+    : function (this: Uint8Array, val: number, off: number) { getDv(this).setUint32(this.byteOffset + off, val, true); };
 
 let writeUtf8: ((str: string, off: number, len: number) => number) = isNode
     ? (Buffer.prototype as BufferInternal).utf8Write
