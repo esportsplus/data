@@ -309,8 +309,13 @@ let driver: CodegenDriver = {
 
 
 function readVarint(buf: Uint8Array, pos: number, end?: number): void {
-    let bufEnd = end ?? buf.length,
-        byte = buf[pos]!,
+    let bufEnd = end ?? buf.length;
+
+    if (pos >= bufEnd) {
+        throw new RangeError('SBC: varint extends beyond buffer');
+    }
+
+    let byte = buf[pos]!,
         result = byte & 0x7F,
         shift = 7;
 
