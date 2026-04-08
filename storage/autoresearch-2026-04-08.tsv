@@ -6,3 +6,11 @@ iteration	target	commit	encode_ratio	decode_ratio	combined_ratio	status	descript
 4	codegen.ts	—	2.4581	1.2461	1.8521	discard	Object literal + setPrototypeOf — killed decode perf (-33%)
 5	index.ts	f154685	2.5919	2.0404	2.3162	keep	Separate tag-8 decode fast path with cached lastDecodeFn (+11% decode)
 6	index.ts	—	2.5553	2.0334	2.2944	discard	Cache lastEncodeSchema to skip hash writes — no improvement
+7	platform.ts	—	2.5108	1.7976	2.1542	discard	Single-pass readShortStrAscii with shared array — decode regressed -11%
+8	index.ts	—	2.5367	2.0735	2.3051	discard	Object.keys().length in matchSchema — no measurable improvement
+9	index.ts	—	2.5498	2.0110	2.2804	discard	Map/Set forEach → for...of — neutral (not in benchmark scenarios)
+10	codegen.ts	—	—	—	—	discard	Object literal with computed keys — breaks null prototype tests
+11	codegen.ts	—	2.5476	1.9138	2.2307	discard	Pre-shaped null-proto factory — decode regressed -5% (double writes)
+12	index.ts	—	2.5451	1.9109	2.2280	discard	Cache lastEncodeObj identity — no improvement, WeakMap already fast
+13	codegen.ts+index.ts	ff4c3ef	2.6423	1.9856	2.3139	keep	Varint string/bytes lengths in schema-compiled fields (+4% encode, -16% wire)
+14	codegen.ts+index.ts	—	2.6172	1.9512	2.2842	discard	Varint array counts — decode regressed -3.5% (branch overhead)
