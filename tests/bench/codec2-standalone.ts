@@ -136,6 +136,38 @@ for (let s of scenarios) {
 console.log(`${'TOTAL'.padEnd(30)} | ${totalC2Encode.toLocaleString().padStart(12)} | ${totalMpEncode.toLocaleString().padStart(13)} | ${(totalC2Encode / totalMpEncode).toFixed(2)}x`);
 
 
+// Fresh objects benchmark (no WeakMap hits)
+console.log('\n=== ENCODE BENCHMARK (fresh objects) ===');
+console.log('Scenario                       | Codec2 ops/s  | MsgPack ops/s | Ratio');
+console.log('-------------------------------|--------------|---------------|------');
+
+let totalC2EncodeFresh = 0,
+    totalMpEncodeFresh = 0;
+
+type FreshFactory = { c2Encoded: Uint8Array; factory: () => unknown; mpEncoded: Uint8Array; name: string };
+
+let freshScenarios: FreshFactory[] = [
+    { c2Encoded: c2Simple, factory: () => ({ name: 'Alice' }), mpEncoded: mpSimple, name: 'simple { name }' },
+    { c2Encoded: c2Multi, factory: () => ({ active: true, age: 30, name: 'Alice' }), mpEncoded: mpMulti, name: 'multi { active, age, name }' },
+    { c2Encoded: c2Nested, factory: () => ({ address: { city: 'NYC', zip: '10001' }, name: 'Alice' }), mpEncoded: mpNested, name: 'nested { address, name }' },
+    { c2Encoded: c2Array, factory: () => ({ items: Array.from({ length: 100 }, (_, i) => i) }), mpEncoded: mpArray, name: 'array { items[100] }' },
+    { c2Encoded: c2Large, factory: () => ({ active: true, age: 30, email: 'alice@test.com', name: 'Alice', role: 'admin', score: 99.5 }), mpEncoded: mpLarge, name: 'large { 6 fields }' },
+];
+
+for (let s of freshScenarios) {
+    let c2 = benchFn(`Codec2 ${s.name}`, () => { codec.encode(s.factory()); }),
+        mp = benchFn(`MsgPack ${s.name}`, () => { pack(s.factory()); }),
+        ratio = (c2.opsPerSec / mp.opsPerSec).toFixed(2);
+
+    totalC2EncodeFresh += c2.opsPerSec;
+    totalMpEncodeFresh += mp.opsPerSec;
+
+    console.log(`${s.name.padEnd(30)} | ${c2.opsPerSec.toLocaleString().padStart(12)} | ${mp.opsPerSec.toLocaleString().padStart(13)} | ${ratio}x`);
+}
+
+console.log(`${'TOTAL'.padEnd(30)} | ${totalC2EncodeFresh.toLocaleString().padStart(12)} | ${totalMpEncodeFresh.toLocaleString().padStart(13)} | ${(totalC2EncodeFresh / totalMpEncodeFresh).toFixed(2)}x`);
+
+
 console.log('\n=== DECODE BENCHMARK ===');
 console.log('Scenario                       | Codec2 ops/s  | MsgPack ops/s | Ratio');
 console.log('-------------------------------|--------------|---------------|------');
