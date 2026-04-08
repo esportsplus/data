@@ -13,6 +13,9 @@ type SchemaRegistry = {
 };
 
 
+let MAX_ARRAY_COUNT = 1048576; // 2^20 — guard against DoS from untrusted u32 counts
+
+
 // FNV-1a
 let FNV_OFFSET = 0x811c9dc5 | 0,
     FNV_PRIME = 0x01000193 | 0;
@@ -176,16 +179,16 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
 // 1 = false, 2 = true
 // 3 = uint8 (1 byte)
 // 4 = float64 (8 bytes)
-// 5 = string (u16 len + utf8)
+// 5 = string (u32 len + utf8)
 // 6 = bytes (u32 len + raw)
-// 7 = array (u16 count + tagged elements)
+// 7 = array (u32 count + tagged elements)
 // 8 = object (u32 hash + u32 len + compiled fields)
 // 9 = bigint (8 bytes)
 // 10 = date (f64)
 // 11 = int32 (4 bytes)
-// 12 = packed uint8 array (u16 count + raw bytes)
-// 13 = packed float64 array (u16 count + raw f64s)
-// 14 = packed int32 array (u16 count + raw i32s)
+// 12 = packed uint8 array (u32 count + raw bytes)
+// 13 = packed float64 array (u32 count + raw f64s)
+// 14 = packed int32 array (u32 count + raw i32s)
 
 const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; encode(value: unknown, view?: boolean): Uint8Array } => {
     let encodeBuf = allocBuf(65536),
@@ -253,8 +256,13 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             }
 
             case 7: {
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
-                    arr = new Array(count),
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (count > MAX_ARRAY_COUNT) {
+                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                }
+
+                let arr = new Array(count),
                     p = offset + 5;
 
                 for (let i = 0; i < count; i++) {
@@ -289,8 +297,13 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
             case 12: {
                 // packed uint8 array
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
-                    arr = new Array(count),
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (count > MAX_ARRAY_COUNT) {
+                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                }
+
+                let arr = new Array(count),
                     p = offset + 5;
 
                 for (let i = 0; i < count; i++) {
@@ -302,8 +315,13 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
             case 13: {
                 // packed float64 array
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
-                    arr = new Array(count),
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (count > MAX_ARRAY_COUNT) {
+                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                }
+
+                let arr = new Array(count),
                     p = offset + 5;
 
                 for (let i = 0; i < count; i++) {
@@ -316,8 +334,13 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
             case 14: {
                 // packed int32 array
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
-                    arr = new Array(count),
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (count > MAX_ARRAY_COUNT) {
+                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                }
+
+                let arr = new Array(count),
                     p = offset + 5;
 
                 for (let i = 0; i < count; i++) {
@@ -642,8 +665,10 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
 
     function decode(buffer: Uint8Array, length?: number): unknown {
-        // Fast path: tag 8 (object) — most common top-level value
-        if (buffer[0] === 8) {
+        let len = length ?? buffer.length;
+
+        // Fast path: tag 8 (object) — only when length covers full buffer
+        if (buffer[0] === 8 && len === buffer.length) {
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
                 schema = registry.schemas.get(hash);
 
@@ -652,7 +677,7 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             }
         }
 
-        return decodeSbc(buffer, 0, length ?? buffer.length, 0);
+        return decodeSbc(buffer, 0, len, 0);
     }
 
 

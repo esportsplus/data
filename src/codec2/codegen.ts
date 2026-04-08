@@ -248,18 +248,14 @@ function compileDecoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
         }
     }
 
-    // Build return object
-    body += `return {`;
+    // Build return object — use computed properties to prevent __proto__ pollution
+    body += `let _r=Object.create(null);`;
 
     for (let i = 0; i < n; i++) {
-        if (i > 0) {
-            body += ',';
-        }
-
-        body += `${JSON.stringify(fields[i]!.name)}:f${i}`;
+        body += `_r[${JSON.stringify(fields[i]!.name)}]=f${i};`;
     }
 
-    body += `};\n`;
+    body += `return _r;\n`;
 
     let bindArgs = d.decoderBindArgs();
 

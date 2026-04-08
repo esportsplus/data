@@ -919,4 +919,72 @@ describe('Codec2', () => {
             expect(() => codec.decode(buf)).toThrow('unknown tag');
         });
     });
+
+
+    // === BATCH 3 FIX COVERAGE ===
+
+    describe('F-001 (run2): __proto__ prototype pollution', () => {
+        it('object with __proto__ as own property round-trips safely', () => {
+            let c = createCodec(),
+                data = Object.create(null) as Record<string, unknown>;
+
+            data['__proto__'] = 'safe';
+            data['name'] = 'test';
+
+            let encoded = c.encode(data),
+                decoded = c.decode(encoded) as Record<string, unknown>;
+
+            expect(decoded['__proto__']).toBe('safe');
+            expect(decoded['name']).toBe('test');
+            // Verify prototype was NOT polluted — should be null (Object.create(null))
+            expect(Object.getPrototypeOf(decoded)).toBe(null);
+        });
+
+        it('decoded objects use null prototype', () => {
+            let data = { x: 1 },
+                decoded = codec.decode(codec.encode(data)) as Record<string, unknown>;
+
+            expect(decoded.x).toBe(1);
+            expect(Object.getPrototypeOf(decoded)).toBe(null);
+        });
+    });
+
+
+    describe('F-002 (run2): array count DoS guard', () => {
+        it('huge array count in wire format throws', () => {
+            // tag 7 (generic array) + count = 0x7FFFFFFF (2 billion)
+            let buf = new Uint8Array([7, 0xFF, 0xFF, 0xFF, 0x7F]);
+
+            expect(() => codec.decode(buf)).toThrow('array count');
+        });
+
+        it('huge packed uint8 count throws', () => {
+            let buf = new Uint8Array([12, 0xFF, 0xFF, 0xFF, 0x7F]);
+
+            expect(() => codec.decode(buf)).toThrow('array count');
+        });
+
+        it('normal-sized arrays still work', () => {
+            let data = Array.from({ length: 1000 }, (_, i) => i);
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+    });
+
+
+    describe('F-003 (run2): decode respects length parameter', () => {
+        it('decode with length shorter than buffer ignores trailing bytes', () => {
+            let data = { x: 42 },
+                encoded = codec.encode(data),
+                extended = new Uint8Array(encoded.length + 10);
+
+            extended.set(encoded);
+            // Fill trailing bytes with garbage
+            for (let i = encoded.length; i < extended.length; i++) {
+                extended[i] = 0xFF;
+            }
+
+            expect(codec.decode(extended, encoded.length)).toEqual(data);
+        });
+    });
 });

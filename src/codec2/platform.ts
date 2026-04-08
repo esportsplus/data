@@ -125,18 +125,6 @@ let readF64: ((off: number) => number) = isNode
     ? Buffer.prototype.readDoubleLE
     : function (this: Uint8Array, off: number) { return getDv(this).getFloat64(this.byteOffset + off, true); };
 
-let readU16: ((off: number) => number) = isNode
-    ? Buffer.prototype.readUInt16LE
-    : function (this: Uint8Array, off: number) { return getDv(this).getUint16(this.byteOffset + off, true); };
-
-let readU32: ((off: number) => number) = isNode
-    ? Buffer.prototype.readUInt32LE
-    : function (this: Uint8Array, off: number) { return getDv(this).getUint32(this.byteOffset + off, true); };
-
-let readUtf8: ((start: number, end: number) => string) = isNode
-    ? (Buffer.prototype as unknown as BufferInternal).utf8Slice
-    : function (this: Uint8Array, start: number, end: number) { return textDecoder.decode(this.subarray(start, end)); };
-
 let writeBI64: ((value: bigint, off: number) => number) = isNode
     ? Buffer.prototype.writeBigInt64LE
     : function (this: Uint8Array, value: bigint, off: number) { getDv(this).setBigInt64(this.byteOffset + off, value, true); return off + 8; };
@@ -144,14 +132,6 @@ let writeBI64: ((value: bigint, off: number) => number) = isNode
 let writeF64: ((value: number, off: number) => number) = isNode
     ? Buffer.prototype.writeDoubleLE
     : function (this: Uint8Array, value: number, off: number) { getDv(this).setFloat64(this.byteOffset + off, value, true); return off + 8; };
-
-let writeU16: ((value: number, off: number) => number) = isNode
-    ? Buffer.prototype.writeUInt16LE
-    : function (this: Uint8Array, value: number, off: number) { getDv(this).setUint16(this.byteOffset + off, value, true); return off + 2; };
-
-let writeU32: ((value: number, off: number) => number) = isNode
-    ? Buffer.prototype.writeUInt32LE
-    : function (this: Uint8Array, value: number, off: number) { getDv(this).setUint32(this.byteOffset + off, value, true); return off + 4; };
 
 let writeUtf8: ((str: string, off: number, len: number) => number) = isNode
     ? (Buffer.prototype as unknown as BufferInternal).utf8Write
@@ -223,7 +203,7 @@ let codegenDriver: CodegenDriver = isNode
             return [
                 (buf: Uint8Array, val: number, off: number) => { getDv(buf).setFloat64(buf.byteOffset + off, val, true); },
                 (buf: Uint8Array, str: string, off: number) => { let enc = te.encode(str); buf.set(enc, off); return enc.length; },
-                (str: string) => new Blob([str]).size,
+                byteLen,
                 writeBI64,
             ];
         },
