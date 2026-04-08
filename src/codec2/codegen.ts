@@ -27,6 +27,7 @@ interface SbcHelpers {
     decodeTagEnd: (buf: Uint8Array, offset: number, depth: number) => number;
     encodeObj: (obj: Record<string, unknown>, buf: Uint8Array, pos: number) => number;
     encodeSbc: (value: unknown, buf: Uint8Array, pos: number) => number;
+    registry: Map<number, Schema>;
 }
 
 
@@ -238,7 +239,14 @@ function compileDecoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
                 break;
 
             case 'object':
-                body += `{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}\n`;
+                // Inline tag-8 fast path: skip decodeTagEnd + decodeSbc switch overhead
+                body += `{if(b[p]===8){`;
+                body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                body += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                body += `_s=_reg.get(_h);`;
+                body += `if(_s&&_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}`;
+                body += `p+=9+_dl;}`;
+                body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
 
                 break;
 
@@ -261,9 +269,9 @@ function compileDecoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
     let bindArgs = d.decoderBindArgs();
 
     try {
-        let factory = new Function(d.decoderParams(), '_dec', '_dte', `return function decode(b,pos,_d){${body}}`);
+        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', `return function decode(b,pos,_d){${body}}`);
 
-        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd);
+        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry);
     }
     catch (e) {
         throw new Error('Codec2: decoder compilation failed: ' + (e instanceof Error ? e.message : e));

@@ -254,6 +254,7 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
         decodeTagEnd,
         encodeObj,
         encodeSbc,
+        registry: registry.schemas,
     };
 
 
