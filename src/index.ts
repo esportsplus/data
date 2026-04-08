@@ -46,7 +46,6 @@ export {
 } from './typed-array-codec';
 export { validator };
 export * from './types';
-export * from './validators';
 
 export type {
     ArrayFieldType,

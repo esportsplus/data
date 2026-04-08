@@ -532,7 +532,7 @@ describe('F-006: decode() uncompressed object path', () => {
         let obj1 = { x: 1, y: 2 };
         let obj2 = { active: true, label: 'test' };
 
-        // Encode both to register schemas
+        // encode() returns owned copies by default that survive subsequent encodes
         let buf1 = codec.encode(obj1);
         let buf2 = codec.encode(obj2);
 

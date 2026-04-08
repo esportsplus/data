@@ -11,7 +11,7 @@ import { createRegistry, inferSchema, lookupSchema, registerSchema } from './reg
 import type { InternPool, Schema, SchemaStoreInterface } from './platform';
 
 
-const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression?: boolean }, internPool?: InternPool): { decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; encode(value: unknown): Uint8Array; extractField(buffer: Uint8Array, fieldName: string, length?: number): unknown } => {
+const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression?: boolean }, internPool?: InternPool): { decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; encode(value: unknown, view?: boolean): Uint8Array; extractField(buffer: Uint8Array, fieldName: string, length?: number): unknown } => {
     let compression = options?.compression ?? false,
         encodeBuf = allocBuf(65536),
         registry = createRegistry(),
@@ -20,7 +20,7 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
             encodeSbc: (value: unknown, buf: Uint8Array, pos: number): number => encodeSbc(value, buf, pos),
         };
 
-    let cachedCtorSchema = new Map<Function, Schema>(),
+    let cachedCtorSchema = new Map<Function, Schema | null>(),
         internDecode = internPool?.decode,
         internEncode = internPool?.encode,
         internFieldSet = internPool?.fields,
@@ -454,39 +454,70 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
         }
     }
 
-    function encodeValue(value: unknown): Uint8Array {
-        // Fast path: schema-compiled object with known size (non-compressed only)
-        if (!compression && value !== null && value !== undefined && typeof value === 'object'
-            && !(value instanceof Date) && !Array.isArray(value)
-            && !(value instanceof Map) && !(value instanceof Set)
-            && !ArrayBuffer.isView(value)) {
+    function encodeValue(value: unknown, view?: boolean): Uint8Array {
+        // Fast path: schema-compiled object with encodeFn (non-compressed only)
+        if (!compression && typeof value === 'object' && value !== null) {
+            let ctor = (value as Record<string, unknown>).constructor,
+                obj: Record<string, unknown> | null = null,
+                schema: Schema | null = null;
 
-            let obj = value as Record<string, unknown>,
+            if (ctor === Object || ctor === undefined) {
+                // Plain object — most common case
+                obj = value as Record<string, unknown>;
                 schema = lookupSchema(obj, registry);
-
-            if (schema && obj.constructor !== Object && obj.constructor !== undefined) {
-                cachedCtorSchema.set(obj.constructor as Function, schema);
             }
+            else if (cachedCtorSchema.has(ctor as Function)) {
+                // Class instance — use cached constructor→schema mapping
+                schema = cachedCtorSchema.get(ctor as Function) || null;
 
-            if (schema?.computeSize && schema.encodeFn) {
-                let size = schema.computeSize(obj);
-
-                if (size > 0) {
-                    let result = allocUnsafe(size);
-
-                    result[0] = 246;
-                    writeU32.call(result, schema.hash, 1);
-
-                    let end = schema.encodeFn(obj, result, 9);
-
-                    writeU32.call(result, end - 9, 5);
-
-                    return end < size ? result.subarray(0, end) : result;
+                if (schema) {
+                    obj = value as Record<string, unknown>;
                 }
+                // Cached null means non-schema type (Date, Array, etc.) — fall through
+            }
+            else {
+                // Unknown constructor — probe once, cache result (null for Date/Array/Map/Set/TypedArray)
+                obj = value as Record<string, unknown>;
+                schema = lookupSchema(obj, registry);
+                cachedCtorSchema.set(ctor as Function, schema);
             }
 
-            // Cache schema for encodeSbc to avoid double lookup on plain objects
-            pendingSchema = schema;
+            if (obj && schema?.encodeFn) {
+                // If computeSize is available, use it to ensure buffer is big enough
+                if (schema.computeSize) {
+                    let size = schema.computeSize(obj);
+
+                    if (size > 0) {
+                        while (size > encodeBuf.length) {
+                            encodeBuf = allocBuf(size * 2);
+                        }
+                    }
+                }
+
+                encodeBuf[0] = 246;
+                writeU32.call(encodeBuf, schema.hash, 1);
+
+                let end = schema.encodeFn(obj, encodeBuf, 9);
+
+                writeU32.call(encodeBuf, end - 9, 5);
+
+                let sub = encodeBuf.subarray(0, end);
+
+                if (view) {
+                    return sub;
+                }
+
+                let result = allocUnsafe(end);
+
+                copyBuf(sub, result, 0, 0, end);
+
+                return result;
+            }
+
+            if (obj) {
+                // Cache schema for encodeSbc to avoid double lookup on plain objects
+                pendingSchema = schema;
+            }
         }
 
         // Fast path: fixed-size primitives — encode directly, no scratch buffer needed
@@ -548,9 +579,15 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
             end = encodeSbc(value, encodeBuf, 0);
         }
 
+        let sub = encodeBuf.subarray(0, end);
+
+        if (view) {
+            return sub;
+        }
+
         let result = allocUnsafe(end);
 
-        copyBuf(encodeBuf, result, 0, 0, end);
+        copyBuf(sub, result, 0, 0, end);
 
         return result;
     }
@@ -558,10 +595,6 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
     return {
         decode(buffer: Uint8Array, length?: number): unknown {
             let len = length ?? buffer.length;
-
-            if (len < buffer.length) {
-                buffer = buffer.subarray(0, len);
-            }
 
             if (len >= 9 && (buffer[0] === 245 || buffer[0] === 246)) {
                 let hash = readU32.call(buffer, 1),
@@ -581,7 +614,14 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
             }
 
             if (len > 0 && buffer[0] !== 245 && buffer[0] !== 246) {
-                // Primitive — no schema involvement, no clobbering risk
+                // Inline fast paths for common primitives — avoids function call overhead
+                switch (buffer[0]) {
+                    case 0: return null;
+                    case 251: return !!buffer[1];
+                    case 252: return readF64.call(buffer, 1);
+                    case 255: return buffer[1]!;
+                }
+
                 return decodeSbc(buffer, 0, len);
             }
 
@@ -599,16 +639,13 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
 
             return decodeSbc(buf, 0, len);
         },
-
         decodeAt(buffer: Uint8Array, offset: number): unknown {
             let tag = buffer[offset]!,
                 len = (tag === 245 || tag === 246) ? 9 + readU32.call(buffer, offset + 5) : decodeTagEnd(buffer, offset, tag) - offset;
 
             return decodeSbc(buffer, offset, len);
         },
-
         encode: encodeValue,
-
         extractField(buffer: Uint8Array, fieldName: string, length?: number): unknown {
             let len = length ?? buffer.length;
 
@@ -657,9 +694,5 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
 export { createCodec };
 export { buildSchema, compileSchema, validateFieldTypeString } from './codegen';
 export { createInternPool, createRegistry, createSchemaStore, decodeFieldDefs, deserializeRegistry, inferFieldType, inferSchema, lookupSchema, parseFieldType, registerSchema, resolveSchema, serializeFieldType, serializeRegistry } from './registry';
-export { buildComputeSize as buildSafeComputeSize, buildDecoder as buildSafeDecoder, buildEncoder as buildSafeEncoder, buildFieldExtractors as buildSafeFieldExtractors, compileSafeSchema, createSafeCodec, deserializeSchema, serializeSchema } from './safe';
 
 export type { ArrayFieldType, FieldDef, FieldType, InternDb, InternPool, NullableFieldType, ObjectFieldType, Schema, SchemaRegistry, SchemaStoreInterface } from './platform';
-export { buildDecoderV2 as buildSafeDecoderV2, buildEncoderV2 as buildSafeEncoderV2, buildFieldExtractorsV2 as buildSafeFieldExtractorsV2, compileSafeSchemaV2, createSafeCodecV2, deserializeSchemaV2, serializeSchemaV2 } from './safe-v2';
-
-export type { SerializedSchema } from './safe';
