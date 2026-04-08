@@ -394,27 +394,26 @@ const lookupSchema = (obj: Record<string, unknown>, registry: SchemaRegistry, ou
             fields = schema.fields,
             n = fields.length;
 
-        // Verify all schema fields are defined in obj — N property lookups, no alloc
-        let match = true;
+        // Single pass: count own defined fields and verify all schema fields exist
+        let defined = 0;
 
-        for (let i = 0; i < n; i++) {
-            if (obj[fields[i]!.name] === undefined) {
-                match = false;
-                break;
+        for (let k in obj) {
+            if (hasOwn.call(obj, k) && obj[k] !== undefined) {
+                defined++;
             }
         }
 
-        if (match) {
-            // Count own defined fields without allocating Object.keys array
-            let defined = 0;
+        if (defined === n) {
+            let match = true;
 
-            for (let k in obj) {
-                if (hasOwn.call(obj, k) && obj[k] !== undefined) {
-                    defined++;
+            for (let i = 0; i < n; i++) {
+                if (obj[fields[i]!.name] === undefined) {
+                    match = false;
+                    break;
                 }
             }
 
-            if (defined === n) {
+            if (match) {
                 if (ctor !== Object && ctor !== undefined) {
                     registry.constructorCache.set(ctor, schema);
                 }
