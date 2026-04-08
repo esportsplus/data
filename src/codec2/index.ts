@@ -212,6 +212,10 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
         weakCache.set(obj, schema);
     }
 
+    // Decode fast path: cache last-used schema to avoid Map lookup
+    let lastDecodeHash = 0,
+        lastDecodeSchema: Schema | null = null;
+
     let helpers: SbcHelpers = {
         decodeSbc,
         decodeTagEnd,
@@ -285,11 +289,16 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
             case 8: {
                 let hash = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
-                    schema = registry.schemas.get(hash);
+                    schema = hash === lastDecodeHash && lastDecodeSchema
+                        ? lastDecodeSchema
+                        : registry.schemas.get(hash);
 
                 if (!schema || !schema.decodeFn) {
                     return null;
                 }
+
+                lastDecodeHash = hash;
+                lastDecodeSchema = schema;
 
                 return schema.decodeFn(buf, offset + 9, depth + 1);
             }
@@ -689,9 +698,14 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
         // Fast path: tag 8 (object) — only when length covers full buffer
         if (buffer[0] === 8 && len === buffer.length) {
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
-                schema = registry.schemas.get(hash);
+                schema = hash === lastDecodeHash && lastDecodeSchema
+                    ? lastDecodeSchema
+                    : registry.schemas.get(hash);
 
             if (schema && schema.decodeFn) {
+                lastDecodeHash = hash;
+                lastDecodeSchema = schema;
+
                 return schema.decodeFn(buffer, 9, 0);
             }
         }
