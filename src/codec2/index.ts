@@ -242,11 +242,19 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             case 5: {
                 let sLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
+                if (offset + 5 + sLen > buf.length) {
+                    throw new Error('Codec2: truncated string at offset ' + offset);
+                }
+
                 return readStr(buf, offset + 5, sLen);
             }
 
             case 6: {
                 let bLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (offset + 5 + bLen > buf.length) {
+                    throw new Error('Codec2: truncated bytes at offset ' + offset);
+                }
 
                 if (isNode) {
                     return Buffer.from(buf.subarray(offset + 5, offset + 5 + bLen));

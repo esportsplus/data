@@ -215,11 +215,11 @@ function compileDecoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
                 break;
 
             case 'string':
-                body += `{let l=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;f${i}=${d.readStr('p', 'l')};p+=l;}\n`;
+                body += `{let l=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;if(p+l>b.length)throw new Error('Codec2: truncated string');f${i}=${d.readStr('p', 'l')};p+=l;}\n`;
                 break;
 
             case 'bytes':
-                body += `{let l=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;f${i}=b.slice(p,p+l);p+=l;}\n`;
+                body += `{let l=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;if(p+l>b.length)throw new Error('Codec2: truncated bytes');f${i}=b.slice(p,p+l);p+=l;}\n`;
                 break;
 
             case 'array':

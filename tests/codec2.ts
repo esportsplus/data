@@ -987,4 +987,40 @@ describe('Codec2', () => {
             expect(codec.decode(extended, encoded.length)).toEqual(data);
         });
     });
+
+
+    describe('F-002 (run3): truncated string/bytes bounds check', () => {
+        it('truncated string throws', () => {
+            // tag 5 (string) + u32 length = 100, but only 5 bytes in buffer
+            let buf = new Uint8Array([5, 100, 0, 0, 0]);
+
+            expect(() => codec.decode(buf)).toThrow('truncated string');
+        });
+
+        it('truncated bytes throws', () => {
+            // tag 6 (bytes) + u32 length = 50, but only 5 bytes in buffer
+            let buf = new Uint8Array([6, 50, 0, 0, 0]);
+
+            expect(() => codec.decode(buf)).toThrow('truncated bytes');
+        });
+
+        it('valid string still decodes', () => {
+            let encoded = codec.encode('hello world');
+
+            expect(codec.decode(encoded)).toBe('hello world');
+        });
+
+        it('truncated string inside schema-compiled object throws', () => {
+            let c = createCodec();
+
+            // Encode a valid object first to register the schema
+            c.encode({ name: 'Alice' });
+
+            // Now craft a buffer with valid tag-8 header but truncated string field
+            let valid = c.encode({ name: 'Alice' }),
+                truncated = valid.slice(0, valid.length - 3); // chop off end of string
+
+            expect(() => c.decode(truncated)).toThrow('truncated');
+        });
+    });
 });
