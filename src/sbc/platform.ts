@@ -191,7 +191,29 @@ let allocUnsafe: (n: number) => Uint8Array = isNode
 
 let byteLen: (str: string) => number = isNode
     ? Buffer.byteLength.bind(Buffer) as (str: string) => number
-    : (str) => textEncoder.encode(str).length;
+    : (str) => {
+        let len = 0;
+
+        for (let i = 0, n = str.length; i < n; i++) {
+            let c = str.charCodeAt(i);
+
+            if (c < 0x80) {
+                len++;
+            }
+            else if (c < 0x800) {
+                len += 2;
+            }
+            else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n) {
+                len += 4;
+                i++;
+            }
+            else {
+                len += 3;
+            }
+        }
+
+        return len;
+    };
 
 let copyBuf: (src: Uint8Array, dst: Uint8Array, dstOffset: number, srcStart: number, srcEnd: number) => void = isNode
     ? (src, dst, dstOffset, srcStart, srcEnd) => (src as Buffer).copy(dst as Buffer, dstOffset, srcStart, srcEnd)
