@@ -394,7 +394,7 @@ const lookupSchema = (obj: Record<string, unknown>, registry: SchemaRegistry, ou
             fields = schema.fields,
             n = fields.length;
 
-        // Single pass: count own defined fields and verify all schema fields exist
+        // Count first, verify only if count matches (avoids N property lookups on mismatch)
         let defined = 0;
 
         for (let k in obj) {
