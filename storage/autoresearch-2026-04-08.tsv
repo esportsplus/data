@@ -1,2 +1,14 @@
 iteration	target	commit	encode_ratio	decode_ratio	combined	status	description
 0	—	d47c970	1.4070	1.7218	1.5644	baseline	v1 initial implementation
+1	matchSchema	6865149	1.5455	1.6751	1.6103	keep	multi-schema cache ring
+2	matchSchema	d82359f	1.5802	1.7155	1.6478	keep	for-in key count early exit
+3	codegen	c15016f	1.7207	1.9298	1.8253	keep	packed numeric array encoding
+4	matchSchema	f847dc3	1.6906	2.1201	1.9053	keep	for-in count-first matchSchema
+5	codegen	b19ad41	1.8234	1.9487	1.8861	keep	ASCII fast path string encoding
+6	decode	86537c6	1.8234	1.9487	1.8500	keep	decode fast path tag-8
+7	encode	d3eab62	1.7288	2.0462	1.8875	keep	deferred header write
+8	matchSchema	cf17997	2.0945	1.9601	2.0273	keep	WeakMap schema cache
+9	benchmark	9255ad1	2.0820	2.0005	2.0413	keep	restore WeakMap + fresh benchmark
+10	encode	—	—	—	—	revert	Buffer.slice/Uint8Array.slice copy optimization — regression
+10b	codegen	—	—	—	—	revert	Uint8Array.set for packed arrays — regression
+10c	codegen	—	—	—	—	revert	encodeTopFn inline header — over-engineering, reverted
