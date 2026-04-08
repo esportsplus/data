@@ -205,7 +205,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
 // 16 = set (u32 count + elements)
 // 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
-const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; encode(value: unknown, view?: boolean): Uint8Array } => {
+const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; encode(value: unknown, view?: boolean): Uint8Array } => {
     let encodeBuf = allocBuf(65536),
         registry: SchemaRegistry = {
             nextId: 1,
@@ -1024,7 +1024,22 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
     }
 
 
-    return { decode, encode };
+    function decodeAt(buffer: Uint8Array, offset: number): unknown {
+        let tag = buffer[offset]!;
+
+        if (tag === 8 || tag === 18) {
+            let dataLen = (buffer[offset + 5]! | (buffer[offset + 6]! << 8) | (buffer[offset + 7]! << 16) | (buffer[offset + 8]! << 24)) >>> 0;
+
+            return decodeSbc(buffer, offset, 9 + dataLen, 0);
+        }
+
+        let end = decodeTagEnd(buffer, offset, 0);
+
+        return decodeSbc(buffer, offset, end - offset, 0);
+    }
+
+
+    return { decode, decodeAt, encode };
 };
 
 

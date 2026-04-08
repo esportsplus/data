@@ -1292,4 +1292,80 @@ describe('Codec2', () => {
             expect(ta.length).toBe(2);
         });
     });
+
+
+    // === DECODE AT ===
+
+    describe('decodeAt', () => {
+        it('decode object at non-zero offset', () => {
+            let obj = { name: 'Alice' },
+                encoded = codec.encode(obj),
+                padded = new Uint8Array(10 + encoded.length);
+
+            padded.set(encoded, 10);
+
+            expect(codec.decodeAt(padded, 10)).toEqual(obj);
+        });
+
+        it('decode primitive at offset', () => {
+            let encoded = codec.encode(42),
+                padded = new Uint8Array(5 + encoded.length);
+
+            padded.set(encoded, 5);
+
+            expect(codec.decodeAt(padded, 5)).toBe(42);
+        });
+
+        it('decode string at offset', () => {
+            let encoded = codec.encode('hello'),
+                padded = new Uint8Array(3 + encoded.length);
+
+            padded.set(encoded, 3);
+
+            expect(codec.decodeAt(padded, 3)).toBe('hello');
+        });
+
+        it('decode array at offset', () => {
+            let arr = [1, 2, 3],
+                encoded = codec.encode(arr),
+                padded = new Uint8Array(7 + encoded.length);
+
+            padded.set(encoded, 7);
+
+            expect(codec.decodeAt(padded, 7)).toEqual(arr);
+        });
+
+        it('decode null at offset', () => {
+            let encoded = codec.encode(null),
+                padded = new Uint8Array(2 + encoded.length);
+
+            padded.set(encoded, 2);
+
+            expect(codec.decodeAt(padded, 2)).toBe(null);
+        });
+
+        it('decode boolean at offset', () => {
+            let encoded = codec.encode(true),
+                padded = new Uint8Array(4 + encoded.length);
+
+            padded.set(encoded, 4);
+
+            expect(codec.decodeAt(padded, 4)).toBe(true);
+        });
+
+        it('decode multiple values concatenated', () => {
+            let a = codec.encode('hello'),
+                b = codec.encode(42),
+                c = codec.encode({ x: 1 }),
+                combined = new Uint8Array(a.length + b.length + c.length);
+
+            combined.set(a, 0);
+            combined.set(b, a.length);
+            combined.set(c, a.length + b.length);
+
+            expect(codec.decodeAt(combined, 0)).toBe('hello');
+            expect(codec.decodeAt(combined, a.length)).toBe(42);
+            expect(codec.decodeAt(combined, a.length + b.length)).toEqual({ x: 1 });
+        });
+    });
 });
