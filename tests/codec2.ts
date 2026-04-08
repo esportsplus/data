@@ -1368,4 +1368,123 @@ describe('Codec2', () => {
             expect(codec.decodeAt(combined, a.length + b.length)).toEqual({ x: 1 });
         });
     });
+
+
+    // === DEFINE SCHEMA ===
+
+    describe('defineSchema', () => {
+        it('pre-registered schema encodes/decodes', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'age', type: 'uint8' },
+            ]);
+
+            let obj = { age: 25, name: 'Alice' };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('returns consistent hash for same fields', () => {
+            let c = createCodec();
+            let h1 = c.defineSchema([
+                { name: 'x', type: 'int32' },
+                { name: 'y', type: 'int32' },
+            ]);
+            let h2 = c.defineSchema([
+                { name: 'x', type: 'int32' },
+                { name: 'y', type: 'int32' },
+            ]);
+
+            expect(h1).toBe(h2);
+        });
+
+        it('sorts fields alphabetically', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'z', type: 'string' },
+                { name: 'a', type: 'uint8' },
+            ]);
+
+            let obj = { a: 1, z: 'test' };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('matches auto-inferred schema hash', () => {
+            let c = createCodec();
+            let obj = { active: true, name: 'Bob' };
+
+            c.encode(obj);
+
+            let hash = c.defineSchema([
+                { name: 'active', type: 'boolean' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            expect(typeof hash).toBe('number');
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('schema with all fixed types', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'a', type: 'uint8' },
+                { name: 'b', type: 'int32' },
+                { name: 'c', type: 'float64' },
+                { name: 'd', type: 'boolean' },
+            ]);
+
+            let obj = { a: 42, b: -1000, c: 3.14, d: true };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('schema with variable types', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'data', type: 'bytes' },
+                { name: 'label', type: 'string' },
+            ]);
+
+            let obj = { data: new Uint8Array([1, 2, 3]), label: 'test' };
+            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
+
+            expect(result.label).toBe('test');
+            expect([...(result.data as Uint8Array)]).toEqual([1, 2, 3]);
+        });
+
+        it('schema with mixed type', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'id', type: 'uint8' },
+                { name: 'value', type: 'mixed' },
+            ]);
+
+            expect(c.decode(c.encode({ id: 1, value: 'hello' }))).toEqual({ id: 1, value: 'hello' });
+            expect(c.decode(c.encode({ id: 2, value: 42 }))).toEqual({ id: 2, value: 42 });
+        });
+
+        it('schema with map/set types', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'meta', type: 'map' },
+                { name: 'tags', type: 'set' },
+            ]);
+
+            let obj = { meta: new Map([['k', 'v']]), tags: new Set(['a', 'b']) };
+            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
+
+            expect(result.tags).toBeInstanceOf(Set);
+            expect((result.tags as Set<string>).has('a')).toBe(true);
+            expect(result.meta).toBeInstanceOf(Map);
+            expect((result.meta as Map<string, string>).get('k')).toBe('v');
+        });
+    });
 });

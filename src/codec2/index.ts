@@ -7,6 +7,12 @@ import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, rea
 import type { FieldDef, Schema, SbcHelpers } from './codegen';
 
 
+type FieldSpec = {
+    name: string;
+    nullable?: boolean;
+    type: 'array' | 'bigint' | 'boolean' | 'bytes' | 'date' | 'float64' | 'int8' | 'int16' | 'int32' | 'map' | 'mixed' | 'object' | 'set' | 'string' | 'typedarray' | 'uint8' | 'uint16' | 'uint32';
+};
+
 type SchemaRegistry = {
     nextId: number;
     schemas: Map<number, Schema>;
@@ -205,7 +211,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
 // 16 = set (u32 count + elements)
 // 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
-const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; encode(value: unknown, view?: boolean): Uint8Array } => {
+const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; encode(value: unknown, view?: boolean): Uint8Array } => {
     let encodeBuf = allocBuf(65536),
         registry: SchemaRegistry = {
             nextId: 1,
@@ -1039,7 +1045,57 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
     }
 
 
-    return { decode, decodeAt, encode };
+    function defineSchema(fields: FieldSpec[]): number {
+        // Sort by name (same order as inferAndRegister)
+        let sorted = fields.slice().sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+
+        let keys: string[] = new Array(sorted.length),
+            types: string[] = new Array(sorted.length);
+
+        for (let i = 0, n = sorted.length; i < n; i++) {
+            keys[i] = sorted[i]!.name;
+            types[i] = sorted[i]!.type;
+        }
+
+        let hash = computeShapeHash(keys, types);
+
+        // Already registered?
+        if (registry.schemas.has(hash)) {
+            return hash;
+        }
+
+        let fieldDefs: FieldDef[] = new Array(sorted.length),
+            fixedSize = 0,
+            offset = 0;
+
+        for (let i = 0, n = sorted.length; i < n; i++) {
+            let fs = FIELD_SIZES[types[i]!] ?? 0;
+
+            fieldDefs[i] = { fixedSize: fs, name: keys[i]!, offset, type: types[i]! };
+
+            if (fs > 0) {
+                fixedSize += fs;
+                offset += fs;
+            }
+        }
+
+        let schema: Schema = {
+            decodeFn: null,
+            encodeFn: null,
+            fields: fieldDefs,
+            fixedSize,
+            hash,
+            id: registry.nextId++,
+        };
+
+        compileSchema(schema, helpers);
+        registry.schemas.set(hash, schema);
+
+        return hash;
+    }
+
+
+    return { decode, decodeAt, defineSchema, encode };
 };
 
 
