@@ -217,6 +217,57 @@ let codegenDriver: CodegenDriver = isNode
     };
 
 
+function readVarint(buf: Uint8Array, pos: number): [number, number] {
+    let b: number,
+        shift = 0,
+        value = 0;
+
+    do {
+        b = buf[pos++]!;
+        value |= (b & 0x7F) << shift;
+        shift += 7;
+    } while (b & 0x80);
+
+    return [value >>> 0, pos];
+}
+
+
+function readZigzag(buf: Uint8Array, pos: number): [number, number] {
+    let [v, p] = readVarint(buf, pos);
+
+    return [zigzagDecode(v), p];
+}
+
+
+function writeVarint(buf: Uint8Array, pos: number, value: number): number {
+    value = value >>> 0;
+
+    while (value > 0x7F) {
+        buf[pos++] = (value & 0x7F) | 0x80;
+        value >>>= 7;
+    }
+
+    buf[pos++] = value;
+
+    return pos;
+}
+
+
+function writeZigzag(buf: Uint8Array, pos: number, value: number): number {
+    return writeVarint(buf, pos, zigzagEncode(value));
+}
+
+
+function zigzagDecode(n: number): number {
+    return (n >>> 1) ^ -(n & 1);
+}
+
+
+function zigzagEncode(n: number): number {
+    return ((n << 1) ^ (n >> 31)) >>> 0;
+}
+
+
 let TYPED_ARRAY_BPE = [4, 8, 1, 2, 4, 1, 1, 2, 4, 8, 8];
 
 let TYPED_ARRAY_CTORS: (new (buf: ArrayBuffer, off: number, len: number) => ArrayBufferView)[] = [
@@ -242,12 +293,18 @@ export {
     readBI64,
     readF64,
     readStr,
+    readVarint,
+    readZigzag,
     TYPED_ARRAY_BPE,
     TYPED_ARRAY_CTORS,
     TYPED_ARRAY_IDS,
     writeBI64,
     writeF64,
     writeUtf8,
+    writeVarint,
+    writeZigzag,
+    zigzagDecode,
+    zigzagEncode,
 };
 
 export type { CodegenDriver };

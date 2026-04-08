@@ -1,7 +1,7 @@
 // Codec2 Codegen — Compile type-specific encode/decode functions via new Function()
 // Zero per-field branching: all type checks happen at compile time
 
-import { codegenDriver } from './platform';
+import { codegenDriver, readVarint, readZigzag, writeVarint, writeZigzag } from './platform';
 import type { CodegenDriver } from './platform';
 
 
@@ -16,12 +16,19 @@ interface FieldDef {
 
 interface Schema {
     bitmapBytes: number;
+    boolFields: number[];
+    compFixedSize: number;
+    compressedDecodeFn: ((buf: Uint8Array, pos: number, depth: number) => unknown) | null;
+    compressedEncodeFn: ((obj: unknown, buf: Uint8Array, pos: number) => number) | null;
+    compressible: boolean;
     decodeFn: ((buf: Uint8Array, pos: number, depth: number) => unknown) | null;
     encodeFn: ((obj: unknown, buf: Uint8Array, pos: number) => number) | null;
     fields: FieldDef[];
     fixedSize: number;
+    float64Fields: number[];
     hash: number;
     id: number;
+    intFields: number[];
     nullableCount: number;
 }
 
@@ -39,6 +46,11 @@ function compileSchema(schema: Schema, helpers: SbcHelpers): void {
 
     schema.encodeFn = compileEncoder(schema, d, helpers);
     schema.decodeFn = compileDecoder(schema, d, helpers);
+
+    if (schema.compressible) {
+        schema.compressedEncodeFn = compileCompressedEncoder(schema, d, helpers);
+        schema.compressedDecodeFn = compileCompressedDecoder(schema, d, helpers);
+    }
 }
 
 
@@ -335,6 +347,389 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
     }
     catch (e) {
         throw new Error('Codec2: decoder compilation failed: ' + (e instanceof Error ? e.message : e));
+    }
+}
+
+
+function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (buf: Uint8Array, pos: number, depth: number) => unknown {
+    let body = `'use strict';\n`,
+        fields = schema.fields,
+        n = fields.length;
+
+    body += d.preamble('b');
+    body += `let p=pos;\n`;
+
+    // Declare field variables
+    for (let i = 0; i < n; i++) {
+        body += `let f${i}${fields[i]!.nullable ? '=null' : ''};\n`;
+    }
+
+    // Read null bitmap
+    if (schema.nullableCount > 0) {
+        body += schema.bitmapBytes === 1 ? `let _bm=b[p];p+=1;\n` : `let _bm=b[p]|(b[p+1]<<8);p+=2;\n`;
+    }
+
+    // Read bool bitmap
+    let boolCount = schema.boolFields.length,
+        boolBitmapBytes = boolCount > 0 ? Math.ceil(boolCount / 8) : 0;
+
+    if (boolCount > 0) {
+        body += boolBitmapBytes === 1 ? `let _bb=b[p];p+=1;\n` : `let _bb=b[p]|(b[p+1]<<8);p+=2;\n`;
+    }
+
+    // Pass 1: Booleans, bigint, date, uint8, int8
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            no = f.nullable ? `if(_bm&${1 << f.nullIndex}){` : '',
+            nc = f.nullable ? `}` : '';
+
+        switch (f.type) {
+            case 'boolean': {
+                let bi = schema.boolFields.indexOf(i);
+
+                body += `${no}f${i}=!!(_bb&${1 << bi});${nc}\n`;
+                break;
+            }
+            case 'bigint':
+                body += `${no}f${i}=_rBI64.call(b,p);p+=8;${nc}\n`;
+                break;
+            case 'date':
+                body += `${no}f${i}=new Date(${d.readF64('p')});p+=8;${nc}\n`;
+                break;
+            case 'uint8':
+                body += `${no}f${i}=b[p];p+=1;${nc}\n`;
+                break;
+            case 'int8':
+                body += `${no}f${i}=(b[p]<<24)>>24;p+=1;${nc}\n`;
+                break;
+        }
+    }
+
+    // Pass 2: Varint integers
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            no = f.nullable ? `if(_bm&${1 << f.nullIndex}){` : '',
+            nc = f.nullable ? `}` : '';
+
+        if (f.type === 'int16' || f.type === 'int32') {
+            body += `${no}{let _r=_rz(b,p);f${i}=_r[0];p=_r[1];}${nc}\n`;
+        }
+        else if (f.type === 'uint16' || f.type === 'uint32') {
+            body += `${no}{let _r=_rv(b,p);f${i}=_r[0];p=_r[1];}${nc}\n`;
+        }
+    }
+
+    // Pass 3: Adaptive float64
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            no = f.nullable ? `if(_bm&${1 << f.nullIndex}){` : '',
+            nc = f.nullable ? `}` : '';
+
+        if (f.type === 'float64') {
+            body += `${no}{let _fl=b[p++];if(_fl===0){let _r=_rz(b,p);f${i}=_r[0];p=_r[1];}else{f${i}=${d.readF64('p')};p+=8;}}${nc}\n`;
+        }
+    }
+
+    // Pass 4: Variable fields
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            no = f.nullable ? `if(_bm&${1 << f.nullIndex}){` : '',
+            nc = f.nullable ? `}` : '';
+
+        switch (f.type) {
+            case 'string':
+                body += `${no}{let l=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;f${i}=${d.readStr('p', 'l')};p+=l;}${nc}\n`;
+                break;
+            case 'bytes':
+                body += `${no}{let l=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;f${i}=b.slice(p,p+l);p+=l;}${nc}\n`;
+                break;
+            case 'array':
+                body += `${no}{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
+                body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
+                body += `else if(_f===1){for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
+                body += `else if(_f===2){for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
+                body += `else{for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}}`;
+                body += `f${i}=a;}${nc}\n`;
+                break;
+            case 'object':
+                body += `${no}{if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h);`;
+                body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
+                body += `p+=9+_dl;}`;
+                body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
+                break;
+            case 'map': case 'set': case 'typedarray': case 'mixed':
+                body += `${no}{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}${nc}\n`;
+                break;
+        }
+    }
+
+    // Build return object
+    body += `let _r=Object.create(null);`;
+
+    for (let i = 0; i < n; i++) {
+        body += `_r[${JSON.stringify(fields[i]!.name)}]=f${i};`;
+    }
+
+    body += `return _r;\n`;
+
+    let bindArgs = d.decoderBindArgs();
+
+    try {
+        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_rz', `return function decodeC(b,pos,_d){${body}}`)
+        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, readZigzag);
+    }
+    catch (e) {
+        throw new Error('Codec2: compressed decoder compilation failed: ' + (e instanceof Error ? e.message : e));
+    }
+}
+
+
+function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (obj: unknown, buf: Uint8Array, pos: number) => number {
+    let body = `'use strict';\n`,
+        fields = schema.fields,
+        n = fields.length;
+
+    body += d.preamble('b');
+    body += `let p=pos;\n`;
+
+    // Null bitmap
+    if (schema.nullableCount > 0) {
+        body += `let _bm=0,_bp=p;p+=${schema.bitmapBytes};\n`;
+    }
+
+    // Bool bitmap
+    let boolCount = schema.boolFields.length,
+        boolBitmapBytes = boolCount > 0 ? Math.ceil(boolCount / 8) : 0;
+
+    if (boolCount > 0) {
+        body += `let _bb=0,_bbp=p;p+=${boolBitmapBytes};\n`;
+    }
+
+    // Pass 1: Booleans (into bitmap), bigint, date, uint8, int8
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            sk = JSON.stringify(f.name),
+            v = `o[${sk}]`;
+
+        switch (f.type) {
+            case 'boolean': {
+                let bi = schema.boolFields.indexOf(i);
+
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};if(${v}){_bb|=${1 << bi};}}\n`;
+                }
+                else {
+                    body += `if(${v}){_bb|=${1 << bi};}\n`;
+                }
+
+                break;
+            }
+            case 'bigint':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `_wBI64.call(b,${v},p);p+=8;\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'date':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `${d.writeF64('p', `${v}.getTime()`)};p+=8;\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'uint8':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `b[p]=${v};p+=1;\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'int8':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `b[p]=${v}&0xFF;p+=1;\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+        }
+    }
+
+    // Pass 2: Varint integers
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            sk = JSON.stringify(f.name),
+            v = `o[${sk}]`;
+
+        if (f.type === 'int16' || f.type === 'int32') {
+            if (f.nullable) {
+                body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+            }
+
+            body += `p=_wz(b,p,${v});\n`;
+
+            if (f.nullable) {
+                body += `}\n`;
+            }
+        }
+        else if (f.type === 'uint16' || f.type === 'uint32') {
+            if (f.nullable) {
+                body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+            }
+
+            body += `p=_wv(b,p,${v});\n`;
+
+            if (f.nullable) {
+                body += `}\n`;
+            }
+        }
+    }
+
+    // Pass 3: Adaptive float64
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            sk = JSON.stringify(f.name),
+            v = `o[${sk}]`;
+
+        if (f.type === 'float64') {
+            if (f.nullable) {
+                body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+            }
+
+            body += `{let _v=${v};if(Number.isInteger(_v)&&_v>=-2147483648&&_v<=2147483647){b[p++]=0;p=_wz(b,p,_v);}else{b[p++]=1;${d.writeF64('p', '_v')};p+=8;}}\n`;
+
+            if (f.nullable) {
+                body += `}\n`;
+            }
+        }
+    }
+
+    // Pass 4: Variable fields (string, bytes, array, object, mixed, map, set, typedarray)
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            sk = JSON.stringify(f.name),
+            v = `o[${sk}]`;
+
+        switch (f.type) {
+            case 'string':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `{let s=${v},sl=s.length;`;
+                body += `if(sl<17){b[p]=sl;b[p+1]=0;b[p+2]=0;b[p+3]=0;p+=4;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=4;let l=_bl(s);b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;b[p+2]=(l>>>16)&0xFF;b[p+3]=(l>>>24)&0xFF;p+=4;${d.writeStr('s', 'p', 'l')};p+=l;}}`;
+                body += `else{let l=_bl(s);b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;b[p+2]=(l>>>16)&0xFF;b[p+3]=(l>>>24)&0xFF;p+=4;${d.writeStr('s', 'p', 'l')};p+=l;}}\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'bytes':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `{let _v=${v},l=_v.length;b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;b[p+2]=(l>>>16)&0xFF;b[p+3]=(l>>>24)&0xFF;p+=4;b.set(_v,p);p+=l;}\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'array':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `{let a=${v},l=a.length,_pk=0;`;
+                body += `if(l>0&&typeof a[0]==='number'){let _u8=1,_i32=1,_an=1;for(let i=0;i<l;i++){let v=a[i];if(typeof v!=='number'){_an=0;break;}if(v!==((v&0xFF)>>>0)){_u8=0;}if(v!==(v|0)){_i32=0;}}`;
+                body += `if(_an&&_u8){_pk=1;b[p]=1;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;}`;
+                body += `else if(_an&&_i32){_pk=1;b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
+                body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}}`;
+                body += `if(!_pk){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'object':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `p=_encObj(${v},b,p);\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'map': case 'set': case 'typedarray': case 'mixed':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `p=_enc(${v},b,p);\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+        }
+    }
+
+    // Write bitmaps
+    if (schema.nullableCount > 0) {
+        body += `b[_bp]=_bm&0xFF;\n`;
+
+        if (schema.bitmapBytes > 1) {
+            body += `b[_bp+1]=(_bm>>>8)&0xFF;\n`;
+        }
+    }
+
+    if (boolCount > 0) {
+        body += `b[_bbp]=_bb&0xFF;\n`;
+
+        if (boolBitmapBytes > 1) {
+            body += `b[_bbp+1]=(_bb>>>8)&0xFF;\n`;
+        }
+    }
+
+    body += `return p;\n`;
+
+    let bindArgs = d.encoderBindArgs(),
+        params = d.encoderParams();
+
+    try {
+        return (
+            new Function(params, '_enc', '_encObj', '_wv', '_wz', `return function encodeC(o,b,pos){${body}}`)
+        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint, writeZigzag);
+    }
+    catch (e) {
+        throw new Error('Codec2: compressed encoder compilation failed: ' + (e instanceof Error ? e.message : e));
     }
 }
 

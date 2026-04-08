@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { CodecOptions } from '../src/codec2';
 import { createCodec } from '../src/codec2';
 
 
@@ -1886,6 +1887,173 @@ describe('Codec2', () => {
                 size = codec.computeSize(obj);
 
             expect(size).toBe(codec.encode(obj).length);
+        });
+    });
+
+
+    // === COMPRESSION ===
+
+    describe('compression', () => {
+        it('compressed and uncompressed produce equivalent results', () => {
+            let normal = createCodec(),
+                comp = createCodec({ compress: true }),
+                obj = { age: 25, name: 'Alice', score: 3.14 };
+
+            // Register schema on both instances first
+            normal.encode(obj);
+            comp.encode(obj);
+
+            expect(comp.decode(comp.encode(obj))).toEqual(obj);
+            expect(normal.decode(comp.encode(obj))).toEqual(obj);
+            expect(comp.decode(normal.encode(obj))).toEqual(obj);
+        });
+
+        it('compressed objects use tag 18', () => {
+            let c = createCodec({ compress: true }),
+                obj = { active: true, age: 25, name: 'Alice' };
+
+            expect(c.encode(obj)[0]).toBe(18);
+        });
+
+        it('non-compressible schema uses tag 8', () => {
+            let c = createCodec({ compress: true }),
+                obj = { label: 'test', name: 'Alice' };
+
+            expect(c.encode(obj)[0]).toBe(8);
+        });
+
+        it('varint edge cases', () => {
+            let c = createCodec({ compress: true });
+
+            c.defineSchema([
+                { name: 'a', type: 'uint16' },
+                { name: 'b', type: 'uint16' },
+                { name: 'c', type: 'uint32' },
+                { name: 'd', type: 'uint32' },
+                { name: 'e', type: 'uint32' },
+            ]);
+
+            let obj = { a: 0, b: 127, c: 128, d: 16383, e: 16384 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('zigzag negative values', () => {
+            let c = createCodec({ compress: true });
+
+            c.defineSchema([
+                { name: 'a', type: 'int32' },
+                { name: 'b', type: 'int32' },
+                { name: 'c', type: 'int32' },
+                { name: 'd', type: 'int32' },
+            ]);
+
+            let obj = { a: -1, b: -128, c: -2147483648, d: 2147483647 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('adaptive float64 — integer values', () => {
+            let c = createCodec({ compress: true });
+
+            c.defineSchema([
+                { name: 'temperature', type: 'float64' },
+                { name: 'value', type: 'float64' },
+            ]);
+
+            let obj = { temperature: 72.0, value: 42.0 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('adaptive float64 — non-integer', () => {
+            let c = createCodec({ compress: true });
+
+            c.defineSchema([
+                { name: 'e', type: 'float64' },
+                { name: 'pi', type: 'float64' },
+            ]);
+
+            let obj = { e: Math.E, pi: Math.PI };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('boolean fields via bitmap', () => {
+            let c = createCodec({ compress: true }),
+                obj = { a: true, b: false, c: true, d: false };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('mixed compressed and uncompressed in same stream', () => {
+            let c = createCodec({ compress: true }),
+                obj1 = { active: true, id: 1, name: 'Alice' },
+                obj2 = { label: 'test', notes: 'hello' };
+
+            expect(c.encode(obj1)[0]).toBe(18);
+            expect(c.encode(obj2)[0]).toBe(8);
+            expect(c.decode(c.encode(obj1))).toEqual(obj1);
+            expect(c.decode(c.encode(obj2))).toEqual(obj2);
+        });
+
+        it('compressed nullable fields', () => {
+            let c = createCodec({ compress: true });
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'score', type: 'int32', nullable: true },
+            ]);
+
+            expect(c.decode(c.encode({ name: 'Alice', score: 42 }))).toEqual({ name: 'Alice', score: 42 });
+            expect(c.decode(c.encode({ name: 'Alice', score: null }))).toEqual({ name: 'Alice', score: null });
+        });
+
+        it('cross-codec decode', () => {
+            let c1 = createCodec({ compress: true }),
+                c2 = createCodec();
+
+            c1.defineSchema([{ name: 'id', type: 'uint8' }, { name: 'value', type: 'int32' }]);
+            c2.defineSchema([{ name: 'id', type: 'uint8' }, { name: 'value', type: 'int32' }]);
+
+            let obj = { id: 1, value: -999 };
+
+            expect(c2.decode(c1.encode(obj))).toEqual(obj);
+        });
+
+        it('compressed wire size smaller for integer-heavy', () => {
+            let normal = createCodec(),
+                comp = createCodec({ compress: true }),
+                obj = { a: 1, b: 2, c: 3, d: 4, e: 5 };
+
+            expect(comp.encode(obj).length).toBeLessThanOrEqual(normal.encode(obj).length);
+        });
+
+        it('all field types together', () => {
+            let c = createCodec({ compress: true });
+
+            c.defineSchema([
+                { name: 'active', type: 'boolean' },
+                { name: 'big', type: 'bigint' },
+                { name: 'data', type: 'bytes' },
+                { name: 'f', type: 'float64' },
+                { name: 'i', type: 'int32' },
+                { name: 'name', type: 'string' },
+                { name: 'ts', type: 'date' },
+                { name: 'u', type: 'uint8' },
+            ]);
+
+            let obj = { active: true, big: 123n, data: new Uint8Array([1, 2]), f: 3.14, i: -42, name: 'test', ts: new Date(1000), u: 7 },
+                result = c.decode(c.encode(obj)) as Record<string, unknown>;
+
+            expect(result.active).toBe(true);
+            expect(result.big).toBe(123n);
+            expect([...(result.data as Uint8Array)]).toEqual([1, 2]);
+            expect(result.f).toBe(3.14);
+            expect(result.i).toBe(-42);
+            expect(result.name).toBe('test');
+            expect((result.ts as Date).getTime()).toBe(1000);
+            expect(result.u).toBe(7);
         });
     });
 });

@@ -7,6 +7,10 @@ import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, rea
 import type { FieldDef, Schema, SbcHelpers } from './codegen';
 
 
+type CodecOptions = {
+    compress?: boolean;
+};
+
 type FieldSpec = {
     name: string;
     nullable?: boolean;
@@ -176,14 +180,46 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         }
     }
 
+    let boolFields: number[] = [],
+        compFixedSize = 0,
+        float64Fields: number[] = [],
+        intFields: number[] = [];
+
+    for (let i = 0, n = fields.length; i < n; i++) {
+        let t = fields[i]!.type;
+
+        if (t === 'boolean') {
+            boolFields.push(i);
+        }
+        else if (t === 'float64') {
+            float64Fields.push(i);
+        }
+        else if (t === 'int16' || t === 'int32' || t === 'uint16' || t === 'uint32') {
+            intFields.push(i);
+        }
+        else if (t === 'bigint' || t === 'date') {
+            compFixedSize += 8;
+        }
+        else if (t === 'int8' || t === 'uint8') {
+            compFixedSize += 1;
+        }
+    }
+
     let schema: Schema = {
         bitmapBytes: 0,
+        boolFields,
+        compFixedSize,
+        compressedDecodeFn: null,
+        compressedEncodeFn: null,
+        compressible: boolFields.length > 0 || float64Fields.length > 0 || intFields.length > 0,
         decodeFn: null,
         encodeFn: null,
         fields,
         fixedSize,
+        float64Fields,
         hash,
         id: registry.nextId++,
+        intFields,
         nullableCount: 0,
     };
 
@@ -230,8 +266,9 @@ function readFixedField(buf: Uint8Array, pos: number, type: string): unknown {
 // 16 = set (u32 count + elements)
 // 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
-const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; encode(value: unknown, view?: boolean): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown } => {
-    let encodeBuf = allocBuf(65536),
+const createCodec = (options?: CodecOptions): { computeSize(value: unknown): number; decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; encode(value: unknown, view?: boolean): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown } => {
+    let compress = options?.compress ?? false,
+        encodeBuf = allocBuf(65536),
         registry: SchemaRegistry = {
             nextId: 1,
             schemas: new Map(),
@@ -270,17 +307,25 @@ const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Ui
             setCache(schema, obj);
         }
 
-        let h = schema.hash;
+        let end: number,
+            h = schema.hash,
+            useCompressed = compress && schema.compressible && schema.compressedEncodeFn;
 
-        buf[pos] = 8;
+        if (useCompressed) {
+            buf[pos] = 18;
+            end = schema.compressedEncodeFn!(obj, buf, pos + 9);
+        }
+        else {
+            buf[pos] = 8;
+            end = schema.encodeFn!(obj, buf, pos + 9);
+        }
+
+        let dataLen = end - pos - 9;
+
         buf[pos + 1] = h & 0xFF;
         buf[pos + 2] = (h >>> 8) & 0xFF;
         buf[pos + 3] = (h >>> 16) & 0xFF;
         buf[pos + 4] = (h >>> 24) & 0xFF;
-
-        let end = schema.encodeFn!(obj, buf, pos + 9),
-            dataLen = end - pos - 9;
-
         buf[pos + 5] = dataLen & 0xFF;
         buf[pos + 6] = (dataLen >>> 8) & 0xFF;
         buf[pos + 7] = (dataLen >>> 16) & 0xFF;
@@ -376,6 +421,21 @@ const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Ui
                 lastDecodeSchema = schema;
 
                 return schema.decodeFn(buf, offset + 9, depth + 1);
+            }
+
+            case 18: {
+                let hash = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
+                    schema = registry.schemas.get(hash);
+
+                if (!schema) {
+                    return null;
+                }
+
+                if (schema.compressedDecodeFn) {
+                    return schema.compressedDecodeFn(buf, offset + 9, depth + 1);
+                }
+
+                return schema.decodeFn ? schema.decodeFn(buf, offset + 9, depth + 1) : null;
             }
 
             case 9:
@@ -553,7 +613,7 @@ const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Ui
 
                 return p;
             }
-            case 8: {
+            case 8: case 18: {
                 let dataLen = (buf[offset + 5]! | (buf[offset + 6]! << 8) | (buf[offset + 7]! << 16) | (buf[offset + 8]! << 24)) >>> 0;
                 return offset + 9 + dataLen;
             }
@@ -886,17 +946,25 @@ const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Ui
                     setCache(schema, obj);
                 }
 
-                let h = schema.hash;
+                let end: number,
+                    h = schema.hash,
+                    useCompressed = compress && schema.compressible && schema.compressedEncodeFn;
 
-                buf[pos] = 8;
+                if (useCompressed) {
+                    buf[pos] = 18;
+                    end = schema.compressedEncodeFn!(obj, buf, pos + 9);
+                }
+                else {
+                    buf[pos] = 8;
+                    end = schema.encodeFn!(obj, buf, pos + 9);
+                }
+
+                let dataLen = end - pos - 9;
+
                 buf[pos + 1] = h & 0xFF;
                 buf[pos + 2] = (h >>> 8) & 0xFF;
                 buf[pos + 3] = (h >>> 16) & 0xFF;
                 buf[pos + 4] = (h >>> 24) & 0xFF;
-
-                let end = schema.encodeFn!(obj, buf, pos + 9),
-                    dataLen = end - pos - 9;
-
                 buf[pos + 5] = dataLen & 0xFF;
                 buf[pos + 6] = (dataLen >>> 8) & 0xFF;
                 buf[pos + 7] = (dataLen >>> 16) & 0xFF;
@@ -959,18 +1027,24 @@ const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Ui
     function decode(buffer: Uint8Array, length?: number): unknown {
         let len = length ?? buffer.length;
 
-        // Fast path: tag 8 (object) — only when length covers full buffer
-        if (buffer[0] === 8 && len === buffer.length) {
+        // Fast path: tag 8/18 (object) — only when length covers full buffer
+        if ((buffer[0] === 8 || buffer[0] === 18) && len === buffer.length) {
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
                 schema = hash === lastDecodeHash && lastDecodeSchema
                     ? lastDecodeSchema
                     : registry.schemas.get(hash);
 
-            if (schema && schema.decodeFn) {
+            if (schema) {
                 lastDecodeHash = hash;
                 lastDecodeSchema = schema;
 
-                return schema.decodeFn(buffer, 9, 0);
+                if (buffer[0] === 18 && schema.compressedDecodeFn) {
+                    return schema.compressedDecodeFn(buffer, 9, 0);
+                }
+
+                if (schema.decodeFn) {
+                    return schema.decodeFn(buffer, 9, 0);
+                }
             }
         }
 
@@ -997,15 +1071,31 @@ const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Ui
                 setCache(schema, obj);
             }
 
-            let end = schema.encodeFn!(obj, encodeBuf, 9),
-                h = schema.hash;
+            let end: number,
+                h = schema.hash,
+                useCompressed = compress && schema.compressible && schema.compressedEncodeFn;
 
-            while (end > encodeBuf.length) {
-                encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+            if (useCompressed) {
+                end = schema.compressedEncodeFn!(obj, encodeBuf, 9);
+
+                while (end > encodeBuf.length) {
+                    encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+                    end = schema.compressedEncodeFn!(obj, encodeBuf, 9);
+                }
+
+                encodeBuf[0] = 18;
+            }
+            else {
                 end = schema.encodeFn!(obj, encodeBuf, 9);
+
+                while (end > encodeBuf.length) {
+                    encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+                    end = schema.encodeFn!(obj, encodeBuf, 9);
+                }
+
+                encodeBuf[0] = 8;
             }
 
-            encodeBuf[0] = 8;
             encodeBuf[1] = h & 0xFF;
             encodeBuf[2] = (h >>> 8) & 0xFF;
             encodeBuf[3] = (h >>> 16) & 0xFF;
@@ -1105,14 +1195,46 @@ const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Ui
             throw new Error('Codec2: max 16 nullable fields per schema');
         }
 
+        let boolFields: number[] = [],
+            compFixedSize = 0,
+            float64Fields: number[] = [],
+            intFields: number[] = [];
+
+        for (let i = 0, n = fieldDefs.length; i < n; i++) {
+            let t = fieldDefs[i]!.type;
+
+            if (t === 'boolean') {
+                boolFields.push(i);
+            }
+            else if (t === 'float64') {
+                float64Fields.push(i);
+            }
+            else if (t === 'int16' || t === 'int32' || t === 'uint16' || t === 'uint32') {
+                intFields.push(i);
+            }
+            else if (t === 'bigint' || t === 'date') {
+                compFixedSize += 8;
+            }
+            else if (t === 'int8' || t === 'uint8') {
+                compFixedSize += 1;
+            }
+        }
+
         let schema: Schema = {
             bitmapBytes: Math.ceil(nullableCount / 8),
+            boolFields,
+            compFixedSize,
+            compressedDecodeFn: null,
+            compressedEncodeFn: null,
+            compressible: boolFields.length > 0 || float64Fields.length > 0 || intFields.length > 0,
             decodeFn: null,
             encodeFn: null,
             fields: fieldDefs,
             fixedSize,
+            float64Fields,
             hash,
             id: registry.nextId++,
+            intFields,
             nullableCount,
         };
 
@@ -1124,7 +1246,7 @@ const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Ui
 
 
     function extractField(buffer: Uint8Array, fieldName: string): unknown {
-        if (buffer[0] !== 8) {
+        if (buffer[0] !== 8 && buffer[0] !== 18) {
             return undefined;
         }
 
@@ -1242,7 +1364,7 @@ const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Ui
                 }
                 case 'mixed':
                 case 'object': {
-                    if (buffer[pos] === 8) {
+                    if (buffer[pos] === 8 || buffer[pos] === 18) {
                         let dLen = (buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0;
 
                         pos += 9 + dLen;
@@ -1277,7 +1399,7 @@ const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Ui
             case 'array':
             case 'mixed':
             case 'object': {
-                let end = buffer[pos] === 8
+                let end = (buffer[pos] === 8 || buffer[pos] === 18)
                     ? pos + 9 + ((buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0)
                     : decodeTagEnd(buffer, pos, 0);
 
@@ -1391,4 +1513,4 @@ const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Ui
 
 
 export { createCodec };
-export type { Schema, SchemaRegistry };
+export type { CodecOptions, Schema, SchemaRegistry };
