@@ -515,21 +515,18 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                 lastEncodeSchema = schema;
                 lastEncodeFields = schema.fields;
 
-                // If computeSize is available, use it to ensure buffer is big enough
-                if (schema.computeSize) {
-                    let size = schema.computeSize(obj);
-
-                    if (size > 0) {
-                        while (size > encodeBuf.length) {
-                            encodeBuf = allocBuf(size * 2);
-                        }
-                    }
-                }
-
                 encodeBuf[0] = 246;
                 writeU32.call(encodeBuf, schema.hash, 1);
 
                 let end = schema.encodeFn(obj, encodeBuf, 9);
+
+                // Retry with larger buffer if encodeFn overflowed (rare — encodeBuf starts at 64KB)
+                while (end > encodeBuf.length) {
+                    encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+                    encodeBuf[0] = 246;
+                    writeU32.call(encodeBuf, schema.hash, 1);
+                    end = schema.encodeFn(obj, encodeBuf, 9);
+                }
 
                 writeU32.call(encodeBuf, end - 9, 5);
 
