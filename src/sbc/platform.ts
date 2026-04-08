@@ -54,6 +54,7 @@ interface Schema {
     fixedSize: number;
     hash: number;
     id: number;
+    nullIndexMap: Map<string, number> | null;
     nullableCount: number;
 }
 

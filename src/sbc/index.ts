@@ -592,20 +592,15 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
             // Account for null bitmap bytes between header and field data
             let bitmapBytes = schema.nullableCount > 0 ? Math.ceil(schema.nullableCount / 8) : 0;
 
-            // Check if target field is nullable and currently null (before extractor lookup)
-            if (bitmapBytes > 0) {
-                for (let i = 0, n = schema.fields.length; i < n; i++) {
-                    let field = schema.fields[i]!;
+            // O(1) null check via precomputed nullIndexMap
+            if (bitmapBytes > 0 && schema.nullIndexMap) {
+                let nullIdx = schema.nullIndexMap.get(fieldName);
 
-                    if (field.name === fieldName && field._nullIndex !== undefined) {
-                        let bitMask = 1 << (field._nullIndex & 7);
+                if (nullIdx !== undefined) {
+                    let bitMask = 1 << (nullIdx & 7);
 
-                        // Bit NOT set means field is null
-                        if (!(buffer[9 + (field._nullIndex >> 3)]! & bitMask)) {
-                            return null;
-                        }
-
-                        break;
+                    if (!(buffer[9 + (nullIdx >> 3)]! & bitMask)) {
+                        return null;
                     }
                 }
             }

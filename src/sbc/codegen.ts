@@ -243,6 +243,7 @@ function buildSchema(fields: FieldDef[], hash: number, id: number): Schema {
         fixedSize,
         hash,
         id,
+        nullIndexMap: null,
         nullableCount,
     };
 }
@@ -288,6 +289,7 @@ function buildSchemaFromDef(def: { fields: { fixedSize: number; name: string; ty
         fixedSize,
         hash: def.hash,
         id: def.id,
+        nullIndexMap: null,
         nullableCount,
     };
 }
@@ -657,6 +659,20 @@ function compileFieldExtractors(schema: Schema): void {
     }
 
     schema.fieldExtractors = extractors;
+
+    if (schema.nullableCount > 0) {
+        let nullMap = new Map<string, number>();
+
+        for (let i = 0, n = schema.fields.length; i < n; i++) {
+            let field = schema.fields[i]!;
+
+            if (field._nullIndex !== undefined) {
+                nullMap.set(field.name, field._nullIndex);
+            }
+        }
+
+        schema.nullIndexMap = nullMap;
+    }
 }
 
 function compileSchema(schema: Schema, registry?: SchemaRegistry, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, compression?: boolean, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Uint8Array, pos: number) => number, internDecode?: (buf: Uint8Array, pos: number) => string, lookupFn?: (obj: Record<string, unknown>, registry: SchemaRegistry) => Schema | null): void {
