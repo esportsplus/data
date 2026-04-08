@@ -1,0 +1,2 @@
+iteration	target	commit	encode_ratio	decode_ratio	combined	status	description
+0	—	d47c970	1.4070	1.7218	1.5644	baseline	v1 initial implementation

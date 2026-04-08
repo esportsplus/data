@@ -176,9 +176,16 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             schemas: new Map(),
         };
 
-    // Monomorphic schema cache
-    let lastFields: FieldDef[] | null = null,
-        lastSchema: Schema | null = null;
+    // Multi-schema cache — handles nested objects without breaking
+    let cacheFields: (FieldDef[] | null)[] = [null, null, null, null],
+        cacheIdx = 0,
+        cacheSchemas: (Schema | null)[] = [null, null, null, null];
+
+    function setCache(schema: Schema): void {
+        cacheSchemas[cacheIdx] = schema;
+        cacheFields[cacheIdx] = schema.fields;
+        cacheIdx = (cacheIdx + 1) & 3;
+    }
 
     let helpers: SbcHelpers = {
         decodeSbc: decodeSbc,
@@ -392,8 +399,7 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                     schema = inferAndRegister(obj, registry, helpers);
                 }
 
-                lastSchema = schema;
-                lastFields = schema.fields;
+                setCache(schema);
 
                 let h = schema.hash;
 
@@ -422,31 +428,32 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
 
     function matchSchema(obj: Record<string, unknown>): Schema | null {
-        if (!lastSchema || !lastFields) {
-            return null;
-        }
+        let keyCount = Object.keys(obj).length;
 
-        let fields = lastFields,
-            n = fields.length,
-            count = 0;
+        for (let i = 0; i < 4; i++) {
+            let schema = cacheSchemas[i],
+                fields = cacheFields[i];
 
-        for (let k in obj) {
-            if (obj[k] !== undefined) {
-                count++;
+            if (!schema || !fields || fields.length !== keyCount) {
+                continue;
+            }
+
+            let n = fields.length,
+                match = true;
+
+            for (let j = 0; j < n; j++) {
+                if (obj[fields[j]!.name] === undefined) {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match) {
+                return schema;
             }
         }
 
-        if (count !== n) {
-            return null;
-        }
-
-        for (let i = 0; i < n; i++) {
-            if (obj[fields[i]!.name] === undefined) {
-                return null;
-            }
-        }
-
-        return lastSchema;
+        return null;
     }
 
 
@@ -465,8 +472,7 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                 schema = inferAndRegister(obj, registry, helpers);
             }
 
-            lastSchema = schema;
-            lastFields = schema.fields;
+            setCache(schema);
 
             let h = schema.hash;
 
