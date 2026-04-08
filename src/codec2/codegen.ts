@@ -191,8 +191,18 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
                         body += `}\n`;
                     }
+                    else if (et.base === 'string') {
+                        // Typed array<string>: varint count + per-element [varint len][utf8 data]
+                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let s=a[i],sl=s.length;`;
+                        body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}`;
+                        body += `else{let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}}\n`;
+                    }
+                    else if (et.base === 'bytes') {
+                        // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
+                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let v=a[i],vl=v.length;p=_wv(b,p,vl);b.set(v,p);p+=vl;}}\n`;
+                    }
                     else {
-                        // Non-fixed element type (string, bytes, containers): varint count + tagged elements
+                        // Container element types: varint count + tagged elements
                         body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
                     }
                 }
@@ -395,8 +405,24 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
                         body += `f${i}=a;}\n`;
                     }
+                    else if (et.base === 'string') {
+                        // Typed array<string>: varint count + per-element [varint len][utf8 data]
+                        body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{let _vr=_rv(b,p);sl=_vr[0];p=_vr[1];}a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
+                        body += `f${i}=a;}\n`;
+                    }
+                    else if (et.base === 'bytes') {
+                        // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
+                        body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{let _vr=_rv(b,p);bl=_vr[0];p=_vr[1];}a[i]=b.slice(p,p+bl);p+=bl;}`;
+                        body += `f${i}=a;}\n`;
+                    }
                     else {
-                        // Non-fixed element type: varint count + tagged elements
+                        // Container element types: varint count + tagged elements
                         body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
