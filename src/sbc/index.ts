@@ -8,7 +8,7 @@ import { compileCompressedDecoder, compileCompressedEncoder, compileSchema } fro
 import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readU16, readU32, readUtf8, writeBI64, writeF64, writeU16, writeU32, writeUtf8 } from './platform';
 import { createRegistry, inferSchema, lookupSchema, registerSchema } from './registry';
 
-import type { InternPool, Schema, SchemaStoreInterface } from './platform';
+import type { FieldDef, InternPool, Schema, SchemaStoreInterface } from './platform';
 
 
 const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression?: boolean }, internPool?: InternPool): { decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; encode(value: unknown, view?: boolean): Uint8Array; extractField(buffer: Uint8Array, fieldName: string, length?: number): unknown } => {
@@ -24,6 +24,8 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
         internDecode = internPool?.decode,
         internEncode = internPool?.encode,
         internFieldSet = internPool?.fields,
+        lastEncodeFields: FieldDef[] | null = null,
+        lastEncodeSchema: Schema | null = null,
         pendingSchema: Schema | null = null;
 
     // Wire helpers into schema store so compiled decoders can call decodeSbc/encodeSbc
@@ -462,27 +464,57 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                 schema: Schema | null = null;
 
             if (ctor === Object || ctor === undefined) {
-                // Plain object — most common case
                 obj = value as Record<string, unknown>;
-                schema = lookupSchema(obj, registry);
+
+                // Codec-level monomorphic cache — avoids Object.keys().sort() + hash on repeat shapes
+                if (lastEncodeSchema && lastEncodeFields) {
+                    let defined = 0,
+                        fields = lastEncodeFields,
+                        n = fields.length;
+
+                    for (let k in obj) {
+                        if (obj[k] !== undefined) {
+                            defined++;
+                        }
+                    }
+
+                    if (defined === n) {
+                        let match = true;
+
+                        for (let i = 0; i < n; i++) {
+                            if (obj[fields[i]!.name] === undefined) {
+                                match = false;
+                                break;
+                            }
+                        }
+
+                        if (match) {
+                            schema = lastEncodeSchema;
+                        }
+                    }
+                }
+
+                if (!schema) {
+                    schema = lookupSchema(obj, registry);
+                }
             }
             else if (cachedCtorSchema.has(ctor as Function)) {
-                // Class instance — use cached constructor→schema mapping
                 schema = cachedCtorSchema.get(ctor as Function) || null;
 
                 if (schema) {
                     obj = value as Record<string, unknown>;
                 }
-                // Cached null means non-schema type (Date, Array, etc.) — fall through
             }
             else {
-                // Unknown constructor — probe once, cache result (null for Date/Array/Map/Set/TypedArray)
                 obj = value as Record<string, unknown>;
                 schema = lookupSchema(obj, registry);
                 cachedCtorSchema.set(ctor as Function, schema);
             }
 
             if (obj && schema?.encodeFn) {
+                lastEncodeSchema = schema;
+                lastEncodeFields = schema.fields;
+
                 // If computeSize is available, use it to ensure buffer is big enough
                 if (schema.computeSize) {
                     let size = schema.computeSize(obj);
