@@ -8,17 +8,21 @@ import type { CodegenDriver } from './platform';
 interface FieldDef {
     fixedSize: number;
     name: string;
+    nullable: boolean;
+    nullIndex: number;
     offset: number;
     type: string;
 }
 
 interface Schema {
+    bitmapBytes: number;
     decodeFn: ((buf: Uint8Array, pos: number, depth: number) => unknown) | null;
     encodeFn: ((obj: unknown, buf: Uint8Array, pos: number) => number) | null;
     fields: FieldDef[];
     fixedSize: number;
     hash: number;
     id: number;
+    nullableCount: number;
 }
 
 interface SbcHelpers {
@@ -31,26 +35,34 @@ interface SbcHelpers {
 
 
 function compileSchema(schema: Schema, helpers: SbcHelpers): void {
-    let d = codegenDriver,
-        fields = schema.fields;
+    let d = codegenDriver;
 
-    schema.encodeFn = compileEncoder(fields, d, helpers);
-    schema.decodeFn = compileDecoder(fields, d, helpers);
+    schema.encodeFn = compileEncoder(schema, d, helpers);
+    schema.decodeFn = compileDecoder(schema, d, helpers);
 }
 
 
-function compileEncoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelpers): (obj: unknown, buf: Uint8Array, pos: number) => number {
+function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (obj: unknown, buf: Uint8Array, pos: number) => number {
     let body = `'use strict';\n`,
+        fields = schema.fields,
         n = fields.length;
 
     body += d.preamble('b');
     body += `let p=pos;\n`;
+
+    if (schema.nullableCount > 0) {
+        body += `let _bm=0,_bp=p;p+=${schema.bitmapBytes};\n`;
+    }
 
     for (let i = 0; i < n; i++) {
         let f = fields[i]!,
             name = f.name,
             safeKey = JSON.stringify(name),
             val = `o[${safeKey}]`;
+
+        if (f.nullable) {
+            body += `if(${val}!=null){_bm|=${1 << f.nullIndex};`;
+        }
 
         switch (f.type) {
             case 'boolean':
@@ -148,6 +160,18 @@ function compileEncoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
                 body += `p=_enc(${val},b,p);\n`;
                 break;
         }
+
+        if (f.nullable) {
+            body += `}\n`;
+        }
+    }
+
+    if (schema.nullableCount > 0) {
+        body += `b[_bp]=_bm&0xFF;\n`;
+
+        if (schema.bitmapBytes > 1) {
+            body += `b[_bp+1]=(_bm>>>8)&0xFF;\n`;
+        }
     }
 
     body += `return p;\n`;
@@ -166,20 +190,39 @@ function compileEncoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
 }
 
 
-function compileDecoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelpers): (buf: Uint8Array, pos: number) => unknown {
+function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (buf: Uint8Array, pos: number) => unknown {
     let body = `'use strict';\n`,
+        fields = schema.fields,
         n = fields.length;
 
     body += d.preamble('b');
     body += `let p=pos;\n`;
 
-    // Declare all field variables
+    if (schema.nullableCount > 0) {
+        if (schema.bitmapBytes === 1) {
+            body += `let _bm=b[p];p+=1;\n`;
+        }
+        else {
+            body += `let _bm=b[p]|(b[p+1]<<8);p+=2;\n`;
+        }
+    }
+
+    // Declare all field variables — nullable fields default to null
     for (let i = 0; i < n; i++) {
-        body += `let f${i};\n`;
+        if (fields[i]!.nullable) {
+            body += `let f${i}=null;\n`;
+        }
+        else {
+            body += `let f${i};\n`;
+        }
     }
 
     for (let i = 0; i < n; i++) {
         let f = fields[i]!;
+
+        if (f.nullable) {
+            body += `if(_bm&${1 << f.nullIndex}){`;
+        }
 
         switch (f.type) {
             case 'boolean':
@@ -267,6 +310,10 @@ function compileDecoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
                 body += `{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}\n`;
 
                 break;
+        }
+
+        if (f.nullable) {
+            body += `}\n`;
         }
     }
 

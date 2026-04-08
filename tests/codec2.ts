@@ -1487,4 +1487,169 @@ describe('Codec2', () => {
             expect((result.meta as Map<string, string>).get('k')).toBe('v');
         });
     });
+
+
+    // === NULLABLE FIELDS ===
+
+    describe('nullable fields', () => {
+        it('nullable string field — non-null', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'email', type: 'string', nullable: true },
+            ]);
+
+            let obj = { email: 'alice@test.com', name: 'Alice' };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('nullable string field — null', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'email', type: 'string', nullable: true },
+            ]);
+
+            let obj = { email: null, name: 'Alice' };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('nullable uint8 field', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'age', type: 'uint8', nullable: true },
+                { name: 'name', type: 'string' },
+            ]);
+
+            expect(c.decode(c.encode({ age: 25, name: 'Bob' }))).toEqual({ age: 25, name: 'Bob' });
+            expect(c.decode(c.encode({ age: null, name: 'Bob' }))).toEqual({ age: null, name: 'Bob' });
+        });
+
+        it('multiple nullable fields — mixed null/non-null', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'a', type: 'string', nullable: true },
+                { name: 'b', type: 'int32', nullable: true },
+                { name: 'c', type: 'float64', nullable: true },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let obj = { a: null, b: 42, c: null, id: 1 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('all nullable fields null', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'a', type: 'string', nullable: true },
+                { name: 'b', type: 'int32', nullable: true },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let obj = { a: null, b: null, id: 5 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('all nullable fields present', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'a', type: 'string', nullable: true },
+                { name: 'b', type: 'int32', nullable: true },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let obj = { a: 'hello', b: -100, id: 5 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('max 16 nullable fields', () => {
+            let c = createCodec();
+            let fields: { name: string; type: 'uint8'; nullable: true }[] = [];
+
+            for (let i = 0; i < 16; i++) {
+                fields.push({ name: `f${String(i).padStart(2, '0')}`, type: 'uint8', nullable: true });
+            }
+
+            let hash = c.defineSchema(fields);
+
+            expect(typeof hash).toBe('number');
+
+            let obj: Record<string, number | null> = {};
+
+            for (let i = 0; i < 16; i++) {
+                obj[`f${String(i).padStart(2, '0')}`] = i % 2 === 0 ? i : null;
+            }
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('throws if >16 nullable fields', () => {
+            let c = createCodec();
+            let fields: { name: string; type: 'uint8'; nullable: true }[] = [];
+
+            for (let i = 0; i < 17; i++) {
+                fields.push({ name: `f${String(i).padStart(2, '0')}`, type: 'uint8', nullable: true });
+            }
+
+            expect(() => c.defineSchema(fields)).toThrow('max 16 nullable');
+        });
+
+        it('nullable boolean field', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'active', type: 'boolean', nullable: true },
+                { name: 'name', type: 'string' },
+            ]);
+
+            expect(c.decode(c.encode({ active: true, name: 'X' }))).toEqual({ active: true, name: 'X' });
+            expect(c.decode(c.encode({ active: false, name: 'X' }))).toEqual({ active: false, name: 'X' });
+            expect(c.decode(c.encode({ active: null, name: 'X' }))).toEqual({ active: null, name: 'X' });
+        });
+
+        it('nullable nested object field', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'addr', type: 'object', nullable: true },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let obj1 = { addr: { city: 'NYC' }, name: 'Alice' };
+            let result1 = c.decode(c.encode(obj1)) as Record<string, unknown>;
+
+            expect(result1.name).toBe('Alice');
+            expect((result1.addr as Record<string, string>).city).toBe('NYC');
+
+            let obj2 = { addr: null, name: 'Bob' };
+
+            expect(c.decode(c.encode(obj2))).toEqual(obj2);
+        });
+
+        it('undefined treated as null for nullable fields', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'note', type: 'string', nullable: true },
+            ]);
+
+            let obj = { name: 'Alice', note: undefined };
+            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
+
+            expect(result.name).toBe('Alice');
+            expect(result.note).toBe(null);
+        });
+    });
 });

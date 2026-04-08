@@ -168,7 +168,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         let fs = FIELD_SIZES[types[i]!] ?? 0,
             name = keys[i]!;
 
-        fields[i] = { fixedSize: fs, name, offset, type: types[i]! };
+        fields[i] = { fixedSize: fs, name, nullable: false, nullIndex: -1, offset, type: types[i]! };
 
         if (fs > 0) {
             fixedSize += fs;
@@ -177,12 +177,14 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
     }
 
     let schema: Schema = {
+        bitmapBytes: 0,
         decodeFn: null,
         encodeFn: null,
         fields,
         fixedSize,
         hash,
         id: registry.nextId++,
+        nullableCount: 0,
     };
 
     compileSchema(schema, helpers);
@@ -1066,12 +1068,15 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
         let fieldDefs: FieldDef[] = new Array(sorted.length),
             fixedSize = 0,
+            nullableCount = 0,
             offset = 0;
 
         for (let i = 0, n = sorted.length; i < n; i++) {
-            let fs = FIELD_SIZES[types[i]!] ?? 0;
+            let fs = FIELD_SIZES[types[i]!] ?? 0,
+                isNullable = sorted[i]!.nullable === true,
+                nullIdx = isNullable ? nullableCount++ : -1;
 
-            fieldDefs[i] = { fixedSize: fs, name: keys[i]!, offset, type: types[i]! };
+            fieldDefs[i] = { fixedSize: fs, name: keys[i]!, nullable: isNullable, nullIndex: nullIdx, offset, type: types[i]! };
 
             if (fs > 0) {
                 fixedSize += fs;
@@ -1079,13 +1084,19 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             }
         }
 
+        if (nullableCount > 16) {
+            throw new Error('Codec2: max 16 nullable fields per schema');
+        }
+
         let schema: Schema = {
+            bitmapBytes: Math.ceil(nullableCount / 8),
             decodeFn: null,
             encodeFn: null,
             fields: fieldDefs,
             fixedSize,
             hash,
             id: registry.nextId++,
+            nullableCount,
         };
 
         compileSchema(schema, helpers);
