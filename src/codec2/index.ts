@@ -180,13 +180,15 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
         };
 
     // Multi-schema cache — handles nested objects without breaking
-    let cacheFields: (FieldDef[] | null)[] = [null, null, null, null],
+    let cacheCounts: number[] = [0, 0, 0, 0],
+        cacheFields: (FieldDef[] | null)[] = [null, null, null, null],
         cacheIdx = 0,
         cacheSchemas: (Schema | null)[] = [null, null, null, null];
 
     function setCache(schema: Schema): void {
         cacheSchemas[cacheIdx] = schema;
         cacheFields[cacheIdx] = schema.fields;
+        cacheCounts[cacheIdx] = schema.fields.length;
         cacheIdx = (cacheIdx + 1) & 3;
     }
 
@@ -559,15 +561,22 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
 
     function matchSchema(obj: Record<string, unknown>): Schema | null {
-        for (let i = 0; i < 4; i++) {
-            let schema = cacheSchemas[i],
-                fields = cacheFields[i];
+        // Count keys once via for..in (no allocation)
+        let keyCount = 0;
 
-            if (!schema || !fields) {
+        for (let _ in obj) {
+            keyCount++;
+        }
+
+        for (let i = 0; i < 4; i++) {
+            let schema = cacheSchemas[i];
+
+            if (!schema || cacheCounts[i] !== keyCount) {
                 continue;
             }
 
-            let n = fields.length,
+            let fields = cacheFields[i]!,
+                n = fields.length,
                 match = true;
 
             for (let j = 0; j < n; j++) {
@@ -577,21 +586,7 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                 }
             }
 
-            if (!match) {
-                continue;
-            }
-
-            // Verify no extra keys: count keys and compare
-            let count = 0;
-
-            for (let _ in obj) {
-                if (++count > n) {
-                    match = false;
-                    break;
-                }
-            }
-
-            if (match && count === n) {
+            if (match) {
                 return schema;
             }
         }
