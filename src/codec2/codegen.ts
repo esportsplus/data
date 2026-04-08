@@ -123,7 +123,7 @@ function compileEncoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
                 // packed int32: flag=2, u32 count, 4 bytes each
                 body += `else if(_an&&_i32){_pk=1;b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
                 // packed float64: flag=3, u32 count, 8 bytes each
-                body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){_wF64.call(b,a[i],p);p+=8;}}}`;
+                body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}}`;
                 // generic: flag=0, u32 count, tagged elements
                 body += `if(!_pk){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
                 break;
@@ -231,7 +231,7 @@ function compileDecoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
                 // flag=2: packed int32
                 body += `else if(_f===2){for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
                 // flag=3: packed float64
-                body += `else{for(let i=0;i<l;i++){a[i]=_rF64.call(b,p);p+=8;}}`;
+                body += `else{for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}}`;
                 body += `f${i}=a;}\n`;
 
                 break;
