@@ -2,7 +2,7 @@
 // JIT-compiled per-shape encode/decode, zero per-field branching at runtime
 
 import { compileSchema } from './codegen';
-import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readStr, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
+import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readStr, readVarint, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 
 import type { FieldDef, Schema, SbcHelpers } from './codegen';
 
@@ -70,6 +70,27 @@ function computeShapeHash(keys: string[], types: string[]): number {
     }
 
     return h >>> 0;
+}
+
+
+function varintSize(n: number): number {
+    if (n < 128) {
+        return 1;
+    }
+
+    if (n < 16384) {
+        return 2;
+    }
+
+    if (n < 2097152) {
+        return 3;
+    }
+
+    if (n < 268435456) {
+        return 4;
+    }
+
+    return 5;
 }
 
 
@@ -1354,9 +1375,9 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
             switch (f.type) {
                 case 'bytes':
                 case 'string': {
-                    let len = (buffer[pos]! | (buffer[pos + 1]! << 8) | (buffer[pos + 2]! << 16) | (buffer[pos + 3]! << 24)) >>> 0;
+                    let [len, np] = readVarint(buffer, pos);
 
-                    pos += 4 + len;
+                    pos = np + len;
                     break;
                 }
                 case 'array': {
@@ -1407,14 +1428,14 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
 
         switch (target.type) {
             case 'string': {
-                let len = (buffer[pos]! | (buffer[pos + 1]! << 8) | (buffer[pos + 2]! << 16) | (buffer[pos + 3]! << 24)) >>> 0;
+                let [len, np] = readVarint(buffer, pos);
 
-                return readStr(buffer, pos + 4, len);
+                return readStr(buffer, np, len);
             }
             case 'bytes': {
-                let len = (buffer[pos]! | (buffer[pos + 1]! << 8) | (buffer[pos + 2]! << 16) | (buffer[pos + 3]! << 24)) >>> 0;
+                let [len, np] = readVarint(buffer, pos);
 
-                return buffer.slice(pos + 4, pos + 4 + len);
+                return buffer.slice(np, np + len);
             }
             case 'array':
             case 'mixed':
@@ -1500,9 +1521,12 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                     }
 
                     switch (f.type) {
-                        case 'bytes':
-                            size += 4 + (v as Uint8Array).length;
+                        case 'bytes': {
+                            let bl = (v as Uint8Array).length;
+
+                            size += varintSize(bl) + bl;
                             break;
+                        }
                         case 'object': {
                             let nested = computeSize(v);
 
@@ -1513,9 +1537,12 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                             size += nested;
                             break;
                         }
-                        case 'string':
-                            size += 4 + byteLen(v as string);
+                        case 'string': {
+                            let bl = byteLen(v as string);
+
+                            size += varintSize(bl) + bl;
                             break;
+                        }
                         default:
                             return -1;
                     }

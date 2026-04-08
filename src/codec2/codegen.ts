@@ -119,20 +119,20 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
             case 'string':
 
-                // ASCII fast path — single-pass check+write for short strings
+                // ASCII fast path — single-pass check+write for short strings (varint length)
                 body += `{let s=${val},sl=s.length;`;
                 body += `if(sl<17){`;
-                body += `b[p]=sl;b[p+1]=0;b[p+2]=0;b[p+3]=0;p+=4;`;
+                body += `b[p]=sl;p+=1;`;
                 body += `let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}`;
                 body += `if(_ok){p+=sl;}`;
-                body += `else{p-=4;let l=_bl(s);b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;b[p+2]=(l>>>16)&0xFF;b[p+3]=(l>>>24)&0xFF;p+=4;${d.writeStr('s', 'p', 'l')};p+=l;}}`;
-                body += `else{let l=_bl(s);b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;b[p+2]=(l>>>16)&0xFF;b[p+3]=(l>>>24)&0xFF;p+=4;${d.writeStr('s', 'p', 'l')};p+=l;}}\n`;
+                body += `else{p-=1;let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}`;
+                body += `else{let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}\n`;
                 break;
 
             case 'bytes':
 
                 body += `{let v=${val},l=v.length;`;
-                body += `b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;b[p+2]=(l>>>16)&0xFF;b[p+3]=(l>>>24)&0xFF;p+=4;`;
+                body += `p=_wv(b,p,l);`;
                 body += `b.set(v,p);p+=l;}\n`;
                 break;
 
@@ -193,8 +193,8 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
     try {
         return (
-            new Function(params, '_enc', '_encObj', `return function encode(o,b,pos){${body}}`)
-        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj);
+            new Function(params, '_enc', '_encObj', '_wv', `return function encode(o,b,pos){${body}}`)
+        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint);
     }
     catch (e) {
         throw new Error('Codec2: encoder compilation failed: ' + (e instanceof Error ? e.message : e));
@@ -278,11 +278,12 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'string':
-                body += `{let l=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;if(p+l>b.length)throw new Error('Codec2: truncated string');f${i}=${d.readStr('p', 'l')};p+=l;}\n`;
+                // Inline varint read — single byte for lengths < 128 (common case)
+                body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}if(p+l>b.length)throw new Error('Codec2: truncated string');f${i}=${d.readStr('p', 'l')};p+=l;}\n`;
                 break;
 
             case 'bytes':
-                body += `{let l=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;if(p+l>b.length)throw new Error('Codec2: truncated bytes');f${i}=b.slice(p,p+l);p+=l;}\n`;
+                body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}if(p+l>b.length)throw new Error('Codec2: truncated bytes');f${i}=b.slice(p,p+l);p+=l;}\n`;
                 break;
 
             case 'array':
@@ -341,9 +342,9 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
     let bindArgs = d.decoderBindArgs();
 
     try {
-        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', `return function decode(b,pos,_d){${body}}`);
+        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', `return function decode(b,pos,_d){${body}}`);
 
-        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry);
+        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint);
     }
     catch (e) {
         throw new Error('Codec2: decoder compilation failed: ' + (e instanceof Error ? e.message : e));
@@ -438,10 +439,10 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
 
         switch (f.type) {
             case 'string':
-                body += `${no}{let l=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;f${i}=${d.readStr('p', 'l')};p+=l;}${nc}\n`;
+                body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}f${i}=${d.readStr('p', 'l')};p+=l;}${nc}\n`;
                 break;
             case 'bytes':
-                body += `${no}{let l=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;f${i}=b.slice(p,p+l);p+=l;}${nc}\n`;
+                body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}f${i}=b.slice(p,p+l);p+=l;}${nc}\n`;
                 break;
             case 'array':
                 body += `${no}{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
@@ -637,8 +638,8 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                 }
 
                 body += `{let s=${v},sl=s.length;`;
-                body += `if(sl<17){b[p]=sl;b[p+1]=0;b[p+2]=0;b[p+3]=0;p+=4;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=4;let l=_bl(s);b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;b[p+2]=(l>>>16)&0xFF;b[p+3]=(l>>>24)&0xFF;p+=4;${d.writeStr('s', 'p', 'l')};p+=l;}}`;
-                body += `else{let l=_bl(s);b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;b[p+2]=(l>>>16)&0xFF;b[p+3]=(l>>>24)&0xFF;p+=4;${d.writeStr('s', 'p', 'l')};p+=l;}}\n`;
+                body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}`;
+                body += `else{let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}\n`;
 
                 if (f.nullable) {
                     body += `}\n`;
@@ -650,7 +651,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
 
-                body += `{let _v=${v},l=_v.length;b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;b[p+2]=(l>>>16)&0xFF;b[p+3]=(l>>>24)&0xFF;p+=4;b.set(_v,p);p+=l;}\n`;
+                body += `{let _v=${v},l=_v.length;p=_wv(b,p,l);b.set(_v,p);p+=l;}\n`;
 
                 if (f.nullable) {
                     body += `}\n`;
