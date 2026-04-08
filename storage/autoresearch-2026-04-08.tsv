@@ -1,0 +1,8 @@
+iteration	target	commit	encode_ratio	decode_ratio	combined_ratio	status	description
+0	—	6988c19	2.5561	1.8290	2.1925	baseline	unmodified baseline after all feature phases
+1	codegen.ts	—	—	—	—	discard	Object.create(null) → {} in decoders — breaks __proto__ security tests
+2	index.ts	—	—	—	—	discard	Buffer.slice for encode output — wrong semantics on Node.js Buffer
+3	index.ts	—	2.5427	1.8453	2.1940	discard	Ring buffer cache 4→8 slots — no measurable impact
+4	codegen.ts	—	2.4581	1.2461	1.8521	discard	Object literal + setPrototypeOf — killed decode perf (-33%)
+5	index.ts	f154685	2.5919	2.0404	2.3162	keep	Separate tag-8 decode fast path with cached lastDecodeFn (+11% decode)
+6	index.ts	—	2.5553	2.0334	2.2944	discard	Cache lastEncodeSchema to skip hash writes — no improvement
