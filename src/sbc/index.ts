@@ -143,6 +143,10 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
             }
 
             case 245: {
+                if (offset + 9 > bufLen) {
+                    throw new RangeError('SBC: compressed object header extends beyond buffer');
+                }
+
                 // Compressed hash-referenced object: [245][u32 hash][u32 len][compressed_field_values...]
                 let hash = readU32.call(buf, offset + 1),
                     schema = schemaStore ? schemaStore.get(hash) : registry.schemasByHash.get(hash);
@@ -167,6 +171,10 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
             }
 
             case 246: {
+                if (offset + 9 > bufLen) {
+                    throw new RangeError('SBC: object header extends beyond buffer');
+                }
+
                 // Hash-referenced object: [246][u32 hash][u32 len][field_values...]
                 let hash = readU32.call(buf, offset + 1),
                     schema = schemaStore ? schemaStore.get(hash) : registry.schemasByHash.get(hash);
@@ -215,6 +223,10 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                 return end;
             }
             case 249: {
+                if (offset + 3 > buf.length) {
+                    throw new RangeError('SBC: array header extends beyond buffer');
+                }
+
                 let count = readU16.call(buf, offset + 1),
                     p = offset + 3;
 
