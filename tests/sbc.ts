@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createCodec, createRegistry, deserializeRegistry, inferSchema, registerSchema, serializeRegistry } from '../src/sbc';
+import { createCodec, createRegistry, deserializeRegistry, inferSchema, registerSchema, serializeFieldType, serializeRegistry } from '../src/sbc';
 import { decodeTypedArray, encodeTypedArrayInto, getTypedArrayType } from '../src/typed-array-codec';
 
 
@@ -227,8 +227,11 @@ describe('T-004: serializeRegistry / deserializeRegistry', () => {
         let restored = deserializeRegistry(serialized);
         let restoredSchema = restored.schemasByHash.get(schema.hash)!;
         let fieldNames = restoredSchema.fields.map((f) => f.name).sort();
+        let fieldTypes = restoredSchema.fields.reduce((acc, f) => { acc[f.name] = serializeFieldType(f.type); return acc; }, {} as Record<string, string>);
 
         expect(fieldNames).toEqual(['count', 'label']);
+        expect(fieldTypes['count']).toBe('float64');
+        expect(fieldTypes['label']).toBe('string');
     });
 
     it('restores nextId so new schemas get higher ids', () => {
