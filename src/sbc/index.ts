@@ -402,9 +402,40 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                 // Plain object — hash-referenced (tag 246)
                 // Wire: [246][u32 hash][u32 len][field_values...]
                 let obj = value as Record<string, unknown>,
-                    schema = pendingSchema
-                        || (obj.constructor !== Object && obj.constructor !== undefined && cachedCtorSchema.get(obj.constructor as Function))
-                        || lookupSchema(obj, registry);
+                    schema: Schema | null | undefined = pendingSchema
+                        || (obj.constructor !== Object && obj.constructor !== undefined ? cachedCtorSchema.get(obj.constructor as Function) : null);
+
+                // Codec-level cache for sub-objects (avoids Object.keys().sort() + hash)
+                if (!schema && lastEncodeSchema && lastEncodeFields) {
+                    let defined = 0,
+                        fields = lastEncodeFields,
+                        fn = fields.length;
+
+                    for (let k in obj) {
+                        if (obj[k] !== undefined) {
+                            defined++;
+                        }
+                    }
+
+                    if (defined === fn) {
+                        let match = true;
+
+                        for (let fi = 0; fi < fn; fi++) {
+                            if (obj[fields[fi]!.name] === undefined) {
+                                match = false;
+                                break;
+                            }
+                        }
+
+                        if (match) {
+                            schema = lastEncodeSchema;
+                        }
+                    }
+                }
+
+                if (!schema) {
+                    schema = lookupSchema(obj, registry);
+                }
 
                 pendingSchema = null;
 
