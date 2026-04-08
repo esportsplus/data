@@ -289,8 +289,9 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
         weakCache.set(obj, schema);
     }
 
-    // Decode fast path: cache last-used schema to avoid Map lookup
-    let lastDecodeHash = 0,
+    // Decode fast path: cache last-used schema + fn to avoid Map lookup + property access
+    let lastDecodeFn: ((buf: Uint8Array, pos: number, depth: number) => unknown) | null = null,
+        lastDecodeHash = 0,
         lastDecodeSchema: Schema | null = null;
 
     // Specialized object encoder — skips typeof/instanceof checks for known-object fields
@@ -1027,8 +1028,27 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
     function decode(buffer: Uint8Array, length?: number): unknown {
         let len = length ?? buffer.length;
 
-        // Fast path: tag 8/18 (object) — only when length covers full buffer
-        if ((buffer[0] === 8 || buffer[0] === 18) && len === buffer.length) {
+        // Fast path: tag 8 (uncompressed object) — hottest path, minimize overhead
+        if (buffer[0] === 8 && len === buffer.length) {
+            let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
+
+            if (hash === lastDecodeHash && lastDecodeFn) {
+                return lastDecodeFn(buffer, 9, 0);
+            }
+
+            let schema = registry.schemas.get(hash);
+
+            if (schema && schema.decodeFn) {
+                lastDecodeHash = hash;
+                lastDecodeFn = schema.decodeFn;
+                lastDecodeSchema = schema;
+
+                return schema.decodeFn(buffer, 9, 0);
+            }
+        }
+
+        // Tag 18 (compressed object) fast path
+        if (buffer[0] === 18 && len === buffer.length) {
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
                 schema = hash === lastDecodeHash && lastDecodeSchema
                     ? lastDecodeSchema
@@ -1038,7 +1058,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                 lastDecodeHash = hash;
                 lastDecodeSchema = schema;
 
-                if (buffer[0] === 18 && schema.compressedDecodeFn) {
+                if (schema.compressedDecodeFn) {
                     return schema.compressedDecodeFn(buffer, 9, 0);
                 }
 
