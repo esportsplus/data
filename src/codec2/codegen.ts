@@ -2,7 +2,6 @@
 // Zero per-field branching: all type checks happen at compile time
 
 import { codegenDriver } from './platform';
-
 import type { CodegenDriver } from './platform';
 
 
@@ -137,6 +136,13 @@ function compileEncoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
                 body += `p=_encObj(${val},b,p);\n`;
                 break;
 
+            case 'map':
+            case 'set':
+            case 'typedarray':
+
+                body += `p=_enc(${val},b,p);\n`;
+                break;
+
             case 'mixed':
 
                 body += `p=_enc(${val},b,p);\n`;
@@ -247,6 +253,13 @@ function compileDecoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
                 body += `if(_s&&_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}`;
                 body += `p+=9+_dl;}`;
                 body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
+
+                break;
+
+            case 'map':
+            case 'set':
+            case 'typedarray':
+                body += `{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}\n`;
 
                 break;
 

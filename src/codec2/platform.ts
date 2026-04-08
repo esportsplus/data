@@ -212,9 +212,24 @@ let codegenDriver: CodegenDriver = isNode
         readStr: (start, len) => `_rStr(b,${start},${len})`,
         readU32: (off) => `(b[${off}]|(b[${off}+1]<<8)|(b[${off}+2]<<16)|(b[${off}+3]<<24))>>>0`,
         writeF64: (off, val) => `_wF64(b,${val},${off})`,
-        writeStr: (str, off, len) => `_wUtf8(b,${str},${off})`,
+        writeStr: (str, off, _len) => `_wUtf8(b,${str},${off})`,
         writeU32: (off, val) => `b[${off}]=${val}&0xFF;b[${off}+1]=(${val}>>>8)&0xFF;b[${off}+2]=(${val}>>>16)&0xFF;b[${off}+3]=(${val}>>>24)&0xFF`,
     };
+
+
+let TYPED_ARRAY_BPE = [4, 8, 1, 2, 4, 1, 1, 2, 4, 8, 8];
+
+let TYPED_ARRAY_CTORS: (new (buf: ArrayBuffer, off: number, len: number) => ArrayBufferView)[] = [
+    Float32Array, Float64Array, Int8Array, Int16Array, Int32Array,
+    Uint8Array, Uint8ClampedArray, Uint16Array, Uint32Array,
+    BigInt64Array, BigUint64Array,
+];
+
+let TYPED_ARRAY_IDS = new Map<Function, number>();
+
+for (let i = 0, n = TYPED_ARRAY_CTORS.length; i < n; i++) {
+    TYPED_ARRAY_IDS.set(TYPED_ARRAY_CTORS[i]!, i);
+}
 
 
 export {
@@ -227,6 +242,9 @@ export {
     readBI64,
     readF64,
     readStr,
+    TYPED_ARRAY_BPE,
+    TYPED_ARRAY_CTORS,
+    TYPED_ARRAY_IDS,
     writeBI64,
     writeF64,
     writeUtf8,

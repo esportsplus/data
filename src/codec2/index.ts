@@ -2,7 +2,7 @@
 // JIT-compiled per-shape encode/decode, zero per-field branching at runtime
 
 import { compileSchema } from './codegen';
-import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readStr, writeBI64, writeF64, writeUtf8 } from './platform';
+import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readStr, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 
 import type { FieldDef, Schema, SbcHelpers } from './codegen';
 
@@ -100,6 +100,18 @@ function inferType(value: unknown): string {
                 return 'bytes';
             }
 
+            if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+                return 'typedarray';
+            }
+
+            if (value instanceof Map) {
+                return 'map';
+            }
+
+            if (value instanceof Set) {
+                return 'set';
+            }
+
             if (Array.isArray(value)) {
                 return 'array';
             }
@@ -189,6 +201,9 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
 // 12 = packed uint8 array (u32 count + raw bytes)
 // 13 = packed float64 array (u32 count + raw f64s)
 // 14 = packed int32 array (u32 count + raw i32s)
+// 15 = map (u32 count + key/value pairs)
+// 16 = set (u32 count + elements)
+// 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
 const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; encode(value: unknown, view?: boolean): Uint8Array } => {
     let encodeBuf = allocBuf(65536),
@@ -403,6 +418,73 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                 return arr;
             }
 
+            case 15: {
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (count > MAX_ARRAY_COUNT) {
+                    throw new Error('Codec2: map count ' + count + ' exceeds limit');
+                }
+
+                let map = new Map(),
+                    p = offset + 5;
+
+                for (let i = 0; i < count; i++) {
+                    let kEnd = decodeTagEnd(buf, p, depth + 1);
+                    let key = decodeSbc(buf, p, kEnd - p, depth + 1);
+
+                    p = kEnd;
+
+                    let vEnd = decodeTagEnd(buf, p, depth + 1);
+                    let val = decodeSbc(buf, p, vEnd - p, depth + 1);
+
+                    p = vEnd;
+                    map.set(key, val);
+                }
+
+                return map;
+            }
+
+            case 16: {
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (count > MAX_ARRAY_COUNT) {
+                    throw new Error('Codec2: set count ' + count + ' exceeds limit');
+                }
+
+                let set = new Set(),
+                    p = offset + 5;
+
+                for (let i = 0; i < count; i++) {
+                    let end = decodeTagEnd(buf, p, depth + 1);
+
+                    set.add(decodeSbc(buf, p, end - p, depth + 1));
+                    p = end;
+                }
+
+                return set;
+            }
+
+            case 17: {
+                let typeId = buf[offset + 1]!;
+                let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
+                let Ctor = TYPED_ARRAY_CTORS[typeId];
+
+                if (!Ctor) {
+                    throw new Error('Codec2: unknown typed array typeId ' + typeId);
+                }
+
+                let bpe = TYPED_ARRAY_BPE[typeId]!;
+
+                if (bLen % bpe !== 0) {
+                    throw new Error('Codec2: typed array byteLength not aligned');
+                }
+
+                let aligned = new Uint8Array(bLen);
+
+                aligned.set(buf.subarray(offset + 6, offset + 6 + bLen));
+                return new (Ctor as new (buf: ArrayBuffer, off: number, len: number) => ArrayBufferView)(aligned.buffer, 0, bLen / bpe);
+            }
+
             default:
                 throw new Error('Codec2: unknown tag ' + tag + ' at offset ' + offset);
         }
@@ -463,6 +545,40 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             case 14: {
                 let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
                 return offset + 5 + count * 4;
+            }
+            case 15: {
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (count > MAX_ARRAY_COUNT) {
+                    throw new Error('Codec2: map count ' + count + ' exceeds limit');
+                }
+
+                let p = offset + 5;
+
+                for (let i = 0, n = count * 2; i < n; i++) {
+                    p = decodeTagEnd(buf, p, depth + 1);
+                }
+
+                return p;
+            }
+            case 16: {
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (count > MAX_ARRAY_COUNT) {
+                    throw new Error('Codec2: set count ' + count + ' exceeds limit');
+                }
+
+                let p = offset + 5;
+
+                for (let i = 0; i < count; i++) {
+                    p = decodeTagEnd(buf, p, depth + 1);
+                }
+
+                return p;
+            }
+            case 17: {
+                let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
+                return offset + 6 + bLen;
             }
             default:
                 throw new Error('Codec2: unknown tag ' + tag + ' at offset ' + offset);
@@ -569,6 +685,65 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                     buf[pos + 4] = (len >>> 24) & 0xFF;
                     buf.set(value, pos + 5);
                     return pos + 5 + len;
+                }
+
+                if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+                    let ta = value as ArrayBufferView & { buffer: ArrayBuffer; byteLength: number; byteOffset: number };
+                    let typeId = TYPED_ARRAY_IDS.get(ta.constructor);
+
+                    if (typeId === undefined) {
+                        buf[pos] = 0;
+                        return pos + 1;
+                    }
+
+                    let bLen = ta.byteLength;
+
+                    buf[pos] = 17;
+                    buf[pos + 1] = typeId;
+                    buf[pos + 2] = bLen & 0xFF;
+                    buf[pos + 3] = (bLen >>> 8) & 0xFF;
+                    buf[pos + 4] = (bLen >>> 16) & 0xFF;
+                    buf[pos + 5] = (bLen >>> 24) & 0xFF;
+                    buf.set(new Uint8Array(ta.buffer, ta.byteOffset, bLen), pos + 6);
+                    return pos + 6 + bLen;
+                }
+
+                if (value instanceof Map) {
+                    let count = value.size;
+
+                    if (count > MAX_ARRAY_COUNT) {
+                        throw new Error('Codec2: map count exceeds limit');
+                    }
+
+                    buf[pos] = 15;
+                    buf[pos + 1] = count & 0xFF;
+                    buf[pos + 2] = (count >>> 8) & 0xFF;
+                    buf[pos + 3] = (count >>> 16) & 0xFF;
+                    buf[pos + 4] = (count >>> 24) & 0xFF;
+
+                    let p = pos + 5;
+
+                    value.forEach((v, k) => { p = encodeSbc(k, buf, p); p = encodeSbc(v, buf, p); });
+                    return p;
+                }
+
+                if (value instanceof Set) {
+                    let count = value.size;
+
+                    if (count > MAX_ARRAY_COUNT) {
+                        throw new Error('Codec2: set count exceeds limit');
+                    }
+
+                    buf[pos] = 16;
+                    buf[pos + 1] = count & 0xFF;
+                    buf[pos + 2] = (count >>> 8) & 0xFF;
+                    buf[pos + 3] = (count >>> 16) & 0xFF;
+                    buf[pos + 4] = (count >>> 24) & 0xFF;
+
+                    let p = pos + 5;
+
+                    value.forEach((v) => { p = encodeSbc(v, buf, p); });
+                    return p;
                 }
 
                 if (Array.isArray(value)) {
@@ -783,7 +958,7 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
     // Callers must consume the view synchronously or copy it before re-encoding.
     function encode(value: unknown, view?: boolean): Uint8Array {
         // Fast path: plain object
-        if (typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof Uint8Array)) {
+        if (typeof value === 'object' && value !== null && ((value as object).constructor === Object || (value as object).constructor === undefined)) {
             let obj = value as Record<string, unknown>,
                 schema = weakCache.get(obj) ?? null;
 

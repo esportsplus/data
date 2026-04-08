@@ -1023,4 +1023,273 @@ describe('Codec2', () => {
             expect(() => c.decode(truncated)).toThrow('truncated');
         });
     });
+
+
+    // === MAP ===
+
+    describe('Map', () => {
+        it('empty Map', () => {
+            let result = codec.decode(codec.encode(new Map())) as Map<unknown, unknown>;
+
+            expect(result).toBeInstanceOf(Map);
+            expect(result.size).toBe(0);
+        });
+
+        it('string keys', () => {
+            let m = new Map([['a', 1], ['b', 2], ['c', 3]]);
+            let result = codec.decode(codec.encode(m)) as Map<unknown, unknown>;
+
+            expect(result).toBeInstanceOf(Map);
+            expect(result.size).toBe(3);
+            expect(result.get('a')).toBe(1);
+            expect(result.get('b')).toBe(2);
+            expect(result.get('c')).toBe(3);
+        });
+
+        it('numeric keys', () => {
+            let m = new Map([[1, 'one'], [2, 'two']]);
+            let result = codec.decode(codec.encode(m)) as Map<unknown, unknown>;
+
+            expect(result.get(1)).toBe('one');
+            expect(result.get(2)).toBe('two');
+        });
+
+        it('mixed value types', () => {
+            let m = new Map<unknown, unknown>([['str', 'hello'], ['num', 42], ['bool', true], ['null', null]]);
+            let result = codec.decode(codec.encode(m)) as Map<unknown, unknown>;
+
+            expect(result.get('str')).toBe('hello');
+            expect(result.get('num')).toBe(42);
+            expect(result.get('bool')).toBe(true);
+            expect(result.get('null')).toBe(null);
+        });
+
+        it('nested Map', () => {
+            let inner = new Map([['x', 1]]);
+            let outer = new Map<string, unknown>([['inner', inner]]);
+            let result = codec.decode(codec.encode(outer)) as Map<string, unknown>;
+            let resultInner = result.get('inner') as Map<string, unknown>;
+
+            expect(resultInner).toBeInstanceOf(Map);
+            expect(resultInner.get('x')).toBe(1);
+        });
+
+        it('Map in object field', () => {
+            let obj = { data: new Map([['key', 'val']]) };
+            let result = codec.decode(codec.encode(obj)) as Record<string, unknown>;
+            let m = result.data as Map<string, string>;
+
+            expect(m).toBeInstanceOf(Map);
+            expect(m.get('key')).toBe('val');
+        });
+
+        it('large Map (1000 entries)', () => {
+            let m = new Map<number, number>();
+
+            for (let i = 0; i < 1000; i++) {
+                m.set(i, i * 2);
+            }
+
+            let result = codec.decode(codec.encode(m)) as Map<number, number>;
+
+            expect(result.size).toBe(1000);
+            expect(result.get(0)).toBe(0);
+            expect(result.get(999)).toBe(1998);
+        });
+    });
+
+
+    // === SET ===
+
+    describe('Set', () => {
+        it('empty Set', () => {
+            let result = codec.decode(codec.encode(new Set())) as Set<unknown>;
+
+            expect(result).toBeInstanceOf(Set);
+            expect(result.size).toBe(0);
+        });
+
+        it('string values', () => {
+            let s = new Set(['a', 'b', 'c']);
+            let result = codec.decode(codec.encode(s)) as Set<string>;
+
+            expect(result).toBeInstanceOf(Set);
+            expect(result.size).toBe(3);
+            expect(result.has('a')).toBe(true);
+            expect(result.has('b')).toBe(true);
+            expect(result.has('c')).toBe(true);
+        });
+
+        it('numeric values', () => {
+            let s = new Set([1, 2, 3, 42]);
+            let result = codec.decode(codec.encode(s)) as Set<number>;
+
+            expect(result.size).toBe(4);
+            expect(result.has(42)).toBe(true);
+        });
+
+        it('mixed types', () => {
+            let s = new Set<unknown>([1, 'hello', true, null]);
+            let result = codec.decode(codec.encode(s)) as Set<unknown>;
+
+            expect(result.size).toBe(4);
+            expect(result.has(1)).toBe(true);
+            expect(result.has('hello')).toBe(true);
+            expect(result.has(true)).toBe(true);
+            expect(result.has(null)).toBe(true);
+        });
+
+        it('nested Set', () => {
+            let inner = new Set([1, 2]);
+            let outer = new Set<unknown>([inner]);
+            let result = codec.decode(codec.encode(outer)) as Set<unknown>;
+            let items = [...result];
+
+            expect(items[0]).toBeInstanceOf(Set);
+            expect((items[0] as Set<number>).has(1)).toBe(true);
+        });
+
+        it('Set in object field', () => {
+            let obj = { tags: new Set(['a', 'b']) };
+            let result = codec.decode(codec.encode(obj)) as Record<string, unknown>;
+            let s = result.tags as Set<string>;
+
+            expect(s).toBeInstanceOf(Set);
+            expect(s.has('a')).toBe(true);
+        });
+    });
+
+
+    // === TYPED ARRAYS ===
+
+    describe('Typed Arrays', () => {
+        it('Float32Array round-trip', () => {
+            let ta = new Float32Array([1.5, 2.5, 3.5]);
+            let result = codec.decode(codec.encode(ta)) as Float32Array;
+
+            expect(result).toBeInstanceOf(Float32Array);
+            expect(result.length).toBe(3);
+            expect(result[0]).toBeCloseTo(1.5);
+            expect(result[1]).toBeCloseTo(2.5);
+            expect(result[2]).toBeCloseTo(3.5);
+        });
+
+        it('Float64Array round-trip', () => {
+            let ta = new Float64Array([Math.PI, Math.E]);
+            let result = codec.decode(codec.encode(ta)) as Float64Array;
+
+            expect(result).toBeInstanceOf(Float64Array);
+            expect(result[0]).toBe(Math.PI);
+            expect(result[1]).toBe(Math.E);
+        });
+
+        it('Int8Array round-trip', () => {
+            let ta = new Int8Array([-128, 0, 127]);
+            let result = codec.decode(codec.encode(ta)) as Int8Array;
+
+            expect(result).toBeInstanceOf(Int8Array);
+            expect([...result]).toEqual([-128, 0, 127]);
+        });
+
+        it('Int16Array round-trip', () => {
+            let ta = new Int16Array([-32768, 0, 32767]);
+            let result = codec.decode(codec.encode(ta)) as Int16Array;
+
+            expect(result).toBeInstanceOf(Int16Array);
+            expect([...result]).toEqual([-32768, 0, 32767]);
+        });
+
+        it('Int32Array round-trip', () => {
+            let ta = new Int32Array([-2147483648, 0, 2147483647]);
+            let result = codec.decode(codec.encode(ta)) as Int32Array;
+
+            expect(result).toBeInstanceOf(Int32Array);
+            expect([...result]).toEqual([-2147483648, 0, 2147483647]);
+        });
+
+        it('Uint8ClampedArray round-trip', () => {
+            let ta = new Uint8ClampedArray([0, 128, 255]);
+            let result = codec.decode(codec.encode(ta)) as Uint8ClampedArray;
+
+            expect(result).toBeInstanceOf(Uint8ClampedArray);
+            expect([...result]).toEqual([0, 128, 255]);
+        });
+
+        it('Uint16Array round-trip', () => {
+            let ta = new Uint16Array([0, 1000, 65535]);
+            let result = codec.decode(codec.encode(ta)) as Uint16Array;
+
+            expect(result).toBeInstanceOf(Uint16Array);
+            expect([...result]).toEqual([0, 1000, 65535]);
+        });
+
+        it('Uint32Array round-trip', () => {
+            let ta = new Uint32Array([0, 100000, 4294967295]);
+            let result = codec.decode(codec.encode(ta)) as Uint32Array;
+
+            expect(result).toBeInstanceOf(Uint32Array);
+            expect([...result]).toEqual([0, 100000, 4294967295]);
+        });
+
+        it('BigInt64Array round-trip', () => {
+            let ta = new BigInt64Array([BigInt('-9223372036854775808'), 0n, BigInt('9223372036854775807')]);
+            let result = codec.decode(codec.encode(ta)) as BigInt64Array;
+
+            expect(result).toBeInstanceOf(BigInt64Array);
+            expect(result[0]).toBe(BigInt('-9223372036854775808'));
+            expect(result[2]).toBe(BigInt('9223372036854775807'));
+        });
+
+        it('BigUint64Array round-trip', () => {
+            let ta = new BigUint64Array([0n, BigInt('18446744073709551615')]);
+            let result = codec.decode(codec.encode(ta)) as BigUint64Array;
+
+            expect(result).toBeInstanceOf(BigUint64Array);
+            expect(result[0]).toBe(0n);
+            expect(result[1]).toBe(BigInt('18446744073709551615'));
+        });
+
+        it('empty typed array', () => {
+            let ta = new Float32Array(0);
+            let result = codec.decode(codec.encode(ta)) as Float32Array;
+
+            expect(result).toBeInstanceOf(Float32Array);
+            expect(result.length).toBe(0);
+        });
+
+        it('large typed array', () => {
+            let ta = new Int32Array(10000);
+
+            for (let i = 0; i < 10000; i++) {
+                ta[i] = i;
+            }
+
+            let result = codec.decode(codec.encode(ta)) as Int32Array;
+
+            expect(result.length).toBe(10000);
+            expect(result[0]).toBe(0);
+            expect(result[9999]).toBe(9999);
+        });
+
+        it('plain Uint8Array still uses tag 6', () => {
+            let ta = new Uint8Array([1, 2, 3]);
+            let encoded = codec.encode(ta);
+
+            expect(encoded[0]).toBe(6);
+
+            let result = codec.decode(encoded) as Uint8Array;
+
+            expect(result).toBeInstanceOf(Uint8Array);
+            expect([...result]).toEqual([1, 2, 3]);
+        });
+
+        it('typed array in object field', () => {
+            let obj = { data: new Float32Array([1.0, 2.0]) };
+            let result = codec.decode(codec.encode(obj)) as Record<string, unknown>;
+            let ta = result.data as Float32Array;
+
+            expect(ta).toBeInstanceOf(Float32Array);
+            expect(ta.length).toBe(2);
+        });
+    });
 });
