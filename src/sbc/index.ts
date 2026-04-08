@@ -1,6 +1,6 @@
 // Schema Binary Codec (SBC) — Zero-overhead value encoding
 // Tag 246: hash-referenced objects stored with central schema DB
-// Primitives: tags 248-254 (self-describing, no schema needed)
+// Primitives: tags 248-255 (self-describing, no schema needed)
 
 import { encodeTypedArrayInto } from '~/typed-array-codec';
 
@@ -36,9 +36,9 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
     }
 
     // Tag table:
-    // 0 = null, 246 = hash-referenced object, 248 = bigint,
-    // 249 = array, 250 = date, 251 = boolean, 252 = number,
-    // 253 = string, 254 = bytes (Uint8Array)
+    // 0 = null, 245 = compressed object, 246 = hash-referenced object,
+    // 248 = bigint, 249 = array, 250 = date, 251 = boolean,
+    // 252 = number (f64), 253 = string, 254 = bytes, 255 = uint8
 
     function decodeSbc(buf: Uint8Array, offset: number, len: number): unknown {
         if (len === 0) {
@@ -142,6 +142,13 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                 return new Uint8Array(slice);
             }
 
+            case 255:
+                if (offset + 2 > bufLen) {
+                    throw new RangeError('SBC: uint8 tag extends beyond buffer');
+                }
+
+                return buf[offset + 1]!;
+
             case 245: {
                 if (offset + 9 > bufLen) {
                     throw new RangeError('SBC: compressed object header extends beyond buffer');
@@ -207,6 +214,7 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
             case 250: return offset + 9;
             case 251: return offset + 2;
             case 252: return offset + 9;
+            case 255: return offset + 2;
             case 253: {
                 let end = offset + 5 + readU32.call(buf, offset + 1);
                 if (end > buf.length) throw new RangeError('SBC: tag length extends beyond buffer');
@@ -261,11 +269,19 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
 
                 return pos + 2;
 
-            case 'number':
-                buf[pos] = 252;
-                writeF64.call(buf, value, pos + 1);
+            case 'number': {
+                let n = value as number;
 
+                if (n >= 0 && n <= 255 && Number.isInteger(n)) {
+                    buf[pos] = 255;
+                    buf[pos + 1] = n;
+                    return pos + 2;
+                }
+
+                buf[pos] = 252;
+                writeF64.call(buf, n, pos + 1);
                 return pos + 9;
+            }
 
             case 'string': {
                 let sLen = byteLen(value),
@@ -487,10 +503,21 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
         }
 
         if (vtype === 'number') {
+            let n = value as number;
+
+            if (n >= 0 && n <= 255 && Number.isInteger(n)) {
+                let p = allocUnsafe(2);
+
+                p[0] = 255;
+                p[1] = n;
+
+                return p;
+            }
+
             let p = allocUnsafe(9);
 
             p[0] = 252;
-            writeF64.call(p, value as number, 1);
+            writeF64.call(p, n, 1);
 
             return p;
         }
