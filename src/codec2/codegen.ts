@@ -25,6 +25,7 @@ interface Schema {
 interface SbcHelpers {
     decodeSbc: (buf: Uint8Array, offset: number, len: number, depth: number) => unknown;
     decodeTagEnd: (buf: Uint8Array, offset: number, depth: number) => number;
+    encodeObj: (obj: Record<string, unknown>, buf: Uint8Array, pos: number) => number;
     encodeSbc: (value: unknown, buf: Uint8Array, pos: number) => number;
 }
 
@@ -132,7 +133,7 @@ function compileEncoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
 
             case 'object':
 
-                body += `p=_enc(${val},b,p);\n`;
+                body += `p=_encObj(${val},b,p);\n`;
                 break;
 
             case 'mixed':
@@ -149,8 +150,8 @@ function compileEncoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
 
     try {
         return (
-            new Function(params, '_enc', `return function encode(o,b,pos){${body}}`)
-        )(...bindArgs, helpers.encodeSbc);
+            new Function(params, '_enc', '_encObj', `return function encode(o,b,pos){${body}}`)
+        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj);
     }
     catch (e) {
         throw new Error('Codec2: encoder compilation failed: ' + (e instanceof Error ? e.message : e));

@@ -216,9 +216,43 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
     let lastDecodeHash = 0,
         lastDecodeSchema: Schema | null = null;
 
+    // Specialized object encoder — skips typeof/instanceof checks for known-object fields
+    function encodeObj(obj: Record<string, unknown>, buf: Uint8Array, pos: number): number {
+        let schema = weakCache.get(obj) ?? null;
+
+        if (!schema) {
+            schema = matchSchema(obj);
+
+            if (!schema) {
+                schema = inferAndRegister(obj, registry, helpers);
+            }
+
+            setCache(schema, obj);
+        }
+
+        let h = schema.hash;
+
+        buf[pos] = 8;
+        buf[pos + 1] = h & 0xFF;
+        buf[pos + 2] = (h >>> 8) & 0xFF;
+        buf[pos + 3] = (h >>> 16) & 0xFF;
+        buf[pos + 4] = (h >>> 24) & 0xFF;
+
+        let end = schema.encodeFn!(obj, buf, pos + 9),
+            dataLen = end - pos - 9;
+
+        buf[pos + 5] = dataLen & 0xFF;
+        buf[pos + 6] = (dataLen >>> 8) & 0xFF;
+        buf[pos + 7] = (dataLen >>> 16) & 0xFF;
+        buf[pos + 8] = (dataLen >>> 24) & 0xFF;
+
+        return end;
+    }
+
     let helpers: SbcHelpers = {
         decodeSbc,
         decodeTagEnd,
+        encodeObj,
         encodeSbc,
     };
 
