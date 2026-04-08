@@ -445,19 +445,21 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             case 'number': {
                 let n = value as number;
 
-                if (n >= 0 && n <= 255 && Number.isInteger(n)) {
-                    buf[pos] = 3;
-                    buf[pos + 1] = n;
-                    return pos + 2;
-                }
+                if (Number.isInteger(n)) {
+                    if (n >= 0 && n <= 255) {
+                        buf[pos] = 3;
+                        buf[pos + 1] = n;
+                        return pos + 2;
+                    }
 
-                if (Number.isInteger(n) && n >= -2147483648 && n <= 2147483647) {
-                    buf[pos] = 11;
-                    buf[pos + 1] = n & 0xFF;
-                    buf[pos + 2] = (n >>> 8) & 0xFF;
-                    buf[pos + 3] = (n >>> 16) & 0xFF;
-                    buf[pos + 4] = (n >>> 24) & 0xFF;
-                    return pos + 5;
+                    if (n >= -2147483648 && n <= 2147483647) {
+                        buf[pos] = 11;
+                        buf[pos + 1] = n & 0xFF;
+                        buf[pos + 2] = (n >>> 8) & 0xFF;
+                        buf[pos + 3] = (n >>> 16) & 0xFF;
+                        buf[pos + 4] = (n >>> 24) & 0xFF;
+                        return pos + 5;
+                    }
                 }
 
                 buf[pos] = 4;
