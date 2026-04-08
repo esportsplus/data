@@ -1320,4 +1320,4 @@ function sortFieldsByName(schema: Schema): FieldDef[] {
 }
 
 
-export { buildSchema, buildSchemaFromDef, CODEGEN_RESERVED_NAMES, compileCompressedDecoder, compileCompressedEncoder, compileSchema, validateFieldName, validateFieldTypeString };
+export { buildSchema, buildSchemaFromDef, compileCompressedDecoder, compileCompressedEncoder, compileSchema, validateFieldName, validateFieldTypeString };

@@ -252,14 +252,6 @@ let readF64: ((off: number) => number) = isNode
     ? Buffer.prototype.readDoubleLE
     : function (this: Uint8Array, off: number) { return getDv(this).getFloat64(this.byteOffset + off, true); };
 
-let readI16: ((off: number) => number) = isNode
-    ? Buffer.prototype.readInt16LE
-    : function (this: Uint8Array, off: number) { return getDv(this).getInt16(this.byteOffset + off, true); };
-
-let readI32: ((off: number) => number) = isNode
-    ? Buffer.prototype.readInt32LE
-    : function (this: Uint8Array, off: number) { return getDv(this).getInt32(this.byteOffset + off, true); };
-
 let readU16: ((off: number) => number) = isNode
     ? Buffer.prototype.readUInt16LE
     : function (this: Uint8Array, off: number) { return getDv(this).getUint16(this.byteOffset + off, true); };
@@ -283,14 +275,6 @@ let writeBI64: ((val: bigint, off: number) => void) = isNode
 let writeF64: ((val: number, off: number) => void) = isNode
     ? Buffer.prototype.writeDoubleLE as unknown as (val: number, off: number) => void
     : function (this: Uint8Array, val: number, off: number) { getDv(this).setFloat64(this.byteOffset + off, val, true); };
-
-let writeI16: ((val: number, off: number) => void) = isNode
-    ? Buffer.prototype.writeInt16LE as unknown as (val: number, off: number) => void
-    : function (this: Uint8Array, val: number, off: number) { getDv(this).setInt16(this.byteOffset + off, val, true); };
-
-let writeI32: ((val: number, off: number) => void) = isNode
-    ? Buffer.prototype.writeInt32LE as unknown as (val: number, off: number) => void
-    : function (this: Uint8Array, val: number, off: number) { getDv(this).setInt32(this.byteOffset + off, val, true); };
 
 let writeU16: ((val: number, off: number) => void) = isNode
     ? Buffer.prototype.writeUInt16LE as unknown as (val: number, off: number) => void
@@ -416,7 +400,7 @@ function writeZigzag(buf: Uint8Array, pos: number, value: number): number {
 
 
 // Public API: shared I/O primitives used by index.ts, registry.ts, and codegen.ts
-export { allocBuf, allocUnsafe, byteLen, copyBuf, FIELD_SIZES, fromUtf8, isNode, readBI64, readF64, readI16, readI32, readU16, readU32, readUtf8, readVarint, readZigzag, toUtf8, varintResult, writeBI64, writeF64, writeI16, writeI32, writeU16, writeU32, writeUtf8, writeVarint, writeZigzag };
+export { allocBuf, allocUnsafe, byteLen, copyBuf, FIELD_SIZES, fromUtf8, isNode, readBI64, readF64, readU16, readU32, readUtf8, readVarint, readZigzag, toUtf8, varintResult, writeBI64, writeF64, writeU16, writeU32, writeUtf8, writeVarint, writeZigzag };
 // Internal: only consumed by codegen.ts and registry.ts — not part of the public sbc API
 export { driver, readShortStr, textDecoder, textEncoder };
 export type { ArrayFieldType, CodegenDriver, FieldDef, FieldType, InternDb, InternPool, NullableFieldType, ObjectFieldType, Schema, SchemaRegistry, SchemaStoreInterface };
