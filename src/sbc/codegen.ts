@@ -262,7 +262,18 @@ function buildSchemaFromDef(def: { fields: { fixedSize: number; name: string; ty
 
     assignNullIndices(fields);
 
-    let fixedSize = computeFieldOffsets(fields);
+    let fixedSize = computeFieldOffsets(fields),
+        nullableCount = 0;
+
+    for (let i = 0, n = fields.length; i < n; i++) {
+        if (typeof fields[i]!.type === 'object' && (fields[i]!.type as { kind: string }).kind === 'nullable') {
+            nullableCount++;
+        }
+    }
+
+    if (nullableCount > 16) {
+        throw new Error('SBC: maximum 16 nullable fields supported (got ' + nullableCount + ')');
+    }
 
     return {
         compressedDecodeFn: null,
@@ -277,7 +288,7 @@ function buildSchemaFromDef(def: { fields: { fixedSize: number; name: string; ty
         fixedSize,
         hash: def.hash,
         id: def.id,
-        nullableCount: def.nullableCount,
+        nullableCount,
     };
 }
 
