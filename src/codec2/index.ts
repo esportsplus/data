@@ -183,13 +183,15 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
     let cacheCounts: number[] = [0, 0, 0, 0],
         cacheFields: (FieldDef[] | null)[] = [null, null, null, null],
         cacheIdx = 0,
-        cacheSchemas: (Schema | null)[] = [null, null, null, null];
+        cacheSchemas: (Schema | null)[] = [null, null, null, null],
+        weakCache = new WeakMap<object, Schema>();
 
-    function setCache(schema: Schema): void {
+    function setCache(schema: Schema, obj: object): void {
         cacheSchemas[cacheIdx] = schema;
         cacheFields[cacheIdx] = schema.fields;
         cacheCounts[cacheIdx] = schema.fields.length;
         cacheIdx = (cacheIdx + 1) & 3;
+        weakCache.set(obj, schema);
     }
 
     let helpers: SbcHelpers = {
@@ -532,7 +534,7 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                     schema = inferAndRegister(obj, registry, helpers);
                 }
 
-                setCache(schema);
+                setCache(schema, obj);
 
                 let h = schema.hash;
 
@@ -561,7 +563,14 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
 
     function matchSchema(obj: Record<string, unknown>): Schema | null {
-        // Count keys once via for..in (no allocation)
+        // O(1) WeakMap lookup for repeated objects
+        let cached = weakCache.get(obj);
+
+        if (cached) {
+            return cached;
+        }
+
+        // Fallback: ring buffer cache
         let keyCount = 0;
 
         for (let _ in obj) {
@@ -620,7 +629,7 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                 schema = inferAndRegister(obj, registry, helpers);
             }
 
-            setCache(schema);
+            setCache(schema, obj);
 
             let end = schema.encodeFn!(obj, encodeBuf, 9),
                 h = schema.hash;
