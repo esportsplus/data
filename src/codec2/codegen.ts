@@ -94,11 +94,13 @@ function compileEncoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
 
             case 'string':
 
-                // ASCII fast path for short strings
+                // ASCII fast path — single-pass check+write for short strings
                 body += `{let s=${val},sl=s.length;`;
-                body += `if(sl<17){let _asc=1;for(let _k=0;_k<sl;_k++){if(s.charCodeAt(_k)>127){_asc=0;break;}}`;
-                body += `if(_asc){b[p]=sl&0xFF;b[p+1]=0;b[p+2]=0;b[p+3]=0;p+=4;for(let _k=0;_k<sl;_k++){b[p+_k]=s.charCodeAt(_k);}p+=sl;}`;
-                body += `else{let l=_bl(s);b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;b[p+2]=(l>>>16)&0xFF;b[p+3]=(l>>>24)&0xFF;p+=4;${d.writeStr('s', 'p', 'l')};p+=l;}}`;
+                body += `if(sl<17){`;
+                body += `b[p]=sl;b[p+1]=0;b[p+2]=0;b[p+3]=0;p+=4;`;
+                body += `let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}`;
+                body += `if(_ok){p+=sl;}`;
+                body += `else{p-=4;let l=_bl(s);b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;b[p+2]=(l>>>16)&0xFF;b[p+3]=(l>>>24)&0xFF;p+=4;${d.writeStr('s', 'p', 'l')};p+=l;}}`;
                 body += `else{let l=_bl(s);b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;b[p+2]=(l>>>16)&0xFF;b[p+3]=(l>>>24)&0xFF;p+=4;${d.writeStr('s', 'p', 'l')};p+=l;}}\n`;
                 break;
 
