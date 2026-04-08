@@ -622,25 +622,19 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
             setCache(schema);
 
-            let h = schema.hash;
+            let end = schema.encodeFn!(obj, encodeBuf, 9),
+                h = schema.hash;
+
+            while (end > encodeBuf.length) {
+                encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+                end = schema.encodeFn!(obj, encodeBuf, 9);
+            }
 
             encodeBuf[0] = 8;
             encodeBuf[1] = h & 0xFF;
             encodeBuf[2] = (h >>> 8) & 0xFF;
             encodeBuf[3] = (h >>> 16) & 0xFF;
             encodeBuf[4] = (h >>> 24) & 0xFF;
-
-            let end = schema.encodeFn!(obj, encodeBuf, 9);
-
-            while (end > encodeBuf.length) {
-                encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
-                encodeBuf[0] = 8;
-                encodeBuf[1] = h & 0xFF;
-                encodeBuf[2] = (h >>> 8) & 0xFF;
-                encodeBuf[3] = (h >>> 16) & 0xFF;
-                encodeBuf[4] = (h >>> 24) & 0xFF;
-                end = schema.encodeFn!(obj, encodeBuf, 9);
-            }
 
             let dataLen = end - 9;
 
