@@ -97,9 +97,12 @@ function compileEncoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
 
             case 'string':
                 hasVariable = true;
-                body += `{let s=${val},l=_bl(s);`;
-                body += `b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;p+=2;`;
-                body += `${d.writeStr('s', 'p', 'l')};p+=l;}\n`;
+                // ASCII fast path for short strings
+                body += `{let s=${val},sl=s.length;`;
+                body += `if(sl<17){let _asc=1;for(let _k=0;_k<sl;_k++){if(s.charCodeAt(_k)>127){_asc=0;break;}}`;
+                body += `if(_asc){b[p]=sl;b[p+1]=0;p+=2;for(let _k=0;_k<sl;_k++){b[p+_k]=s.charCodeAt(_k);}p+=sl;}`;
+                body += `else{let l=_bl(s);b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;p+=2;${d.writeStr('s', 'p', 'l')};p+=l;}}`;
+                body += `else{let l=_bl(s);b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;p+=2;${d.writeStr('s', 'p', 'l')};p+=l;}}\n`;
                 break;
 
             case 'bytes':
