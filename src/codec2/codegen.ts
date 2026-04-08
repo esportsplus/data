@@ -146,22 +146,74 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'array':
+                if (f.elementType) {
+                    let et = f.elementType;
 
-                // Inline packed numeric array detection with allNumber guard
-                body += `{let a=${val},l=a.length,_pk=0;`;
-                body += `if(l>0&&typeof a[0]==='number'){`;
-                body += `let _u8=1,_i32=1,_an=1;`;
-                body += `for(let i=0;i<l;i++){let v=a[i];if(typeof v!=='number'){_an=0;break;}`;
-                body += `if(v!==((v&0xFF)>>>0)){_u8=0;}`;
-                body += `if(v!==(v|0)){_i32=0;}}`;
-                // packed uint8: flag=1, u32 count, raw bytes
-                body += `if(_an&&_u8){_pk=1;b[p]=1;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;}`;
-                // packed int32: flag=2, u32 count, 4 bytes each
-                body += `else if(_an&&_i32){_pk=1;b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
-                // packed float64: flag=3, u32 count, 8 bytes each
-                body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}}`;
-                // generic: flag=0, u32 count, tagged elements
-                body += `if(!_pk){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
+                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
+                        et.base === 'uint16' || et.base === 'int16' ||
+                        et.base === 'uint32' || et.base === 'int32' ||
+                        et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
+                        // Typed array: varint count + raw fixed-size elements
+                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);`;
+
+                        switch (et.base) {
+                            case 'boolean':
+                                body += `for(let i=0;i<l;i++){b[p]=a[i]?1:0;p+=1;}`;
+                                break;
+                            case 'uint8':
+                                body += `for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;`;
+                                break;
+                            case 'int8':
+                                body += `for(let i=0;i<l;i++){b[p]=a[i]&0xFF;p+=1;}`;
+                                break;
+                            case 'uint16':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
+                                break;
+                            case 'int16':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
+                                break;
+                            case 'uint32':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
+                                break;
+                            case 'int32':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
+                                break;
+                            case 'float64':
+                                body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}`;
+                                break;
+                            case 'date':
+                                body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}`;
+                                break;
+                            case 'bigint':
+                                body += `for(let i=0;i<l;i++){_wBI64.call(b,a[i],p);p+=8;}`;
+                                break;
+                        }
+
+                        body += `}\n`;
+                    }
+                    else {
+                        // Non-fixed element type (string, bytes, containers): varint count + tagged elements
+                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
+                    }
+                }
+                else {
+                    // Existing generic path — inline packed numeric detection
+                    body += `{let a=${val},l=a.length,_pk=0;`;
+                    body += `if(l>0&&typeof a[0]==='number'){`;
+                    body += `let _u8=1,_i32=1,_an=1;`;
+                    body += `for(let i=0;i<l;i++){let v=a[i];if(typeof v!=='number'){_an=0;break;}`;
+                    body += `if(v!==((v&0xFF)>>>0)){_u8=0;}`;
+                    body += `if(v!==(v|0)){_i32=0;}}`;
+                    // packed uint8: flag=1, u32 count, raw bytes
+                    body += `if(_an&&_u8){_pk=1;b[p]=1;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;}`;
+                    // packed int32: flag=2, u32 count, 4 bytes each
+                    body += `else if(_an&&_i32){_pk=1;b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
+                    // packed float64: flag=3, u32 count, 8 bytes each
+                    body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}}`;
+                    // generic: flag=0, u32 count, tagged elements
+                    body += `if(!_pk){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
+                }
+
                 break;
 
             case 'object':
@@ -296,16 +348,75 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'array':
-                body += `{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
-                // flag=0: generic tagged elements
-                body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
-                // flag=1: packed uint8
-                body += `else if(_f===1){for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
-                // flag=2: packed int32
-                body += `else if(_f===2){for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
-                // flag=3: packed float64
-                body += `else{for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}}`;
-                body += `f${i}=a;}\n`;
+                if (f.elementType) {
+                    let et = f.elementType;
+
+                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
+                        et.base === 'uint16' || et.base === 'int16' ||
+                        et.base === 'uint32' || et.base === 'int32' ||
+                        et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
+                        // Typed array: varint count + raw fixed-size elements
+                        body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+
+                        switch (et.base) {
+                            case 'boolean':
+                                body += `for(let i=0;i<l;i++){a[i]=!!b[p];p+=1;}`;
+                                break;
+                            case 'uint8':
+                                body += `for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;`;
+                                break;
+                            case 'int8':
+                                body += `for(let i=0;i<l;i++){a[i]=(b[p]<<24)>>24;p+=1;}`;
+                                break;
+                            case 'uint16':
+                                body += `for(let i=0;i<l;i++){a[i]=b[p]|(b[p+1]<<8);p+=2;}`;
+                                break;
+                            case 'int16':
+                                body += `for(let i=0;i<l;i++){a[i]=((b[p]|(b[p+1]<<8))<<16)>>16;p+=2;}`;
+                                break;
+                            case 'uint32':
+                                body += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;}`;
+                                break;
+                            case 'int32':
+                                body += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}`;
+                                break;
+                            case 'float64':
+                                body += `for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}`;
+                                break;
+                            case 'date':
+                                body += `for(let i=0;i<l;i++){a[i]=new Date(${d.readF64('p')});p+=8;}`;
+                                break;
+                            case 'bigint':
+                                body += `for(let i=0;i<l;i++){a[i]=_rBI64.call(b,p);p+=8;}`;
+                                break;
+                        }
+
+                        body += `f${i}=a;}\n`;
+                    }
+                    else {
+                        // Non-fixed element type: varint count + tagged elements
+                        body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+                        body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
+                        body += `f${i}=a;}\n`;
+                    }
+                }
+                else {
+                    // Existing generic path — flag byte + u32 count
+                    body += `{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
+                    // flag=0: generic tagged elements
+                    body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
+                    // flag=1: packed uint8
+                    body += `else if(_f===1){for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
+                    // flag=2: packed int32
+                    body += `else if(_f===2){for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
+                    // flag=3: packed float64
+                    body += `else{for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}}`;
+                    body += `f${i}=a;}\n`;
+                }
 
                 break;
 
