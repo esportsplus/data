@@ -266,7 +266,7 @@ function readFixedField(buf: Uint8Array, pos: number, type: string): unknown {
 // 16 = set (u32 count + elements)
 // 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
-const createCodec = (options?: CodecOptions): { computeSize(value: unknown): number; decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; encode(value: unknown, view?: boolean): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown } => {
+const createCodec = (options?: CodecOptions): { computeSize(value: unknown): number; decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; deserializeRegistry(data: Uint8Array): void; encode(value: unknown, view?: boolean): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown; serializeRegistry(): Uint8Array } => {
     let compress = options?.compress ?? false,
         encodeBuf = allocBuf(65536),
         registry: SchemaRegistry = {
@@ -1508,7 +1508,143 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
     }
 
 
-    return { computeSize, decode, decodeAt, defineSchema, encode, extractField };
+    function deserializeRegistry(data: Uint8Array): void {
+        let pos = 0;
+
+        let schemaCount = data[pos]! | (data[pos + 1]! << 8);
+        pos += 2;
+
+        for (let i = 0; i < schemaCount; i++) {
+            let hash = (data[pos]! | (data[pos + 1]! << 8) | (data[pos + 2]! << 16) | (data[pos + 3]! << 24)) >>> 0;
+            pos += 4;
+
+            let fieldCount = data[pos]! | (data[pos + 1]! << 8);
+            pos += 2;
+
+            let fields: FieldSpec[] = [];
+
+            for (let j = 0; j < fieldCount; j++) {
+                let nameLen = data[pos]! | (data[pos + 1]! << 8);
+                pos += 2;
+
+                let name = '';
+
+                for (let k = 0; k < nameLen; k++) {
+                    name += String.fromCharCode(data[pos + k]!);
+                }
+
+                pos += nameLen;
+
+                let typeLen = data[pos]! | (data[pos + 1]! << 8);
+                pos += 2;
+
+                let type = '';
+
+                for (let k = 0; k < typeLen; k++) {
+                    type += String.fromCharCode(data[pos + k]!);
+                }
+
+                pos += typeLen;
+
+                let flags = data[pos]!;
+                pos += 1;
+
+                fields.push({
+                    name,
+                    nullable: !!(flags & 1),
+                    type: type as FieldSpec['type'],
+                });
+            }
+
+            // Skip if already registered
+            if (registry.schemas.has(hash)) {
+                continue;
+            }
+
+            defineSchema(fields);
+        }
+    }
+
+
+    function serializeRegistry(): Uint8Array {
+        let schemas = [...registry.schemas.values()];
+
+        // Calculate total size
+        let size = 2; // u16 schemaCount
+
+        for (let i = 0, n = schemas.length; i < n; i++) {
+            let s = schemas[i]!;
+
+            size += 4 + 2; // u32 hash + u16 fieldCount
+
+            for (let j = 0, m = s.fields.length; j < m; j++) {
+                let f = s.fields[j]!;
+
+                size += 2 + f.name.length + 2 + f.type.length + 1;
+            }
+        }
+
+        let buf = new Uint8Array(size),
+            pos = 0;
+
+        // Write schema count
+        buf[pos] = schemas.length & 0xFF;
+        buf[pos + 1] = (schemas.length >>> 8) & 0xFF;
+        pos += 2;
+
+        for (let i = 0, n = schemas.length; i < n; i++) {
+            let s = schemas[i]!;
+
+            // Write hash
+            buf[pos] = s.hash & 0xFF;
+            buf[pos + 1] = (s.hash >>> 8) & 0xFF;
+            buf[pos + 2] = (s.hash >>> 16) & 0xFF;
+            buf[pos + 3] = (s.hash >>> 24) & 0xFF;
+            pos += 4;
+
+            // Write field count
+            let fc = s.fields.length;
+
+            buf[pos] = fc & 0xFF;
+            buf[pos + 1] = (fc >>> 8) & 0xFF;
+            pos += 2;
+
+            for (let j = 0; j < fc; j++) {
+                let f = s.fields[j]!;
+
+                // Write name
+                buf[pos] = f.name.length & 0xFF;
+                buf[pos + 1] = (f.name.length >>> 8) & 0xFF;
+                pos += 2;
+
+                for (let k = 0, kn = f.name.length; k < kn; k++) {
+                    buf[pos + k] = f.name.charCodeAt(k);
+                }
+
+                pos += f.name.length;
+
+                // Write type
+                buf[pos] = f.type.length & 0xFF;
+                buf[pos + 1] = (f.type.length >>> 8) & 0xFF;
+                pos += 2;
+
+                for (let k = 0, kn = f.type.length; k < kn; k++) {
+                    buf[pos + k] = f.type.charCodeAt(k);
+                }
+
+                pos += f.type.length;
+
+                // Write flags
+                buf[pos] = f.nullable ? 1 : 0;
+                pos += 1;
+            }
+        }
+
+        return buf;
+    }
+
+
+    return { computeSize, decode, decodeAt, defineSchema, deserializeRegistry, encode, extractField, serializeRegistry };
 };
 
 

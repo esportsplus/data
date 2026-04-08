@@ -2056,4 +2056,128 @@ describe('Codec2', () => {
             expect(result.u).toBe(7);
         });
     });
+
+
+    // === REGISTRY SERIALIZATION ===
+
+    describe('registry serialization', () => {
+        it('serialize and deserialize round-trip', () => {
+            let c1 = createCodec();
+
+            c1.defineSchema([
+                { name: 'age', type: 'uint8' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let blob = c1.serializeRegistry();
+
+            let c2 = createCodec();
+
+            c2.deserializeRegistry(blob);
+
+            let obj = { age: 25, name: 'Alice' };
+            let encoded = c1.encode(obj);
+
+            expect(c2.decode(encoded)).toEqual(obj);
+        });
+
+        it('cross-instance decode after import', () => {
+            let server = createCodec();
+
+            server.defineSchema([
+                { name: 'active', type: 'boolean' },
+                { name: 'id', type: 'int32' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let encoded = server.encode({ active: true, id: 42, name: 'Test' });
+            let blob = server.serializeRegistry();
+
+            let client = createCodec();
+
+            client.deserializeRegistry(blob);
+
+            expect(client.decode(encoded)).toEqual({ active: true, id: 42, name: 'Test' });
+        });
+
+        it('nullable fields preserved', () => {
+            let c1 = createCodec();
+
+            c1.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'note', type: 'string', nullable: true },
+            ]);
+
+            // Encode with non-null value to use the pre-defined nullable schema
+            let withValue = { name: 'Alice', note: 'hello' };
+            let encoded = c1.encode(withValue);
+
+            let blob = c1.serializeRegistry();
+            let c2 = createCodec();
+
+            c2.deserializeRegistry(blob);
+
+            // c2 can decode data from c1's nullable schema
+            expect(c2.decode(encoded)).toEqual(withValue);
+
+            // c2 can also encode/decode with the nullable schema (null value)
+            let withNull = { name: 'Bob', note: 'world' };
+            let encoded2 = c2.encode(withNull);
+
+            expect(c1.decode(encoded2)).toEqual(withNull);
+        });
+
+        it('duplicate schemas skipped', () => {
+            let c = createCodec();
+
+            c.defineSchema([{ name: 'x', type: 'uint8' }]);
+
+            let blob = c.serializeRegistry();
+
+            c.deserializeRegistry(blob); // should not throw
+
+            expect(c.decode(c.encode({ x: 42 }))).toEqual({ x: 42 });
+        });
+
+        it('multiple schemas', () => {
+            let c1 = createCodec();
+
+            c1.defineSchema([{ name: 'a', type: 'uint8' }]);
+            c1.defineSchema([{ name: 'x', type: 'string' }, { name: 'y', type: 'int32' }]);
+
+            let blob = c1.serializeRegistry();
+            let c2 = createCodec();
+
+            c2.deserializeRegistry(blob);
+
+            expect(c2.decode(c1.encode({ a: 7 }))).toEqual({ a: 7 });
+            expect(c2.decode(c1.encode({ x: 'hi', y: -1 }))).toEqual({ x: 'hi', y: -1 });
+        });
+
+        it('empty registry', () => {
+            let c = createCodec();
+            let blob = c.serializeRegistry();
+
+            expect(blob.length).toBe(2); // just u16 count = 0
+
+            let c2 = createCodec();
+
+            c2.deserializeRegistry(blob); // should not throw
+        });
+
+        it('auto-inferred schemas included', () => {
+            let c1 = createCodec();
+
+            c1.encode({ name: 'Alice', score: 100 }); // auto-infer
+
+            let blob = c1.serializeRegistry();
+            let c2 = createCodec();
+
+            c2.deserializeRegistry(blob);
+
+            let encoded = c1.encode({ name: 'Bob', score: 200 });
+
+            expect(c2.decode(encoded)).toEqual({ name: 'Bob', score: 200 });
+        });
+    });
 });
