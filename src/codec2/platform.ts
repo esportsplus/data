@@ -37,15 +37,14 @@ function readShortStrAscii(buf: Uint8Array, start: number, len: number): string 
         case 6: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!);
         case 7: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!, buf[s + 6]!);
         case 8: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!, buf[s + 6]!, buf[s + 7]!);
-        default: {
-            let codes = new Array(len);
-
-            for (let i = 0; i < len; i++) {
-                codes[i] = buf[s + i]!;
-            }
-
-            return String.fromCharCode.apply(null, codes);
-        }
+        case 9: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!, buf[s + 6]!, buf[s + 7]!, buf[s + 8]!);
+        case 10: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!, buf[s + 6]!, buf[s + 7]!, buf[s + 8]!, buf[s + 9]!);
+        case 11: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!, buf[s + 6]!, buf[s + 7]!, buf[s + 8]!, buf[s + 9]!, buf[s + 10]!);
+        case 12: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!, buf[s + 6]!, buf[s + 7]!, buf[s + 8]!, buf[s + 9]!, buf[s + 10]!, buf[s + 11]!);
+        case 13: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!, buf[s + 6]!, buf[s + 7]!, buf[s + 8]!, buf[s + 9]!, buf[s + 10]!, buf[s + 11]!, buf[s + 12]!);
+        case 14: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!, buf[s + 6]!, buf[s + 7]!, buf[s + 8]!, buf[s + 9]!, buf[s + 10]!, buf[s + 11]!, buf[s + 12]!, buf[s + 13]!);
+        case 15: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!, buf[s + 6]!, buf[s + 7]!, buf[s + 8]!, buf[s + 9]!, buf[s + 10]!, buf[s + 11]!, buf[s + 12]!, buf[s + 13]!, buf[s + 14]!);
+        default: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!, buf[s + 6]!, buf[s + 7]!, buf[s + 8]!, buf[s + 9]!, buf[s + 10]!, buf[s + 11]!, buf[s + 12]!, buf[s + 13]!, buf[s + 14]!, buf[s + 15]!);
     }
 }
 
