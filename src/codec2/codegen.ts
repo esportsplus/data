@@ -146,9 +146,9 @@ function compileEncoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
         params = d.encoderParams();
 
     try {
-        let factory = new Function(params, '_enc', `return function encode(o,b,pos){${body}}`);
-
-        return factory(...bindArgs, helpers.encodeSbc);
+        return (
+            new Function(params, '_enc', `return function encode(o,b,pos){${body}}`)
+        )(...bindArgs, helpers.encodeSbc);
     }
     catch (e) {
         throw new Error('Codec2: encoder compilation failed: ' + (e instanceof Error ? e.message : e));
@@ -165,8 +165,6 @@ function compileDecoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
 
     // Declare all field variables
     for (let i = 0; i < n; i++) {
-        let f = fields[i]!;
-
         body += `let f${i};\n`;
     }
 
