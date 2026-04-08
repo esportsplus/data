@@ -168,6 +168,9 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
 // 9 = bigint (8 bytes)
 // 10 = date (f64)
 // 11 = int32 (4 bytes)
+// 12 = packed uint8 array (u16 count + raw bytes)
+// 13 = packed float64 array (u16 count + raw f64s)
+// 14 = packed int32 array (u16 count + raw i32s)
 
 const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; encode(value: unknown, view?: boolean): Uint8Array } => {
     let encodeBuf = allocBuf(65536),
@@ -261,6 +264,47 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             case 11:
                 return (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) | 0;
 
+            case 12: {
+                // packed uint8 array
+                let count = buf[offset + 1]! | (buf[offset + 2]! << 8),
+                    arr = new Array(count),
+                    p = offset + 3;
+
+                for (let i = 0; i < count; i++) {
+                    arr[i] = buf[p + i]!;
+                }
+
+                return arr;
+            }
+
+            case 13: {
+                // packed float64 array
+                let count = buf[offset + 1]! | (buf[offset + 2]! << 8),
+                    arr = new Array(count),
+                    p = offset + 3;
+
+                for (let i = 0; i < count; i++) {
+                    arr[i] = readF64.call(buf, p);
+                    p += 8;
+                }
+
+                return arr;
+            }
+
+            case 14: {
+                // packed int32 array
+                let count = buf[offset + 1]! | (buf[offset + 2]! << 8),
+                    arr = new Array(count),
+                    p = offset + 3;
+
+                for (let i = 0; i < count; i++) {
+                    arr[i] = (buf[p]! | (buf[p + 1]! << 8) | (buf[p + 2]! << 16) | (buf[p + 3]! << 24)) | 0;
+                    p += 4;
+                }
+
+                return arr;
+            }
+
             default:
                 return null;
         }
@@ -301,6 +345,18 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             }
             case 11:
                 return offset + 5;
+            case 12: {
+                let count = buf[offset + 1]! | (buf[offset + 2]! << 8);
+                return offset + 3 + count;
+            }
+            case 13: {
+                let count = buf[offset + 1]! | (buf[offset + 2]! << 8);
+                return offset + 3 + count * 8;
+            }
+            case 14: {
+                let count = buf[offset + 1]! | (buf[offset + 2]! << 8);
+                return offset + 3 + count * 4;
+            }
             default:
                 return offset + 1;
         }
@@ -377,6 +433,81 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
                 if (Array.isArray(value)) {
                     let len = value.length;
+
+                    if (len > 0 && typeof value[0] === 'number') {
+                        // Try packed numeric array
+                        let allUint8 = true,
+                            allInt32 = true,
+                            allNumber = true;
+
+                        for (let i = 0; i < len; i++) {
+                            let v = value[i];
+
+                            if (typeof v !== 'number') {
+                                allNumber = false;
+                                allUint8 = false;
+                                allInt32 = false;
+                                break;
+                            }
+
+                            if (!Number.isInteger(v) || v < 0 || v > 255) {
+                                allUint8 = false;
+                            }
+
+                            if (!Number.isInteger(v) || v < -2147483648 || v > 2147483647) {
+                                allInt32 = false;
+                            }
+                        }
+
+                        if (allUint8) {
+                            buf[pos] = 12;
+                            buf[pos + 1] = len & 0xFF;
+                            buf[pos + 2] = (len >>> 8) & 0xFF;
+
+                            let p = pos + 3;
+
+                            for (let i = 0; i < len; i++) {
+                                buf[p + i] = value[i];
+                            }
+
+                            return p + len;
+                        }
+
+                        if (allInt32) {
+                            buf[pos] = 14;
+                            buf[pos + 1] = len & 0xFF;
+                            buf[pos + 2] = (len >>> 8) & 0xFF;
+
+                            let p = pos + 3;
+
+                            for (let i = 0; i < len; i++) {
+                                let v = value[i];
+
+                                buf[p] = v & 0xFF;
+                                buf[p + 1] = (v >>> 8) & 0xFF;
+                                buf[p + 2] = (v >>> 16) & 0xFF;
+                                buf[p + 3] = (v >>> 24) & 0xFF;
+                                p += 4;
+                            }
+
+                            return p;
+                        }
+
+                        if (allNumber) {
+                            buf[pos] = 13;
+                            buf[pos + 1] = len & 0xFF;
+                            buf[pos + 2] = (len >>> 8) & 0xFF;
+
+                            let p = pos + 3;
+
+                            for (let i = 0; i < len; i++) {
+                                writeF64.call(buf, value[i], p);
+                                p += 8;
+                            }
+
+                            return p;
+                        }
+                    }
 
                     buf[pos] = 7;
                     buf[pos + 1] = len & 0xFF;

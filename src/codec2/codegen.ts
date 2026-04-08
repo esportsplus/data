@@ -111,9 +111,22 @@ function compileEncoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
 
             case 'array':
                 hasVariable = true;
+                // Inline packed numeric array detection
                 body += `{let a=${val},l=a.length;`;
-                body += `b[p]=l&0xFF;b[p+1]=(l>>>8)&0xFF;p+=2;`;
-                body += `for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
+                body += `if(l>0&&typeof a[0]==='number'){`;
+                // Check if all uint8
+                body += `let _u8=1,_i32=1;`;
+                body += `for(let i=0;i<l;i++){let v=a[i];if(typeof v!=='number'){_u8=0;_i32=0;break;}`;
+                body += `if(v!==((v&0xFF)>>>0)){_u8=0;}`;
+                body += `if(v!==(v|0)){_i32=0;}}`;
+                // packed uint8: flag=1, u16 count, raw bytes
+                body += `if(_u8){b[p]=1;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;p+=3;for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;}`;
+                // packed int32: flag=2, u16 count, 4 bytes each
+                body += `else if(_i32){b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;p+=3;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
+                // packed float64: flag=3, u16 count, 8 bytes each
+                body += `else{b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;p+=3;for(let i=0;i<l;i++){_wF64.call(b,a[i],p);p+=8;}}}`;
+                // generic: flag=0, u16 count, tagged elements
+                body += `else{b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;p+=3;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
                 break;
 
             case 'object':
@@ -212,8 +225,16 @@ function compileDecoder(fields: FieldDef[], d: CodegenDriver, helpers: SbcHelper
                 break;
 
             case 'array':
-                body += `{let l=b[p]|(b[p+1]<<8),a=new Array(l);p+=2;`;
-                body += `for(let i=0;i<l;i++){let e=_dte(b,p);a[i]=_dec(b,p,e-p);p=e;}f${i}=a;}\n`;
+                body += `{let _f=b[p],l=b[p+1]|(b[p+2]<<8),a=new Array(l);p+=3;`;
+                // flag=0: generic tagged elements
+                body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p);a[i]=_dec(b,p,e-p);p=e;}}`;
+                // flag=1: packed uint8
+                body += `else if(_f===1){for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
+                // flag=2: packed int32
+                body += `else if(_f===2){for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
+                // flag=3: packed float64
+                body += `else{for(let i=0;i<l;i++){a[i]=_rF64.call(b,p);p+=8;}}`;
+                body += `f${i}=a;}\n`;
                 needsTagEnd = true;
                 break;
 
