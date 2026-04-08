@@ -470,12 +470,21 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                     }
                 }
 
+                let sh = schema.hash;
+
                 buf[pos] = 246;
-                writeU32.call(buf, schema.hash, pos + 1);
+                buf[pos + 1] = sh;
+                buf[pos + 2] = (sh >>> 8);
+                buf[pos + 3] = (sh >>> 16);
+                buf[pos + 4] = (sh >>> 24);
 
-                let end = schema.encodeFn!(obj, buf, pos + 9);
+                let end = schema.encodeFn!(obj, buf, pos + 9),
+                    slen = end - pos - 9;
 
-                writeU32.call(buf, end - pos - 9, pos + 5);
+                buf[pos + 5] = slen;
+                buf[pos + 6] = (slen >>> 8);
+                buf[pos + 7] = (slen >>> 16);
+                buf[pos + 8] = (slen >>> 24);
 
                 return end;
             }
