@@ -515,8 +515,13 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                 lastEncodeSchema = schema;
                 lastEncodeFields = schema.fields;
 
+                let h = schema.hash;
+
                 encodeBuf[0] = 246;
-                writeU32.call(encodeBuf, schema.hash, 1);
+                encodeBuf[1] = h;
+                encodeBuf[2] = (h >>> 8);
+                encodeBuf[3] = (h >>> 16);
+                encodeBuf[4] = (h >>> 24);
 
                 let end = schema.encodeFn(obj, encodeBuf, 9);
 
@@ -524,11 +529,19 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                 while (end > encodeBuf.length) {
                     encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
                     encodeBuf[0] = 246;
-                    writeU32.call(encodeBuf, schema.hash, 1);
+                    encodeBuf[1] = h;
+                    encodeBuf[2] = (h >>> 8);
+                    encodeBuf[3] = (h >>> 16);
+                    encodeBuf[4] = (h >>> 24);
                     end = schema.encodeFn(obj, encodeBuf, 9);
                 }
 
-                writeU32.call(encodeBuf, end - 9, 5);
+                let len = end - 9;
+
+                encodeBuf[5] = len;
+                encodeBuf[6] = (len >>> 8);
+                encodeBuf[7] = (len >>> 16);
+                encodeBuf[8] = (len >>> 24);
 
                 let sub = encodeBuf.subarray(0, end);
 
