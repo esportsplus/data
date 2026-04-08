@@ -388,8 +388,13 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                 return offset + 5 + bLen;
             }
             case 7: {
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
-                    p = offset + 5;
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (count > MAX_ARRAY_COUNT) {
+                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                }
+
+                let p = offset + 5;
 
                 for (let i = 0; i < count; i++) {
                     p = decodeTagEnd(buf, p, depth + 1);
