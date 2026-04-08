@@ -25,20 +25,26 @@ function readShortStrAscii(buf: Uint8Array, start: number, len: number): string 
         }
     }
 
+    let s = start;
+
     switch (len) {
         case 0: return '';
-        case 1: return String.fromCharCode(buf[start]!);
-        case 2: return String.fromCharCode(buf[start]!, buf[start + 1]!);
-        case 3: return String.fromCharCode(buf[start]!, buf[start + 1]!, buf[start + 2]!);
-        case 4: return String.fromCharCode(buf[start]!, buf[start + 1]!, buf[start + 2]!, buf[start + 3]!);
+        case 1: return String.fromCharCode(buf[s]!);
+        case 2: return String.fromCharCode(buf[s]!, buf[s + 1]!);
+        case 3: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!);
+        case 4: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!);
+        case 5: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!);
+        case 6: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!);
+        case 7: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!, buf[s + 6]!);
+        case 8: return String.fromCharCode(buf[s]!, buf[s + 1]!, buf[s + 2]!, buf[s + 3]!, buf[s + 4]!, buf[s + 5]!, buf[s + 6]!, buf[s + 7]!);
         default: {
-            let s = '';
+            let codes = new Array(len);
 
-            for (let i = start, e = start + len; i < e; i++) {
-                s += String.fromCharCode(buf[i]!);
+            for (let i = 0; i < len; i++) {
+                codes[i] = buf[s + i]!;
             }
 
-            return s;
+            return String.fromCharCode.apply(null, codes);
         }
     }
 }
@@ -98,7 +104,7 @@ function getDv(buf: Uint8Array): DataView {
     let ab = buf.buffer as ArrayBuffer,
         dv = dvCache.get(ab);
 
-    if (!dv || dv.byteLength !== ab.byteLength) {
+    if (!dv) {
         dv = new DataView(ab);
         dvCache.set(ab, dv);
     }
@@ -150,11 +156,9 @@ let writeU32: ((value: number, off: number) => number) = isNode
 let writeUtf8: ((str: string, off: number, len: number) => number) = isNode
     ? (Buffer.prototype as unknown as BufferInternal).utf8Write
     : function (this: Uint8Array, str: string, off: number, _len: number) {
-        let encoded = textEncoder.encode(str);
+        let result = textEncoder.encodeInto(str, this.subarray(off));
 
-        this.set(encoded, off);
-
-        return encoded.length;
+        return result.written!;
     };
 
 
@@ -244,13 +248,8 @@ export {
     readBI64,
     readF64,
     readStr,
-    readU16,
-    readU32,
-    readUtf8,
     writeBI64,
     writeF64,
-    writeU16,
-    writeU32,
     writeUtf8,
 };
 

@@ -2,7 +2,7 @@
 // JIT-compiled per-shape encode/decode, zero per-field branching at runtime
 
 import { compileSchema } from './codegen';
-import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readStr, readU16, readU32, writeBI64, writeF64, writeU16, writeU32, writeUtf8 } from './platform';
+import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readStr, writeBI64, writeF64, writeUtf8 } from './platform';
 
 import type { FieldDef, Schema, SbcHelpers } from './codegen';
 
@@ -120,7 +120,23 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         existing = registry.schemas.get(hash);
 
     if (existing) {
-        return existing;
+        let ef = existing.fields,
+            match = ef.length === keys.length;
+
+        if (match) {
+            for (let i = 0, n = keys.length; i < n; i++) {
+                if (ef[i]!.name !== keys[i] || ef[i]!.type !== types[i]) {
+                    match = false;
+                    break;
+                }
+            }
+        }
+
+        if (match) {
+            return existing;
+        }
+
+        throw new Error('Codec2: schema hash collision — two distinct schemas share hash ' + hash);
     }
 
     let fields: FieldDef[] = new Array(keys.length),
@@ -140,7 +156,6 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
     }
 
     let schema: Schema = {
-        computeSize: null,
         decodeFn: null,
         encodeFn: null,
         fields,
@@ -195,13 +210,17 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
     }
 
     let helpers: SbcHelpers = {
-        decodeSbc: decodeSbc,
-        decodeTagEnd: decodeTagEnd,
-        encodeSbc: encodeSbc,
+        decodeSbc,
+        decodeTagEnd,
+        encodeSbc,
     };
 
 
-    function decodeSbc(buf: Uint8Array, offset: number, len: number): unknown {
+    function decodeSbc(buf: Uint8Array, offset: number, len: number, depth: number): unknown {
+        if (depth > 64) {
+            throw new Error('Codec2: max decode depth exceeded');
+        }
+
         if (len === 0) {
             return undefined;
         }
@@ -218,9 +237,9 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                 return readF64.call(buf, offset + 1);
 
             case 5: {
-                let sLen = buf[offset + 1]! | (buf[offset + 2]! << 8);
+                let sLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
-                return readStr(buf, offset + 3, sLen);
+                return readStr(buf, offset + 5, sLen);
             }
 
             case 6: {
@@ -234,14 +253,14 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             }
 
             case 7: {
-                let count = buf[offset + 1]! | (buf[offset + 2]! << 8),
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
                     arr = new Array(count),
-                    p = offset + 3;
+                    p = offset + 5;
 
                 for (let i = 0; i < count; i++) {
-                    let end = decodeTagEnd(buf, p);
+                    let end = decodeTagEnd(buf, p, depth + 1);
 
-                    arr[i] = decodeSbc(buf, p, end - p);
+                    arr[i] = decodeSbc(buf, p, end - p, depth + 1);
                     p = end;
                 }
 
@@ -256,7 +275,7 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                     return null;
                 }
 
-                return schema.decodeFn(buf, offset + 9);
+                return schema.decodeFn(buf, offset + 9, depth + 1);
             }
 
             case 9:
@@ -270,9 +289,9 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
             case 12: {
                 // packed uint8 array
-                let count = buf[offset + 1]! | (buf[offset + 2]! << 8),
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
                     arr = new Array(count),
-                    p = offset + 3;
+                    p = offset + 5;
 
                 for (let i = 0; i < count; i++) {
                     arr[i] = buf[p + i]!;
@@ -283,9 +302,9 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
             case 13: {
                 // packed float64 array
-                let count = buf[offset + 1]! | (buf[offset + 2]! << 8),
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
                     arr = new Array(count),
-                    p = offset + 3;
+                    p = offset + 5;
 
                 for (let i = 0; i < count; i++) {
                     arr[i] = readF64.call(buf, p);
@@ -297,9 +316,9 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
             case 14: {
                 // packed int32 array
-                let count = buf[offset + 1]! | (buf[offset + 2]! << 8),
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
                     arr = new Array(count),
-                    p = offset + 3;
+                    p = offset + 5;
 
                 for (let i = 0; i < count; i++) {
                     arr[i] = (buf[p]! | (buf[p + 1]! << 8) | (buf[p + 2]! << 16) | (buf[p + 3]! << 24)) | 0;
@@ -310,12 +329,16 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             }
 
             default:
-                return null;
+                throw new Error('Codec2: unknown tag ' + tag + ' at offset ' + offset);
         }
     }
 
 
-    function decodeTagEnd(buf: Uint8Array, offset: number): number {
+    function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
+        if (depth > 64) {
+            throw new Error('Codec2: max decode depth exceeded');
+        }
+
         let tag = buf[offset]!;
 
         switch (tag) {
@@ -326,19 +349,19 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             case 4: case 9: case 10:
                 return offset + 9;
             case 5: {
-                let sLen = buf[offset + 1]! | (buf[offset + 2]! << 8);
-                return offset + 3 + sLen;
+                let sLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+                return offset + 5 + sLen;
             }
             case 6: {
                 let bLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
                 return offset + 5 + bLen;
             }
             case 7: {
-                let count = buf[offset + 1]! | (buf[offset + 2]! << 8),
-                    p = offset + 3;
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
+                    p = offset + 5;
 
                 for (let i = 0; i < count; i++) {
-                    p = decodeTagEnd(buf, p);
+                    p = decodeTagEnd(buf, p, depth + 1);
                 }
 
                 return p;
@@ -350,19 +373,19 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             case 11:
                 return offset + 5;
             case 12: {
-                let count = buf[offset + 1]! | (buf[offset + 2]! << 8);
-                return offset + 3 + count;
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+                return offset + 5 + count;
             }
             case 13: {
-                let count = buf[offset + 1]! | (buf[offset + 2]! << 8);
-                return offset + 3 + count * 8;
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+                return offset + 5 + count * 8;
             }
             case 14: {
-                let count = buf[offset + 1]! | (buf[offset + 2]! << 8);
-                return offset + 3 + count * 4;
+                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+                return offset + 5 + count * 4;
             }
             default:
-                return offset + 1;
+                throw new Error('Codec2: unknown tag ' + tag + ' at offset ' + offset);
         }
     }
 
@@ -412,8 +435,10 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                 buf[pos] = 5;
                 buf[pos + 1] = sLen & 0xFF;
                 buf[pos + 2] = (sLen >>> 8) & 0xFF;
-                writeUtf8.call(buf, value, pos + 3, sLen);
-                return pos + 3 + sLen;
+                buf[pos + 3] = (sLen >>> 16) & 0xFF;
+                buf[pos + 4] = (sLen >>> 24) & 0xFF;
+                writeUtf8.call(buf, value, pos + 5, sLen);
+                return pos + 5 + sLen;
             }
 
             case 'object': {
@@ -454,11 +479,13 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                                 break;
                             }
 
-                            if (!Number.isInteger(v) || v < 0 || v > 255) {
+                            let isInt = Number.isInteger(v);
+
+                            if (!isInt || v < 0 || v > 255) {
                                 allUint8 = false;
                             }
 
-                            if (!Number.isInteger(v) || v < -2147483648 || v > 2147483647) {
+                            if (!isInt || v < -2147483648 || v > 2147483647) {
                                 allInt32 = false;
                             }
                         }
@@ -467,8 +494,10 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                             buf[pos] = 12;
                             buf[pos + 1] = len & 0xFF;
                             buf[pos + 2] = (len >>> 8) & 0xFF;
+                            buf[pos + 3] = (len >>> 16) & 0xFF;
+                            buf[pos + 4] = (len >>> 24) & 0xFF;
 
-                            let p = pos + 3;
+                            let p = pos + 5;
 
                             for (let i = 0; i < len; i++) {
                                 buf[p + i] = value[i];
@@ -481,8 +510,10 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                             buf[pos] = 14;
                             buf[pos + 1] = len & 0xFF;
                             buf[pos + 2] = (len >>> 8) & 0xFF;
+                            buf[pos + 3] = (len >>> 16) & 0xFF;
+                            buf[pos + 4] = (len >>> 24) & 0xFF;
 
-                            let p = pos + 3;
+                            let p = pos + 5;
 
                             for (let i = 0; i < len; i++) {
                                 let v = value[i];
@@ -501,8 +532,10 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                             buf[pos] = 13;
                             buf[pos + 1] = len & 0xFF;
                             buf[pos + 2] = (len >>> 8) & 0xFF;
+                            buf[pos + 3] = (len >>> 16) & 0xFF;
+                            buf[pos + 4] = (len >>> 24) & 0xFF;
 
-                            let p = pos + 3;
+                            let p = pos + 5;
 
                             for (let i = 0; i < len; i++) {
                                 writeF64.call(buf, value[i], p);
@@ -516,8 +549,10 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                     buf[pos] = 7;
                     buf[pos + 1] = len & 0xFF;
                     buf[pos + 2] = (len >>> 8) & 0xFF;
+                    buf[pos + 3] = (len >>> 16) & 0xFF;
+                    buf[pos + 4] = (len >>> 24) & 0xFF;
 
-                    let p = pos + 3;
+                    let p = pos + 5;
 
                     for (let i = 0; i < len; i++) {
                         p = encodeSbc(value[i], buf, p);
@@ -570,7 +605,7 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             return cached;
         }
 
-        // Fallback: ring buffer cache
+        // Fallback: ring buffer cache — match on key names AND value types
         let keyCount = 0;
 
         for (let _ in obj) {
@@ -585,11 +620,13 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             }
 
             let fields = cacheFields[i]!,
-                n = fields.length,
-                match = true;
+                match = true,
+                n = fields.length;
 
             for (let j = 0; j < n; j++) {
-                if (!(fields[j]!.name in obj)) {
+                let f = fields[j]!;
+
+                if (!(f.name in obj) || inferType(obj[f.name]) !== f.type) {
                     match = false;
                     break;
                 }
@@ -611,14 +648,17 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                 schema = registry.schemas.get(hash);
 
             if (schema && schema.decodeFn) {
-                return schema.decodeFn(buffer, 9);
+                return schema.decodeFn(buffer, 9, 0);
             }
         }
 
-        return decodeSbc(buffer, 0, length ?? buffer.length);
+        return decodeSbc(buffer, 0, length ?? buffer.length, 0);
     }
 
 
+    // view=true returns a subarray into the shared encode buffer (zero-copy).
+    // BORROW SEMANTICS: the returned slice is invalidated by the next encode() call.
+    // Callers must consume the view synchronously or copy it before re-encoding.
     function encode(value: unknown, view?: boolean): Uint8Array {
         // Fast path: plain object
         if (typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof Uint8Array)) {
