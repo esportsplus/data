@@ -596,6 +596,16 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
 
     function decode(buffer: Uint8Array, length?: number): unknown {
+        // Fast path: tag 8 (object) — most common top-level value
+        if (buffer[0] === 8) {
+            let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
+                schema = registry.schemas.get(hash);
+
+            if (schema && schema.decodeFn) {
+                return schema.decodeFn(buffer, 9);
+            }
+        }
+
         return decodeSbc(buffer, 0, length ?? buffer.length);
     }
 
