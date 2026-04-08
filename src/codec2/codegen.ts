@@ -5,12 +5,21 @@ import { codegenDriver, readVarint, readZigzag, writeVarint, writeZigzag } from 
 import type { CodegenDriver } from './platform';
 
 
+interface ParsedType {
+    base: string;
+    elementType?: ParsedType;
+    hash?: number;
+}
+
 interface FieldDef {
+    elementType?: ParsedType;
     fixedSize: number;
     name: string;
     nullable: boolean;
     nullIndex: number;
     offset: number;
+    rawType: string;
+    refHash?: number;
     type: string;
 }
 
@@ -736,4 +745,4 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
 
 
 export { compileSchema };
-export type { FieldDef, Schema, SbcHelpers };
+export type { FieldDef, ParsedType, Schema, SbcHelpers };

@@ -4,7 +4,7 @@
 import { compileSchema } from './codegen';
 import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readStr, readVarint, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 
-import type { FieldDef, Schema, SbcHelpers } from './codegen';
+import type { FieldDef, ParsedType, Schema, SbcHelpers } from './codegen';
 
 
 type CodecOptions = {
@@ -14,7 +14,7 @@ type CodecOptions = {
 type FieldSpec = {
     name: string;
     nullable?: boolean;
-    type: 'array' | 'bigint' | 'boolean' | 'bytes' | 'date' | 'float64' | 'int8' | 'int16' | 'int32' | 'map' | 'mixed' | 'object' | 'set' | 'string' | 'typedarray' | 'uint8' | 'uint16' | 'uint32';
+    type: string;
 };
 
 type SchemaRegistry = {
@@ -91,6 +91,58 @@ function varintSize(n: number): number {
     }
 
     return 5;
+}
+
+
+let KNOWN_TYPES: Record<string, number> = {
+    array: 1,
+    bigint: 1,
+    boolean: 1,
+    bytes: 1,
+    date: 1,
+    float64: 1,
+    int8: 1,
+    int16: 1,
+    int32: 1,
+    map: 1,
+    mixed: 1,
+    object: 1,
+    set: 1,
+    string: 1,
+    typedarray: 1,
+    uint8: 1,
+    uint16: 1,
+    uint32: 1,
+};
+
+
+function parseFieldType(type: string): ParsedType {
+    if (type.startsWith('array<') && type.endsWith('>')) {
+        let inner = type.slice(6, -1);
+
+        if (!inner) {
+            throw new Error('Codec2: empty array element type');
+        }
+
+        return { base: 'array', elementType: parseFieldType(inner) };
+    }
+
+    if (type.startsWith('object(') && type.endsWith(')')) {
+        let hashStr = type.slice(7, -1),
+            hash = Number(hashStr);
+
+        if (!hashStr || !Number.isFinite(hash) || !Number.isInteger(hash) || hash < 0) {
+            throw new Error('Codec2: invalid object hash: ' + hashStr);
+        }
+
+        return { base: 'object', hash: hash >>> 0 };
+    }
+
+    if (!(type in KNOWN_TYPES)) {
+        throw new Error('Codec2: unknown field type: ' + type);
+    }
+
+    return { base: type };
 }
 
 
@@ -171,7 +223,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
 
         if (match) {
             for (let i = 0, n = keys.length; i < n; i++) {
-                if (ef[i]!.name !== keys[i] || ef[i]!.type !== types[i]) {
+                if (ef[i]!.name !== keys[i] || ef[i]!.rawType !== types[i]) {
                     match = false;
                     break;
                 }
@@ -193,7 +245,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         let fs = FIELD_SIZES[types[i]!] ?? 0,
             name = keys[i]!;
 
-        fields[i] = { fixedSize: fs, name, nullable: false, nullIndex: -1, offset, type: types[i]! };
+        fields[i] = { fixedSize: fs, name, nullable: false, nullIndex: -1, offset, rawType: types[i]!, type: types[i]! };
 
         if (fs > 0) {
             fixedSize += fs;
@@ -1220,11 +1272,13 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
             offset = 0;
 
         for (let i = 0, n = sorted.length; i < n; i++) {
-            let fs = FIELD_SIZES[types[i]!] ?? 0,
+            let parsed = parseFieldType(types[i]!),
+                baseType = parsed.base,
+                fs = FIELD_SIZES[baseType] ?? 0,
                 isNullable = sorted[i]!.nullable === true,
                 nullIdx = isNullable ? nullableCount++ : -1;
 
-            fieldDefs[i] = { fixedSize: fs, name: keys[i]!, nullable: isNullable, nullIndex: nullIdx, offset, type: types[i]! };
+            fieldDefs[i] = { elementType: parsed.elementType, fixedSize: fs, name: keys[i]!, nullable: isNullable, nullIndex: nullIdx, offset, rawType: types[i]!, refHash: parsed.hash, type: baseType };
 
             if (fs > 0) {
                 fixedSize += fs;
@@ -1599,7 +1653,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                 fields.push({
                     name,
                     nullable: !!(flags & 1),
-                    type: type as FieldSpec['type'],
+                    type,
                 });
             }
 
@@ -1627,7 +1681,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
             for (let j = 0, m = s.fields.length; j < m; j++) {
                 let f = s.fields[j]!;
 
-                size += 2 + f.name.length + 2 + f.type.length + 1;
+                size += 2 + f.name.length + 2 + f.rawType.length + 1;
             }
         }
 
@@ -1670,16 +1724,16 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
 
                 pos += f.name.length;
 
-                // Write type
-                buf[pos] = f.type.length & 0xFF;
-                buf[pos + 1] = (f.type.length >>> 8) & 0xFF;
+                // Write type (full structural type string)
+                buf[pos] = f.rawType.length & 0xFF;
+                buf[pos + 1] = (f.rawType.length >>> 8) & 0xFF;
                 pos += 2;
 
-                for (let k = 0, kn = f.type.length; k < kn; k++) {
-                    buf[pos + k] = f.type.charCodeAt(k);
+                for (let k = 0, kn = f.rawType.length; k < kn; k++) {
+                    buf[pos + k] = f.rawType.charCodeAt(k);
                 }
 
-                pos += f.type.length;
+                pos += f.rawType.length;
 
                 // Write flags
                 buf[pos] = f.nullable ? 1 : 0;
