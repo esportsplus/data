@@ -477,9 +477,38 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
             }
 
             case 'string': {
-                let sLen = byteLen(value);
+                let sl = (value as string).length;
 
                 buf[pos] = 5;
+
+                // Single-pass ASCII fast path for short strings
+                if (sl < 17) {
+                    buf[pos + 1] = sl;
+                    buf[pos + 2] = 0;
+                    buf[pos + 3] = 0;
+                    buf[pos + 4] = 0;
+
+                    let ok = true,
+                        p = pos + 5;
+
+                    for (let k = 0; k < sl; k++) {
+                        let c = (value as string).charCodeAt(k);
+
+                        if (c > 127) {
+                            ok = false;
+                            break;
+                        }
+
+                        buf[p + k] = c;
+                    }
+
+                    if (ok) {
+                        return p + sl;
+                    }
+                }
+
+                let sLen = byteLen(value);
+
                 buf[pos + 1] = sLen & 0xFF;
                 buf[pos + 2] = (sLen >>> 8) & 0xFF;
                 buf[pos + 3] = (sLen >>> 16) & 0xFF;
