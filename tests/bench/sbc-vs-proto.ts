@@ -1,6 +1,7 @@
 import { afterAll, bench, describe } from 'vitest';
-import { createCodec as createProtoCodec } from '../tests/utils';
-import { createCodec as createSbcCodec } from '../src/sbc';
+import { pack, unpack } from 'msgpackr';
+import { createCodec as createProtoCodec } from '../utils';
+import { createCodec as createSbcCodec } from '../../src/sbc';
 
 
 // Proto codec setup (compile-time code generation)
@@ -63,6 +64,15 @@ let sbcArrayEncoded = sbcCodec.encode(arrayData),
     sbcSimpleEncoded = sbcCodec.encode(simpleData);
 
 
+// Pre-encode for msgpackr decode benchmarks
+
+let msgArrayEncoded = pack(arrayData),
+    msgLargeEncoded = pack(largeData),
+    msgMultiEncoded = pack(multiData),
+    msgNestedEncoded = pack(nestedData),
+    msgSimpleEncoded = pack(simpleData);
+
+
 // Extra warmup — run each path 2000 times to stabilize JIT
 
 for (let i = 0; i < 2000; i++) {
@@ -86,17 +96,27 @@ for (let i = 0; i < 2000; i++) {
     sbcCodec.decode(sbcArrayEncoded);
     sbcCodec.encode(largeData);
     sbcCodec.decode(sbcLargeEncoded);
+    pack(simpleData);
+    unpack(msgSimpleEncoded);
+    pack(multiData);
+    unpack(msgMultiEncoded);
+    pack(nestedData);
+    unpack(msgNestedEncoded);
+    pack(arrayData);
+    unpack(msgArrayEncoded);
+    pack(largeData);
+    unpack(msgLargeEncoded);
 }
 
 
 // Wire sizes
 
 console.log('\n--- Wire Size Comparison (bytes) ---');
-console.log(`Simple   { name }              — Proto: ${protoSimpleEncoded.length}  SBC: ${sbcSimpleEncoded.length}`);
-console.log(`Multi    { active, age, name }  — Proto: ${protoMultiEncoded.length}  SBC: ${sbcMultiEncoded.length}`);
-console.log(`Nested   { address, name }      — Proto: ${protoNestedEncoded.length}  SBC: ${sbcNestedEncoded.length}`);
-console.log(`Array    { items: number[100] } — Proto: ${protoArrayEncoded.length}  SBC: ${sbcArrayEncoded.length}`);
-console.log(`Large    { 6 fields }           — Proto: ${protoLargeEncoded.length}  SBC: ${sbcLargeEncoded.length}`);
+console.log(`Simple   { name }              — Proto: ${protoSimpleEncoded.length}  SBC: ${sbcSimpleEncoded.length}  MsgPack: ${msgSimpleEncoded.length}`);
+console.log(`Multi    { active, age, name }  — Proto: ${protoMultiEncoded.length}  SBC: ${sbcMultiEncoded.length}  MsgPack: ${msgMultiEncoded.length}`);
+console.log(`Nested   { address, name }      — Proto: ${protoNestedEncoded.length}  SBC: ${sbcNestedEncoded.length}  MsgPack: ${msgNestedEncoded.length}`);
+console.log(`Array    { items: number[100] } — Proto: ${protoArrayEncoded.length}  SBC: ${sbcArrayEncoded.length}  MsgPack: ${msgArrayEncoded.length}`);
+console.log(`Large    { 6 fields }           — Proto: ${protoLargeEncoded.length}  SBC: ${sbcLargeEncoded.length}  MsgPack: ${msgLargeEncoded.length}`);
 console.log('');
 
 
@@ -144,6 +164,17 @@ describe('SBC Encode', () => {
     bench('large { 6 fields }', () => { sbcCodec.encode(largeData); }, opts);
 });
 
+// === MSGPACK ENCODE (all scenarios) ===
+
+describe('MsgPack Encode', () => {
+    afterAll(() => cooldown());
+    bench('simple { name }', () => { pack(simpleData); }, opts);
+    bench('multi { active, age, name }', () => { pack(multiData); }, opts);
+    bench('nested { address, name }', () => { pack(nestedData); }, opts);
+    bench('array { items[100] }', () => { pack(arrayData); }, opts);
+    bench('large { 6 fields }', () => { pack(largeData); }, opts);
+});
+
 // === PROTO DECODE (all scenarios) ===
 
 describe('Proto Decode', () => {
@@ -158,9 +189,20 @@ describe('Proto Decode', () => {
 // === SBC DECODE (all scenarios) ===
 
 describe('SBC Decode', () => {
+    afterAll(() => cooldown());
     bench('simple { name }', () => { sbcCodec.decode(sbcSimpleEncoded); }, opts);
     bench('multi { active, age, name }', () => { sbcCodec.decode(sbcMultiEncoded); }, opts);
     bench('nested { address, name }', () => { sbcCodec.decode(sbcNestedEncoded); }, opts);
     bench('array { items[100] }', () => { sbcCodec.decode(sbcArrayEncoded); }, opts);
     bench('large { 6 fields }', () => { sbcCodec.decode(sbcLargeEncoded); }, opts);
+});
+
+// === MSGPACK DECODE (all scenarios) ===
+
+describe('MsgPack Decode', () => {
+    bench('simple { name }', () => { unpack(msgSimpleEncoded); }, opts);
+    bench('multi { active, age, name }', () => { unpack(msgMultiEncoded); }, opts);
+    bench('nested { address, name }', () => { unpack(msgNestedEncoded); }, opts);
+    bench('array { items[100] }', () => { unpack(msgArrayEncoded); }, opts);
+    bench('large { 6 fields }', () => { unpack(msgLargeEncoded); }, opts);
 });

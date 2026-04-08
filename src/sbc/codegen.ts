@@ -606,8 +606,10 @@ function compileFieldExtractors(schema: Schema): void {
     outer: for (let vi = 0, vn = varFields.length; vi < vn; vi++) {
         let target = varFields[vi]!;
 
-        // Only support simple string/bytes extraction for now (most common filter fields)
-        if (typeof target.type !== 'string' || (target.type !== 'string' && target.type !== 'bytes')) {
+        // Support string, bytes, nullable<string>, nullable<bytes> extraction
+        let targetInner = extractableInner(target.type);
+
+        if (!targetInner) {
             continue;
         }
 
@@ -624,21 +626,43 @@ function compileFieldExtractors(schema: Schema): void {
                 lines.push('{let s=' + driver.readU32('vp') + ';if(vp+4+s>bl)return undefined;vp+=4+s}');
             }
             else if (typeof prev.type === 'object') {
-                // Nested object/array: read u32 length prefix and skip
                 if (prev.type.kind === 'object') {
                     lines.push('if(vp+4>bl)return undefined');
                     lines.push('{let s=' + driver.readU32('vp') + ';if(vp+4+s>bl)return undefined;vp+=4+s}');
                 }
-                else if (prev.type.kind === 'array' || prev.type.kind === 'nullable') {
-                    continue outer; // Can't cheaply skip arrays/nullables without full parse
+                else if (prev.type.kind === 'nullable' && prev._nullIndex !== undefined) {
+                    // Nullable with u32-prefixed inner: check null bit, skip data only if non-null
+                    let inner = prev.type.inner;
+
+                    if (
+                        (typeof inner === 'string' && (inner === 'string' || inner === 'bytes'))
+                        || (typeof inner === 'object' && inner.kind === 'object')
+                    ) {
+                        let byteOff = 9 + (prev._nullIndex >> 3),
+                            bitMask = 1 << (prev._nullIndex & 7);
+
+                        lines.push('if(buf[' + byteOff + ']&' + bitMask + '){');
+                        lines.push('if(vp+4>bl)return undefined');
+                        lines.push('{let s=' + driver.readU32('vp') + ';if(vp+4+s>bl)return undefined;vp+=4+s}');
+                        lines.push('}');
+                    }
+                    else {
+                        continue outer;
+                    }
+                }
+                else if (prev.type.kind === 'array') {
+                    continue outer;
+                }
+                else {
+                    continue outer;
                 }
             }
             else {
-                continue outer; // Unknown type, bail
+                continue outer;
             }
         }
 
-        if (target.type === 'string') {
+        if (targetInner === 'string') {
             lines.push('if(vp+4>bl)return undefined');
             lines.push('let l=' + driver.readU32('vp'));
             lines.push('vp+=4');
@@ -1213,6 +1237,18 @@ function emitVarFields(lines: string[], schema: Schema, vp: string, dir: 'decode
     }
 
     return hasVar;
+}
+
+function extractableInner(type: FieldType): string | null {
+    if (typeof type === 'string') {
+        return (type === 'string' || type === 'bytes') ? type : null;
+    }
+
+    if (typeof type === 'object' && type.kind === 'nullable' && typeof type.inner === 'string') {
+        return (type.inner === 'string' || type.inner === 'bytes') ? type.inner : null;
+    }
+
+    return null;
 }
 
 function finalizeBody(lines: string[]): string {

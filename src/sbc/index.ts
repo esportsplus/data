@@ -23,7 +23,8 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
     let cachedCtorSchema = new Map<Function, Schema>(),
         internDecode = internPool?.decode,
         internEncode = internPool?.encode,
-        internFieldSet = internPool?.fields;
+        internFieldSet = internPool?.fields,
+        pendingSchema: Schema | null = null;
 
     // Wire helpers into schema store so compiled decoders can call decodeSbc/encodeSbc
     if (schemaStore?._setHelpers) {
@@ -399,11 +400,14 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
                 // Plain object — hash-referenced (tag 246)
                 // Wire: [246][u32 hash][u32 len][field_values...]
                 let obj = value as Record<string, unknown>,
-                    keysOut: string[][] = [],
-                    schema = (obj.constructor !== Object && obj.constructor !== undefined && cachedCtorSchema.get(obj.constructor as Function)) || lookupSchema(obj, registry, keysOut);
+                    schema = pendingSchema
+                        || (obj.constructor !== Object && obj.constructor !== undefined && cachedCtorSchema.get(obj.constructor as Function))
+                        || lookupSchema(obj, registry);
+
+                pendingSchema = null;
 
                 if (!schema) {
-                    schema = inferSchema(obj, registry, keysOut[0]);
+                    schema = inferSchema(obj, registry);
                     registerSchema(schema, registry);
                     compileSchema(schema, registry, sbcHelpers, compression, internFieldSet, internEncode, internDecode, lookupSchema);
 
@@ -477,9 +481,12 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
 
                     writeU32.call(result, end - 9, 5);
 
-                    return result;
+                    return end < size ? result.subarray(0, end) : result;
                 }
             }
+
+            // Cache schema for encodeSbc to avoid double lookup on plain objects
+            pendingSchema = schema;
         }
 
         // Fast path: fixed-size primitives — encode directly, no scratch buffer needed
@@ -533,6 +540,8 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
 
         // Slow path: variable-length types, nested objects, compressed, unknown schema
         let end = encodeSbc(value, encodeBuf, 0);
+
+        pendingSchema = null;
 
         while (end > encodeBuf.length) {
             encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
@@ -648,5 +657,9 @@ const createCodec = (schemaStore?: SchemaStoreInterface, options?: { compression
 export { createCodec };
 export { buildSchema, compileSchema, validateFieldTypeString } from './codegen';
 export { createInternPool, createRegistry, createSchemaStore, decodeFieldDefs, deserializeRegistry, inferFieldType, inferSchema, lookupSchema, parseFieldType, registerSchema, resolveSchema, serializeFieldType, serializeRegistry } from './registry';
+export { buildComputeSize as buildSafeComputeSize, buildDecoder as buildSafeDecoder, buildEncoder as buildSafeEncoder, buildFieldExtractors as buildSafeFieldExtractors, compileSafeSchema, createSafeCodec, deserializeSchema, serializeSchema } from './safe';
 
 export type { ArrayFieldType, FieldDef, FieldType, InternDb, InternPool, NullableFieldType, ObjectFieldType, Schema, SchemaRegistry, SchemaStoreInterface } from './platform';
+export { buildDecoderV2 as buildSafeDecoderV2, buildEncoderV2 as buildSafeEncoderV2, buildFieldExtractorsV2 as buildSafeFieldExtractorsV2, compileSafeSchemaV2, createSafeCodecV2, deserializeSchemaV2, serializeSchemaV2 } from './safe-v2';
+
+export type { SerializedSchema } from './safe';
