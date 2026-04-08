@@ -1774,4 +1774,118 @@ describe('Codec2', () => {
             expect(addr.city).toBe('NYC');
         });
     });
+
+
+    // === COMPUTE SIZE ===
+
+    describe('computeSize', () => {
+        it('null', () => {
+            expect(codec.computeSize(null)).toBe(1);
+        });
+
+        it('undefined', () => {
+            expect(codec.computeSize(undefined)).toBe(1);
+        });
+
+        it('boolean', () => {
+            expect(codec.computeSize(true)).toBe(1);
+        });
+
+        it('uint8 (0)', () => {
+            expect(codec.computeSize(0)).toBe(2);
+        });
+
+        it('uint8 (255)', () => {
+            expect(codec.computeSize(255)).toBe(2);
+        });
+
+        it('int32', () => {
+            expect(codec.computeSize(256)).toBe(5);
+        });
+
+        it('float64', () => {
+            expect(codec.computeSize(3.14)).toBe(9);
+        });
+
+        it('bigint', () => {
+            expect(codec.computeSize(123n)).toBe(9);
+        });
+
+        it('string', () => {
+            expect(codec.computeSize('hello')).toBe(5 + 5);
+        });
+
+        it('empty string', () => {
+            expect(codec.computeSize('')).toBe(5);
+        });
+
+        it('date', () => {
+            expect(codec.computeSize(new Date())).toBe(9);
+        });
+
+        it('Uint8Array', () => {
+            expect(codec.computeSize(new Uint8Array(10))).toBe(15);
+        });
+
+        it('matches actual encoded size for primitives', () => {
+            let values: unknown[] = [null, true, false, 0, 255, 256, -1, 3.14, 'hello', '', 123n, new Date(0), new Uint8Array([1, 2, 3])];
+
+            for (let v of values) {
+                let size = codec.computeSize(v);
+
+                if (size !== -1) {
+                    expect(size).toBe(codec.encode(v).length);
+                }
+            }
+        });
+
+        it('plain object with fixed fields', () => {
+            let obj = { active: true, age: 25, score: -500 },
+                size = codec.computeSize(obj);
+
+            expect(size).toBe(codec.encode(obj).length);
+        });
+
+        it('plain object with string field', () => {
+            let obj = { id: 1, name: 'Alice' },
+                size = codec.computeSize(obj);
+
+            expect(size).toBe(codec.encode(obj).length);
+        });
+
+        it('returns -1 for Map', () => {
+            expect(codec.computeSize(new Map())).toBe(-1);
+        });
+
+        it('returns -1 for Set', () => {
+            expect(codec.computeSize(new Set())).toBe(-1);
+        });
+
+        it('returns -1 for typed array', () => {
+            expect(codec.computeSize(new Float32Array(3))).toBe(-1);
+        });
+
+        it('returns -1 for array', () => {
+            expect(codec.computeSize([1, 2, 3])).toBe(-1);
+        });
+
+        it('returns -1 for object with mixed field', () => {
+            // Null infers as 'mixed' type, which computeSize cannot predict
+            expect(codec.computeSize({ data: null, id: 1 })).toBe(-1);
+        });
+
+        it('object with only fixed and string fields', () => {
+            let withNote = { name: 'Alice', note: 'hello' },
+                sizeWith = codec.computeSize(withNote);
+
+            expect(sizeWith).toBe(codec.encode(withNote).length);
+        });
+
+        it('nested object', () => {
+            let obj = { addr: { city: 'NYC' }, name: 'Alice' },
+                size = codec.computeSize(obj);
+
+            expect(size).toBe(codec.encode(obj).length);
+        });
+    });
 });

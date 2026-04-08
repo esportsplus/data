@@ -230,7 +230,7 @@ function readFixedField(buf: Uint8Array, pos: number, type: string): unknown {
 // 16 = set (u32 count + elements)
 // 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
-const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; encode(value: unknown, view?: boolean): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown } => {
+const createCodec = (): { computeSize(value: unknown): number; decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; encode(value: unknown, view?: boolean): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown } => {
     let encodeBuf = allocBuf(65536),
         registry: SchemaRegistry = {
             nextId: 1,
@@ -1289,7 +1289,104 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
     }
 
 
-    return { decode, decodeAt, defineSchema, encode, extractField };
+    function computeSize(value: unknown): number {
+        if (value === null || value === undefined) {
+            return 1;
+        }
+
+        switch (typeof value) {
+            case 'bigint': return 9;
+            case 'boolean': return 1;
+            case 'number': {
+                if (Number.isInteger(value)) {
+                    if (value >= 0 && value <= 255) {
+                        return 2;
+                    }
+
+                    if (value >= -2147483648 && value <= 2147483647) {
+                        return 5;
+                    }
+                }
+
+                return 9;
+            }
+            case 'string':
+                return 5 + byteLen(value);
+            case 'object': {
+                if (value instanceof Date) {
+                    return 9;
+                }
+
+                if (value instanceof Uint8Array) {
+                    return 5 + value.length;
+                }
+
+                if (value instanceof Map || value instanceof Set) {
+                    return -1;
+                }
+
+                if (ArrayBuffer.isView(value)) {
+                    return -1;
+                }
+
+                if (Array.isArray(value)) {
+                    return -1;
+                }
+
+                let obj = value as Record<string, unknown>,
+                    schema = weakCache.get(obj) ?? matchSchema(obj) ?? null;
+
+                if (!schema) {
+                    schema = inferAndRegister(obj, registry, helpers);
+                    setCache(schema, obj);
+                }
+
+                let fields = schema.fields,
+                    size = 9 + schema.bitmapBytes;
+
+                for (let i = 0, n = fields.length; i < n; i++) {
+                    let f = fields[i]!,
+                        v = obj[f.name];
+
+                    if (f.nullable && v == null) {
+                        continue;
+                    }
+
+                    if (f.fixedSize > 0) {
+                        size += f.fixedSize;
+                        continue;
+                    }
+
+                    switch (f.type) {
+                        case 'bytes':
+                            size += 4 + (v as Uint8Array).length;
+                            break;
+                        case 'object': {
+                            let nested = computeSize(v);
+
+                            if (nested === -1) {
+                                return -1;
+                            }
+
+                            size += nested;
+                            break;
+                        }
+                        case 'string':
+                            size += 4 + byteLen(v as string);
+                            break;
+                        default:
+                            return -1;
+                    }
+                }
+
+                return size;
+            }
+            default: return 1;
+        }
+    }
+
+
+    return { computeSize, decode, decodeAt, defineSchema, encode, extractField };
 };
 
 
