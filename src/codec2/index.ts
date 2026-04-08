@@ -428,13 +428,11 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
 
 
     function matchSchema(obj: Record<string, unknown>): Schema | null {
-        let keyCount = Object.keys(obj).length;
-
         for (let i = 0; i < 4; i++) {
             let schema = cacheSchemas[i],
                 fields = cacheFields[i];
 
-            if (!schema || !fields || fields.length !== keyCount) {
+            if (!schema || !fields) {
                 continue;
             }
 
@@ -442,13 +440,27 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
                 match = true;
 
             for (let j = 0; j < n; j++) {
-                if (obj[fields[j]!.name] === undefined) {
+                if (!(fields[j]!.name in obj)) {
                     match = false;
                     break;
                 }
             }
 
-            if (match) {
+            if (!match) {
+                continue;
+            }
+
+            // Verify no extra keys: count keys and compare
+            let count = 0;
+
+            for (let _ in obj) {
+                if (++count > n) {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match && count === n) {
                 return schema;
             }
         }
