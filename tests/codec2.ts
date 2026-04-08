@@ -1652,4 +1652,126 @@ describe('Codec2', () => {
             expect(result.note).toBe(null);
         });
     });
+
+
+    // === EXTRACT FIELD ===
+
+    describe('extractField', () => {
+        it('extract fixed-size field (O(1))', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'active', type: 'boolean' },
+                { name: 'age', type: 'uint8' },
+                { name: 'score', type: 'int32' },
+            ]);
+
+            let encoded = c.encode({ active: true, age: 30, score: -500 });
+
+            expect(c.extractField(encoded, 'active')).toBe(true);
+            expect(c.extractField(encoded, 'age')).toBe(30);
+            expect(c.extractField(encoded, 'score')).toBe(-500);
+        });
+
+        it('extract string field', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'id', type: 'uint8' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let encoded = c.encode({ id: 1, name: 'Alice' });
+
+            expect(c.extractField(encoded, 'name')).toBe('Alice');
+            expect(c.extractField(encoded, 'id')).toBe(1);
+        });
+
+        it('extract field after variable-size field', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'label', type: 'string' },
+                { name: 'value', type: 'int32' },
+            ]);
+
+            let encoded = c.encode({ label: 'test', value: 42 });
+
+            expect(c.extractField(encoded, 'value')).toBe(42);
+        });
+
+        it('extract nullable field — non-null', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'note', type: 'string', nullable: true },
+            ]);
+
+            let encoded = c.encode({ name: 'Alice', note: 'hello' });
+
+            expect(c.extractField(encoded, 'note')).toBe('hello');
+        });
+
+        it('extract nullable field — null', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'note', type: 'string', nullable: true },
+            ]);
+
+            let encoded = c.encode({ name: 'Alice', note: null });
+
+            expect(c.extractField(encoded, 'note')).toBe(null);
+        });
+
+        it('returns undefined for non-tag-8 buffer', () => {
+            let c = createCodec(),
+                encoded = c.encode('hello');
+
+            expect(c.extractField(encoded, 'anything')).toBeUndefined();
+        });
+
+        it('returns undefined for unknown field', () => {
+            let c = createCodec();
+
+            c.defineSchema([{ name: 'x', type: 'uint8' }]);
+
+            let encoded = c.encode({ x: 1 });
+
+            expect(c.extractField(encoded, 'nonexistent')).toBeUndefined();
+        });
+
+        it('extract bytes field', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'data', type: 'bytes' },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let encoded = c.encode({ data: new Uint8Array([10, 20, 30]), id: 5 });
+            let extracted = c.extractField(encoded, 'data') as Uint8Array;
+
+            expect([...extracted]).toEqual([10, 20, 30]);
+            expect(c.extractField(encoded, 'id')).toBe(5);
+        });
+
+        it('extract from auto-inferred schema', () => {
+            let c = createCodec(),
+                encoded = c.encode({ age: 25, name: 'Bob' });
+
+            expect(c.extractField(encoded, 'name')).toBe('Bob');
+            expect(c.extractField(encoded, 'age')).toBe(25);
+        });
+
+        it('extract nested object field', () => {
+            let c = createCodec(),
+                encoded = c.encode({ addr: { city: 'NYC' }, name: 'Alice' });
+            let addr = c.extractField(encoded, 'addr') as Record<string, string>;
+
+            expect(addr.city).toBe('NYC');
+        });
+    });
 });

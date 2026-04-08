@@ -194,6 +194,23 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
 }
 
 
+function readFixedField(buf: Uint8Array, pos: number, type: string): unknown {
+    switch (type) {
+        case 'bigint': return readBI64.call(buf, pos);
+        case 'boolean': return !!buf[pos]!;
+        case 'date': return new Date(readF64.call(buf, pos));
+        case 'float64': return readF64.call(buf, pos);
+        case 'int8': return (buf[pos]! << 24) >> 24;
+        case 'int16': return ((buf[pos]! | (buf[pos + 1]! << 8)) << 16) >> 16;
+        case 'int32': return (buf[pos]! | (buf[pos + 1]! << 8) | (buf[pos + 2]! << 16) | (buf[pos + 3]! << 24)) | 0;
+        case 'uint8': return buf[pos]!;
+        case 'uint16': return buf[pos]! | (buf[pos + 1]! << 8);
+        case 'uint32': return (buf[pos]! | (buf[pos + 1]! << 8) | (buf[pos + 2]! << 16) | (buf[pos + 3]! << 24)) >>> 0;
+        default: return undefined;
+    }
+}
+
+
 // Tags:
 // 0 = null/undefined
 // 1 = false, 2 = true
@@ -213,7 +230,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
 // 16 = set (u32 count + elements)
 // 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
-const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; encode(value: unknown, view?: boolean): Uint8Array } => {
+const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; encode(value: unknown, view?: boolean): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown } => {
     let encodeBuf = allocBuf(65536),
         registry: SchemaRegistry = {
             nextId: 1,
@@ -1106,7 +1123,173 @@ const createCodec = (): { decode(buffer: Uint8Array, length?: number): unknown; 
     }
 
 
-    return { decode, decodeAt, defineSchema, encode };
+    function extractField(buffer: Uint8Array, fieldName: string): unknown {
+        if (buffer[0] !== 8) {
+            return undefined;
+        }
+
+        let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
+            schema = registry.schemas.get(hash);
+
+        if (!schema) {
+            return undefined;
+        }
+
+        let fields = schema.fields,
+            n = fields.length,
+            targetIdx = -1;
+
+        for (let i = 0; i < n; i++) {
+            if (fields[i]!.name === fieldName) {
+                targetIdx = i;
+                break;
+            }
+        }
+
+        if (targetIdx === -1) {
+            return undefined;
+        }
+
+        let bm = schema.bitmapBytes,
+            target = fields[targetIdx]!;
+
+        // Check nullable bitmap for target field
+        if (target.nullable) {
+            let bitmap = bm === 1 ? buffer[9]! : (buffer[9]! | (buffer[10]! << 8));
+
+            if (!(bitmap & (1 << target.nullIndex))) {
+                return null;
+            }
+        }
+
+        let dataStart = 9 + bm;
+
+        // O(1) path: target is fixed-size and all preceding fields are also fixed-size
+        if (target.fixedSize > 0) {
+            let allPrecedingFixed = true;
+
+            for (let i = 0; i < targetIdx; i++) {
+                if (fields[i]!.fixedSize === 0) {
+                    allPrecedingFixed = false;
+                    break;
+                }
+            }
+
+            if (allPrecedingFixed) {
+                let bitmap = bm > 0 ? (bm === 1 ? buffer[9]! : (buffer[9]! | (buffer[10]! << 8))) : 0,
+                    pos = dataStart;
+
+                for (let i = 0; i < targetIdx; i++) {
+                    let f = fields[i]!;
+
+                    if (f.nullable && !(bitmap & (1 << f.nullIndex))) {
+                        continue;
+                    }
+
+                    pos += f.fixedSize;
+                }
+
+                return readFixedField(buffer, pos, target.type);
+            }
+        }
+
+        // Variable-size scan
+        let bitmap = bm > 0 ? (bm === 1 ? buffer[9]! : (buffer[9]! | (buffer[10]! << 8))) : 0,
+            pos = dataStart;
+
+        for (let i = 0; i < targetIdx; i++) {
+            let f = fields[i]!;
+
+            if (f.nullable && !(bitmap & (1 << f.nullIndex))) {
+                continue;
+            }
+
+            if (f.fixedSize > 0) {
+                pos += f.fixedSize;
+                continue;
+            }
+
+            switch (f.type) {
+                case 'bytes':
+                case 'string': {
+                    let len = (buffer[pos]! | (buffer[pos + 1]! << 8) | (buffer[pos + 2]! << 16) | (buffer[pos + 3]! << 24)) >>> 0;
+
+                    pos += 4 + len;
+                    break;
+                }
+                case 'array': {
+                    let flag = buffer[pos]!,
+                        count = (buffer[pos + 1]! | (buffer[pos + 2]! << 8) | (buffer[pos + 3]! << 16) | (buffer[pos + 4]! << 24)) >>> 0;
+
+                    pos += 5;
+
+                    if (flag === 1) {
+                        pos += count;
+                    }
+                    else if (flag === 2) {
+                        pos += count * 4;
+                    }
+                    else if (flag === 3) {
+                        pos += count * 8;
+                    }
+                    else {
+                        for (let j = 0; j < count; j++) {
+                            pos = decodeTagEnd(buffer, pos, 0);
+                        }
+                    }
+
+                    break;
+                }
+                case 'mixed':
+                case 'object': {
+                    if (buffer[pos] === 8) {
+                        let dLen = (buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0;
+
+                        pos += 9 + dLen;
+                    }
+                    else {
+                        pos = decodeTagEnd(buffer, pos, 0);
+                    }
+
+                    break;
+                }
+                default:
+                    return undefined;
+            }
+        }
+
+        // pos now points to target field data
+        if (target.fixedSize > 0) {
+            return readFixedField(buffer, pos, target.type);
+        }
+
+        switch (target.type) {
+            case 'string': {
+                let len = (buffer[pos]! | (buffer[pos + 1]! << 8) | (buffer[pos + 2]! << 16) | (buffer[pos + 3]! << 24)) >>> 0;
+
+                return readStr(buffer, pos + 4, len);
+            }
+            case 'bytes': {
+                let len = (buffer[pos]! | (buffer[pos + 1]! << 8) | (buffer[pos + 2]! << 16) | (buffer[pos + 3]! << 24)) >>> 0;
+
+                return buffer.slice(pos + 4, pos + 4 + len);
+            }
+            case 'array':
+            case 'mixed':
+            case 'object': {
+                let end = buffer[pos] === 8
+                    ? pos + 9 + ((buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0)
+                    : decodeTagEnd(buffer, pos, 0);
+
+                return decodeSbc(buffer, pos, end - pos, 0);
+            }
+            default:
+                return undefined;
+        }
+    }
+
+
+    return { decode, decodeAt, defineSchema, encode, extractField };
 };
 
 
