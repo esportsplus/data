@@ -12,7 +12,8 @@
 codec2's fresh-object encode path is 0.35x vs MsgPack because every new object reference must:
 1. WeakMap miss (~50ns wasted)
 2. Ring buffer scan (up to 4 slots × `inferType` per field)
-3. Possibly `inferAndRegister` (Object.keys, sort, hash, compile)
+3. `typedSchemas` name-hash lookup (for `defineSchema`-registered typed schemas)
+4. Possibly `inferAndRegister` (Object.keys, sort, hash, compile)
 
 In production (lmdb `put`, WebSocket send, etc.), callers almost always know the schema at the call site — either from a `defineSchema` hash or from the TypeScript type. Passing this knowledge to `encode`/`decode` skips all inference overhead.
 
@@ -44,7 +45,7 @@ let hash = codec.defineSchema([...]);
 codec.encode(obj, { schema: hash });
 ```
 - Look up schema directly: `registry.schemas.get(hash)`
-- If not found → throw `Error('Codec2: unknown schema hash')`
+- If not found → fall through to normal encode path (WeakMap → ring buffer → typedSchemas → inferAndRegister). The value is right there — no reason to throw when we can infer.
 - Skip WeakMap, skip matchSchema, skip inferAndRegister
 - Call `schema.encodeFn(obj, encodeBuf, 9)` directly
 
