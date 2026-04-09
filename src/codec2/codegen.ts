@@ -641,6 +641,30 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
         fields = schema.fields,
         n = fields.length;
 
+    // Collect unique ref hashes for direct-call decode
+    let refHashes: Map<number, string> = new Map(),
+        refIdx = 0;
+
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!;
+
+        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
+            let rs = helpers.registry.get(f.refHash);
+
+            if (rs && rs.decodeFn) {
+                refHashes.set(f.refHash, `_rd${refIdx++}`);
+            }
+        }
+
+        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
+            let rs = helpers.registry.get(f.elementType.hash);
+
+            if (rs && rs.decodeFn) {
+                refHashes.set(f.elementType.hash, `_rd${refIdx++}`);
+            }
+        }
+    }
+
     body += d.preamble('b');
     body += `let p=pos;\n`;
 
@@ -729,18 +753,139 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                 body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}f${i}=b.slice(p,p+l);p+=l;}${nc}\n`;
                 break;
             case 'array':
-                body += `${no}{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
-                body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
-                body += `else if(_f===1){for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
-                body += `else if(_f===2){for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
-                body += `else{for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}}`;
-                body += `f${i}=a;}${nc}\n`;
+                if (f.elementType) {
+                    let et = f.elementType;
+
+                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
+                        et.base === 'uint16' || et.base === 'int16' ||
+                        et.base === 'uint32' || et.base === 'int32' ||
+                        et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
+                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+
+                        switch (et.base) {
+                            case 'boolean':
+                                body += `for(let i=0;i<l;i++){a[i]=!!b[p];p+=1;}`;
+                                break;
+                            case 'uint8':
+                                body += `for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;`;
+                                break;
+                            case 'int8':
+                                body += `for(let i=0;i<l;i++){a[i]=(b[p]<<24)>>24;p+=1;}`;
+                                break;
+                            case 'uint16':
+                                body += `for(let i=0;i<l;i++){a[i]=b[p]|(b[p+1]<<8);p+=2;}`;
+                                break;
+                            case 'int16':
+                                body += `for(let i=0;i<l;i++){a[i]=((b[p]|(b[p+1]<<8))<<16)>>16;p+=2;}`;
+                                break;
+                            case 'uint32':
+                                body += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;}`;
+                                break;
+                            case 'int32':
+                                body += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}`;
+                                break;
+                            case 'float64':
+                                body += `for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}`;
+                                break;
+                            case 'date':
+                                body += `for(let i=0;i<l;i++){a[i]=new Date(${d.readF64('p')});p+=8;}`;
+                                break;
+                            case 'bigint':
+                                body += `for(let i=0;i<l;i++){a[i]=_rBI64.call(b,p);p+=8;}`;
+                                break;
+                        }
+
+                        body += `f${i}=a;}${nc}\n`;
+                    }
+                    else if (et.base === 'string') {
+                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{let _vr=_rv(b,p);sl=_vr[0];p=_vr[1];}a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
+                        body += `f${i}=a;}${nc}\n`;
+                    }
+                    else if (et.base === 'bytes') {
+                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{let _vr=_rv(b,p);bl=_vr[0];p=_vr[1];}a[i]=b.slice(p,p+bl);p+=bl;}`;
+                        body += `f${i}=a;}${nc}\n`;
+                    }
+                    else if (et.base === 'object' && et.hash !== undefined) {
+                        let refParam = refHashes.get(et.hash);
+
+                        if (refParam) {
+                            body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                            body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            body += `let a=new Array(l);`;
+                            body += `for(let i=0;i<l;i++){let _dl=b[p];`;
+                            body += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
+                            body += `else{if(b[p]===8||b[p]===18){`;
+                            body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                            body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                            body += `_s=_reg.get(_h);`;
+                            body += `if(_s&&_s.decodeFn){a[i]=_s.decodeFn(b,p+9,_d+1);}else{a[i]=null;}`;
+                            body += `p+=9+_dl2;}`;
+                            body += `else{let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}}`;
+                            body += `f${i}=a;}${nc}\n`;
+                        }
+                        else {
+                            body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                            body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            body += `let a=new Array(l);`;
+                            body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
+                            body += `f${i}=a;}${nc}\n`;
+                        }
+                    }
+                    else {
+                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+                        body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
+                        body += `f${i}=a;}${nc}\n`;
+                    }
+                }
+                else {
+                    body += `${no}{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
+                    body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
+                    body += `else if(_f===1){for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
+                    body += `else if(_f===2){for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
+                    body += `else{for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}}`;
+                    body += `f${i}=a;}${nc}\n`;
+                }
+
                 break;
             case 'object':
-                body += `${no}{if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h);`;
-                body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
-                body += `p+=9+_dl;}`;
-                body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
+                if (f.refHash !== undefined) {
+                    let rp = refHashes.get(f.refHash);
+
+                    if (rp) {
+                        body += `${no}{let _dl=b[p];`;
+                        body += `if(_dl<128){p+=1;f${i}=${rp}(b,p,_d+1);p+=_dl;}`;
+                        body += `else if(b[p]===8||b[p]===18){`;
+                        body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                        body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                        body += `_s=_reg.get(_h);`;
+                        body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
+                        body += `p+=9+_dl2;}`;
+                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
+                    }
+                    else {
+                        body += `${no}{if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h);`;
+                        body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
+                        body += `p+=9+_dl;}`;
+                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
+                    }
+                }
+                else {
+                    body += `${no}{if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h);`;
+                    body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
+                    body += `p+=9+_dl;}`;
+                    body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
+                }
+
                 break;
             case 'map': case 'set': case 'typedarray': case 'mixed':
                 body += `${no}{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}${nc}\n`;
@@ -757,11 +902,13 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
 
     body += `return _r;\n`;
 
-    let bindArgs = d.decoderBindArgs();
+    let bindArgs = d.decoderBindArgs(),
+        refDecParamNames = [...refHashes.values()],
+        refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
 
     try {
-        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_rz', `return function decodeC(b,pos,_d){${body}}`)
-        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, readZigzag);
+        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_rz', ...refDecParamNames, `return function decodeC(b,pos,_d){${body}}`)
+        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, readZigzag, ...refDecBindValues);
     }
     catch (e) {
         throw new Error('Codec2: compressed decoder compilation failed: ' + (e instanceof Error ? e.message : e));
@@ -773,6 +920,30 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
     let body = `'use strict';\n`,
         fields = schema.fields,
         n = fields.length;
+
+    // Collect unique ref hashes for direct-call encode
+    let refHashes: Map<number, string> = new Map(),
+        refIdx = 0;
+
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!;
+
+        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
+            let rs = helpers.registry.get(f.refHash);
+
+            if (rs && rs.encodeFn) {
+                refHashes.set(f.refHash, `_re${refIdx++}`);
+            }
+        }
+
+        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
+            let rs = helpers.registry.get(f.elementType.hash);
+
+            if (rs && rs.encodeFn) {
+                refHashes.set(f.elementType.hash, `_re${refIdx++}`);
+            }
+        }
+    }
 
     body += d.preamble('b');
     body += `let p=pos;\n`;
@@ -947,12 +1118,83 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
 
-                body += `{let a=${v},l=a.length,_pk=0;`;
-                body += `if(l>0&&typeof a[0]==='number'){let _u8=1,_i32=1,_an=1;for(let i=0;i<l;i++){let v=a[i];if(typeof v!=='number'){_an=0;break;}if(v!==((v&0xFF)>>>0)){_u8=0;}if(v!==(v|0)){_i32=0;}}`;
-                body += `if(_an&&_u8){_pk=1;b[p]=1;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;}`;
-                body += `else if(_an&&_i32){_pk=1;b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
-                body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}}`;
-                body += `if(!_pk){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
+                if (f.elementType) {
+                    let et = f.elementType;
+
+                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
+                        et.base === 'uint16' || et.base === 'int16' ||
+                        et.base === 'uint32' || et.base === 'int32' ||
+                        et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
+                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);`;
+
+                        switch (et.base) {
+                            case 'boolean':
+                                body += `for(let i=0;i<l;i++){b[p]=a[i]?1:0;p+=1;}`;
+                                break;
+                            case 'uint8':
+                                body += `for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;`;
+                                break;
+                            case 'int8':
+                                body += `for(let i=0;i<l;i++){b[p]=a[i]&0xFF;p+=1;}`;
+                                break;
+                            case 'uint16':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
+                                break;
+                            case 'int16':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
+                                break;
+                            case 'uint32':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
+                                break;
+                            case 'int32':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
+                                break;
+                            case 'float64':
+                                body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}`;
+                                break;
+                            case 'date':
+                                body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}`;
+                                break;
+                            case 'bigint':
+                                body += `for(let i=0;i<l;i++){_wBI64.call(b,a[i],p);p+=8;}`;
+                                break;
+                        }
+
+                        body += `}\n`;
+                    }
+                    else if (et.base === 'string') {
+                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let s=a[i],sl=s.length;`;
+                        body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}`;
+                        body += `else{let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}}\n`;
+                    }
+                    else if (et.base === 'bytes') {
+                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let v=a[i],vl=v.length;p=_wv(b,p,vl);b.set(v,p);p+=vl;}}\n`;
+                    }
+                    else if (et.base === 'object' && et.hash !== undefined) {
+                        let refParam = refHashes.get(et.hash);
+
+                        if (refParam) {
+                            body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){`;
+                            body += `let _lp=p;p+=1;let _end=${refParam}(a[i],b,p);let _dl=_end-p;`;
+                            body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
+                            body += `else{p=_encObj(a[i],b,_lp);}}}\n`;
+                        }
+                        else {
+                            body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
+                        }
+                    }
+                    else {
+                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
+                    }
+                }
+                else {
+                    body += `{let a=${v},l=a.length,_pk=0;`;
+                    body += `if(l>0&&typeof a[0]==='number'){let _u8=1,_i32=1,_an=1;for(let i=0;i<l;i++){let v=a[i];if(typeof v!=='number'){_an=0;break;}if(v!==((v&0xFF)>>>0)){_u8=0;}if(v!==(v|0)){_i32=0;}}`;
+                    body += `if(_an&&_u8){_pk=1;b[p]=1;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;}`;
+                    body += `else if(_an&&_i32){_pk=1;b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
+                    body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}}`;
+                    body += `if(!_pk){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
+                }
 
                 if (f.nullable) {
                     body += `}\n`;
@@ -964,7 +1206,21 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
 
-                body += `p=_encObj(${v},b,p);\n`;
+                if (f.refHash !== undefined) {
+                    let rp = refHashes.get(f.refHash);
+
+                    if (rp) {
+                        body += `{let _lp=p;p+=1;let _end=${rp}(${v},b,p);let _dl=_end-p;`;
+                        body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
+                        body += `else{p=_encObj(${v},b,_lp);}}\n`;
+                    }
+                    else {
+                        body += `p=_encObj(${v},b,p);\n`;
+                    }
+                }
+                else {
+                    body += `p=_encObj(${v},b,p);\n`;
+                }
 
                 if (f.nullable) {
                     body += `}\n`;
@@ -1006,12 +1262,14 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
     body += `return p;\n`;
 
     let bindArgs = d.encoderBindArgs(),
-        params = d.encoderParams();
+        params = d.encoderParams(),
+        refEncParamNames = [...refHashes.values()],
+        refEncBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.encodeFn!);
 
     try {
         return (
-            new Function(params, '_enc', '_encObj', '_wv', '_wz', `return function encodeC(o,b,pos){${body}}`)
-        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint, writeZigzag);
+            new Function(params, '_enc', '_encObj', '_wv', '_wz', ...refEncParamNames, `return function encodeC(o,b,pos){${body}}`)
+        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint, writeZigzag, ...refEncBindValues);
     }
     catch (e) {
         throw new Error('Codec2: compressed encoder compilation failed: ' + (e instanceof Error ? e.message : e));
