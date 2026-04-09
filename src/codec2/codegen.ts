@@ -225,6 +225,21 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
                         body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let v=a[i],vl=v.length;p=_wv(b,p,vl);b.set(v,p);p+=vl;}}\n`;
                     }
+                    else if (et.base === 'object' && et.hash !== undefined) {
+                        // Typed array<object(hash)>: varint count + per-element [varint payloadLen][fields]
+                        let refParam = refHashes.get(et.hash);
+
+                        if (refParam) {
+                            body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){`;
+                            body += `let _lp=p;p+=1;let _end=${refParam}(a[i],b,p);let _dl=_end-p;`;
+                            body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
+                            body += `else{p=_encObj(a[i],b,_lp);}}}\n`;
+                        }
+                        else {
+                            // Referenced schema not compiled — tagged fallback
+                            body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
+                        }
+                    }
                     else {
                         // Container element types: varint count + tagged elements
                         body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
@@ -485,6 +500,34 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         body += `let a=new Array(l);`;
                         body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{let _vr=_rv(b,p);bl=_vr[0];p=_vr[1];}a[i]=b.slice(p,p+bl);p+=bl;}`;
                         body += `f${i}=a;}\n`;
+                    }
+                    else if (et.base === 'object' && et.hash !== undefined) {
+                        // Typed array<object(hash)>: varint count + per-element [varint payloadLen][fields]
+                        let refParam = refHashes.get(et.hash);
+
+                        if (refParam) {
+                            body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                            body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            body += `let a=new Array(l);`;
+                            body += `for(let i=0;i<l;i++){let _dl=b[p];`;
+                            body += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
+                            body += `else{if(b[p]===8||b[p]===18){`;
+                            body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                            body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                            body += `_s=_reg.get(_h);`;
+                            body += `if(_s&&_s.decodeFn){a[i]=_s.decodeFn(b,p+9,_d+1);}else{a[i]=null;}`;
+                            body += `p+=9+_dl2;}`;
+                            body += `else{let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}}`;
+                            body += `f${i}=a;}\n`;
+                        }
+                        else {
+                            // Referenced schema not compiled — tagged fallback
+                            body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                            body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            body += `let a=new Array(l);`;
+                            body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
+                            body += `f${i}=a;}\n`;
+                        }
                     }
                     else {
                         // Container element types: varint count + tagged elements
