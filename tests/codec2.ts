@@ -738,8 +738,8 @@ describe('Codec2', () => {
     // === CROSS-INSTANCE SCHEMA COMPATIBILITY ===
 
     describe('cross-instance compatibility', () => {
-        // Known limitation: schema registry is per-instance, wire format is not self-describing
-        it.fails('cross-instance decode — not self-describing (by design)', () => {
+        // Shared SIEVE cache enables cross-instance decode
+        it('cross-instance decode via shared schema cache', () => {
             let c1 = createCodec(),
                 c2 = createCodec(),
                 data = { active: true, age: 30, name: 'Alice' };

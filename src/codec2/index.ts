@@ -41,6 +41,10 @@ type SchemaRegistry = {
 };
 
 
+// Module-level SIEVE cache — shared across all codec instances
+let schemaCache = createSchemaCache();
+
+
 let MAX_ARRAY_COUNT = 1048576; // 2^20 — guard against DoS from untrusted u32 counts
 
 
@@ -396,8 +400,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
             schemas: new Map(),
         };
 
-    let schemaCache = createSchemaCache(),
-        store = options?.store ?? null;
+    let store = options?.store ?? null;
 
     // Multi-schema cache — handles nested objects without breaking
     let cacheCounts: number[] = [0, 0, 0, 0],
