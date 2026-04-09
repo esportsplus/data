@@ -3382,4 +3382,276 @@ describe('Codec2', () => {
             expect(size).toBe(encoded.length);
         });
     });
+
+
+    // === BATCH C: SECURITY/CORRECTNESS FIX COVERAGE ===
+
+    describe('field name validation', () => {
+        it('defineSchema rejects field name with spaces', () => {
+            let c = codec();
+
+            expect(() => c.defineSchema([{ name: 'bad field', type: 'uint8' }])).toThrow('Codec2: invalid field name');
+        });
+
+        it('defineSchema rejects field name with special chars', () => {
+            let c = codec();
+
+            expect(() => c.defineSchema([{ name: 'field@name!', type: 'string' }])).toThrow('Codec2: invalid field name');
+        });
+
+        it('defineSchema accepts valid field names', () => {
+            let c = codec();
+
+            expect(() => c.defineSchema([
+                { name: '_private', type: 'uint8' },
+                { name: '$dollar', type: 'uint8' },
+                { name: 'camelCase', type: 'string' },
+                { name: 'PascalCase', type: 'int32' },
+            ])).not.toThrow();
+        });
+
+        it('deserializeRegistry rejects crafted buffer with invalid field name', () => {
+            let c1 = codec();
+
+            // Register a valid schema first
+            c1.defineSchema([{ name: 'ok', type: 'uint8' }]);
+
+            let blob = c1.serializeRegistry();
+
+            // Find the field name bytes in the blob and corrupt them with a space character
+            // Registry format: u16 schemaCount + [u32 hash + u16 fieldCount + fields...]
+            // Field format: u16 nameLen + utf8 name + u16 typeLen + utf8 type + u8 flags
+            // For a single schema with field 'ok': offset 8 is where name data starts (after schemaCount+hash+fieldCount)
+            // schemaCount(2) + hash(4) + fieldCount(2) + nameLen(2) = 10 bytes before name
+            let corrupt = new Uint8Array(blob);
+
+            // The name 'ok' starts at offset 10 — replace first byte with space (0x20)
+            corrupt[10] = 0x20; // space character
+
+            let c2 = codec();
+
+            expect(() => c2.deserializeRegistry(corrupt)).toThrow('Codec2: invalid field name in registry data');
+        });
+    });
+
+
+    describe('decodeAt truncation guard', () => {
+        it('decodeAt with 5-byte buffer (tag=8 but too short for header) throws', () => {
+            let c = codec();
+
+            // tag=8 but buffer only 5 bytes — needs 9 for full header
+            let buf = new Uint8Array([8, 0, 0, 0, 0]);
+
+            expect(() => c.decodeAt(buf, 0)).toThrow('Codec2: truncated tag-8/18 header');
+        });
+
+        it('decodeAt with 5-byte buffer tag=18 throws', () => {
+            let c = codec();
+
+            let buf = new Uint8Array([18, 0, 0, 0, 0]);
+
+            expect(() => c.decodeAt(buf, 0)).toThrow('Codec2: truncated tag-8/18 header');
+        });
+    });
+
+
+    describe('extractField buffer bounds guard', () => {
+        it('extractField on truncated buffer throws', () => {
+            let c = codec();
+
+            // Register schema so extractField knows the field layout
+            c.defineSchema([
+                { name: 'age', type: 'uint8' },
+                { name: 'name', type: 'string' },
+                { name: 'score', type: 'int32' },
+            ]);
+
+            // Encode a valid object to get proper header
+            let valid = c.encode({ age: 25, name: 'Alice', score: 100 });
+
+            // Truncate the buffer — keep tag+hash+dataLen header (9 bytes) but chop most data
+            let truncated = valid.slice(0, 11);
+
+            // Requesting 'score' (3rd field) should fail because buffer is too short
+            expect(() => c.extractField(truncated, 'score')).toThrow('Codec2: buffer too short for field');
+        });
+    });
+
+
+    describe('decode hint len >= 9 boundary', () => {
+        it('decode with schema hint on 6-byte tag-8 buffer skips hint fast path', () => {
+            let c = codec();
+
+            let hash = c.defineSchema([{ name: 'x', type: 'uint8' }]);
+
+            // 6 bytes: tag=8 + 4 hash bytes + 1 garbage — len < 9 so hint path is skipped
+            let buf = new Uint8Array([8, hash & 0xFF, (hash >> 8) & 0xFF, (hash >> 16) & 0xFF, (hash >> 24) & 0xFF, 0]);
+
+            // With hint, the condition `len >= 9` fails, so it falls through to normal decode
+            // Normal decode path sees tag=8, but buffer.length=6 < 9 so it won't read the
+            // 9-byte header via the compiled schema path either — falls through to decodeSbc
+            // The key behavior: it does NOT crash by trying to read 9-byte header when < 9 bytes
+            let result = c.decode(buf, { schema: hash });
+
+            // The result is whatever decodeSbc produces for this malformed buffer,
+            // but the critical assertion is that it did NOT throw a truncation error
+            // from the hint path trying to read beyond buffer bounds
+            expect(result).toBeDefined();
+        });
+
+        it('decode with schema hint on 9+ byte tag-8 buffer uses hint fast path', () => {
+            let c = codec();
+
+            c.defineSchema([{ name: 'x', type: 'uint8' }]);
+
+            let obj = { x: 42 },
+                encoded = c.encode(obj);
+
+            // len >= 9, so hint path is used — verify correct decode
+            let decoded = c.decode(encoded, { schema: [{ name: 'x', type: 'uint8' }] });
+
+            expect(decoded).toEqual(obj);
+        });
+    });
+
+
+    describe('computeSize nested object >= 128 bytes', () => {
+        it('nested typed object with 16+ float64 fields uses 9-byte header in computeSize', () => {
+            let c = codec();
+
+            // Create inner schema with 16 float64 fields = 16 * 8 = 128 bytes (>= 128 threshold)
+            let innerFields: { name: string; type: string }[] = [];
+
+            for (let i = 0; i < 16; i++) {
+                innerFields.push({ name: `f${String(i).padStart(2, '0')}`, type: 'float64' });
+            }
+
+            let innerHash = c.defineSchema(innerFields);
+
+            c.defineSchema([
+                { name: 'data', type: `object(${innerHash})` },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            // Use non-integer float values so inferType returns 'float64' for all fields
+            let innerObj: Record<string, number> = {};
+
+            for (let i = 0; i < 16; i++) {
+                innerObj[`f${String(i).padStart(2, '0')}`] = i + 0.1;
+            }
+
+            let obj = { data: innerObj, id: 1 },
+                size = c.computeSize(obj);
+
+            // nestedSize = 16 * 8 = 128 (>= 128), so computeSize uses 9-byte header (not 1-byte varint)
+            // Expected: 9 (outer header) + (9 + 128) (nested with 9-byte header) + 1 (id) = 147
+            expect(size).toBe(147);
+        });
+
+        it('nested typed object < 128 bytes uses 1-byte varint header', () => {
+            let c = codec();
+
+            // Create inner schema with 15 float64 fields = 15 * 8 = 120 bytes (< 128 threshold)
+            let innerFields: { name: string; type: string }[] = [];
+
+            for (let i = 0; i < 15; i++) {
+                innerFields.push({ name: `f${String(i).padStart(2, '0')}`, type: 'float64' });
+            }
+
+            let innerHash = c.defineSchema(innerFields);
+
+            c.defineSchema([
+                { name: 'data', type: `object(${innerHash})` },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let innerObj: Record<string, number> = {};
+
+            for (let i = 0; i < 15; i++) {
+                innerObj[`f${String(i).padStart(2, '0')}`] = i + 0.1;
+            }
+
+            let obj = { data: innerObj, id: 1 },
+                size = c.computeSize(obj);
+
+            // nestedSize = 15 * 8 = 120 (< 128), so computeSize uses 1-byte varint header
+            // Expected: 9 (outer header) + (1 + 120) (nested with 1-byte varint) + 1 (id) = 131
+            expect(size).toBe(131);
+
+            // And verify this matches actual encoded length
+            let encoded = c.encode(obj);
+
+            expect(size).toBe(encoded.length);
+        });
+    });
+
+
+    describe('nested compressed object tag-18 dispatch', () => {
+        it('encode nested typed object with compress:true, decode with compress:false', () => {
+            let comp = codec({ compress: true }),
+                plain = codec();
+
+            let innerHash = comp.defineSchema([
+                { name: 'value', type: 'int32' },
+                { name: 'x', type: 'uint8' },
+            ]);
+
+            comp.defineSchema([
+                { name: 'child', type: `object(${innerHash})` },
+                { name: 'name', type: 'string' },
+            ]);
+
+            // Register same schemas on plain codec
+            let innerHash2 = plain.defineSchema([
+                { name: 'value', type: 'int32' },
+                { name: 'x', type: 'uint8' },
+            ]);
+
+            plain.defineSchema([
+                { name: 'child', type: `object(${innerHash2})` },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let obj = { child: { value: -42, x: 7 }, name: 'test' },
+                encoded = comp.encode(obj);
+
+            // Compressed codec produces tag 18 for compressible schemas
+            // The parent schema has a string field so may not be compressible,
+            // but the child is (int32+uint8 = compressible)
+            // Either way, plain.decode should handle the tag-18 dispatch correctly
+            expect(plain.decode(encoded)).toEqual(obj);
+        });
+
+        it('cross-codec nested compressed object round-trips', () => {
+            let comp = codec({ compress: true }),
+                plain = codec();
+
+            let innerHash = comp.defineSchema([
+                { name: 'a', type: 'boolean' },
+                { name: 'b', type: 'int32' },
+                { name: 'c', type: 'uint8' },
+            ]);
+
+            comp.defineSchema([
+                { name: 'id', type: 'uint8' },
+                { name: 'nested', type: `object(${innerHash})` },
+            ]);
+
+            plain.defineSchema([
+                { name: 'a', type: 'boolean' },
+                { name: 'b', type: 'int32' },
+                { name: 'c', type: 'uint8' },
+            ]);
+
+            plain.defineSchema([
+                { name: 'id', type: 'uint8' },
+                { name: 'nested', type: `object(${innerHash})` },
+            ]);
+
+            let obj = { id: 5, nested: { a: true, b: -999, c: 42 } },
+                encoded = comp.encode(obj);
+
+            expect(plain.decode(encoded)).toEqual(obj);
+        });
+    });
 });

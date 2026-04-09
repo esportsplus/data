@@ -361,3 +361,107 @@ describe('Mixed Literals and Types', () => {
         });
     });
 });
+
+
+describe('Bigint in Union Validation', () => {
+    let validate = createValidator(`
+        type Data = { value: string | bigint };
+        validator.build<Data>();
+    `);
+
+    it('accepts bigint value', () => {
+        let result = validate({ value: BigInt(42) });
+
+        expect(result.ok).toBe(true);
+    });
+
+    it('accepts string value', () => {
+        let result = validate({ value: 'hello' });
+
+        expect(result.ok).toBe(true);
+    });
+
+    it('rejects number (not bigint)', () => {
+        let result = validate({ value: 42 });
+
+        expect(result.ok).toBe(false);
+    });
+});
+
+
+describe('Optional Tuple Validation', () => {
+    let validate = createValidator(`
+        type Data = { value: [string, number?] };
+        validator.build<Data>();
+    `);
+
+    it('accepts tuple with all elements', () => {
+        let result = validate({ value: ['hello', 42] });
+
+        expect(result.ok).toBe(true);
+    });
+
+    it('accepts tuple with only required element', () => {
+        let result = validate({ value: ['hello'] });
+
+        expect(result.ok).toBe(true);
+    });
+
+    it('rejects empty tuple (too short)', () => {
+        let result = validate({ value: [] });
+
+        expect(result.ok).toBe(false);
+    });
+
+    it('rejects tuple with too many elements', () => {
+        let result = validate({ value: ['hello', 42, true] });
+
+        expect(result.ok).toBe(false);
+    });
+});
+
+
+describe('Nullable Record Validation', () => {
+    let validate = createValidator(`
+        type Data = { value: Record<string, number> | null };
+        validator.build<Data>();
+    `);
+
+    it('accepts null', () => {
+        let result = validate({ value: null });
+
+        expect(result.ok).toBe(true);
+    });
+
+    it('accepts valid record', () => {
+        let result = validate({ value: { a: 1, b: 2 } });
+
+        expect(result.ok).toBe(true);
+    });
+
+    it('rejects string', () => {
+        let result = validate({ value: 'string' });
+
+        expect(result.ok).toBe(false);
+    });
+});
+
+
+describe('Tuple in Union Validation', () => {
+    let validate = createValidator(`
+        type Data = { value: string | [number, string] };
+        validator.build<Data>();
+    `);
+
+    it('accepts tuple value', () => {
+        let result = validate({ value: [1, 'hello'] });
+
+        expect(result.ok).toBe(true);
+    });
+
+    it('accepts string value', () => {
+        let result = validate({ value: 'hello' });
+
+        expect(result.ok).toBe(true);
+    });
+});
