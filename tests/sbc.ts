@@ -2886,4 +2886,41 @@ describe('Codec2', () => {
             });
         });
     });
+
+
+    // === VIEW MODE (encode buffer aliasing) ===
+
+    describe('view mode aliasing', () => {
+        it('view=true returns a live alias that is overwritten by subsequent encode()', () => {
+            let c = createCodec();
+            let first = c.encode({ msg: 'aaaa' }, { view: true });
+            let second = c.encode({ msg: 'zzzz' }, { view: true });
+
+            // Both views share the same underlying ArrayBuffer — they are aliased
+            expect(first.buffer).toBe(second.buffer);
+
+            // The first view now contains the second encode's data at overlapping positions
+            // (both objects share schema/shape so the header + payload overlap completely)
+            expect(first[0]).toBe(second[0]);
+        });
+
+        it('default (view=false) returns an independent copy not affected by subsequent encode()', () => {
+            let c = createCodec();
+            let first = c.encode({ msg: 'aaaa' });
+            let snapshot = first.slice();
+
+            // Second encode should NOT affect the first result
+            c.encode({ msg: 'zzzz' });
+
+            expect(first).toEqual(snapshot);
+        });
+
+        it('view=true alias is decodable before next encode()', () => {
+            let c = createCodec();
+            let view = c.encode({ x: 42 }, { view: true });
+            let decoded = c.decode(view) as Record<string, unknown>;
+
+            expect(decoded.x).toBe(42);
+        });
+    });
 });
