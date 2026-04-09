@@ -243,7 +243,7 @@ function inferType(value: unknown): string {
 }
 
 
-function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers): Schema {
+function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers, schemaCache: SchemaCache, store: PersistentStore | null): Schema {
     let keys = Object.keys(obj).sort(),
         types: string[] = new Array(keys.length);
 
@@ -336,6 +336,18 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
     compileSchema(schema, helpers);
     registry.schemas.set(hash, schema);
 
+    let storedFields: FieldSpec[] = new Array(keys.length);
+
+    for (let i = 0, n = keys.length; i < n; i++) {
+        storedFields[i] = { name: keys[i]!, type: types[i]! };
+    }
+
+    schemaCache.set(hash, { fields: storedFields, hash });
+
+    if (store) {
+        store.set(hash, { fields: storedFields, hash });
+    }
+
     return schema;
 }
 
@@ -384,6 +396,9 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
             schemas: new Map(),
         };
 
+    let schemaCache = createSchemaCache(),
+        store = options?.store ?? null;
+
     // Multi-schema cache — handles nested objects without breaking
     let cacheCounts: number[] = [0, 0, 0, 0],
         cacheFields: (FieldDef[] | null)[] = [null, null, null, null],
@@ -400,6 +415,26 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
         weakCache.set(obj, schema);
     }
 
+    function resolveSchemaFromCacheOrStore(hash: number): Schema | null {
+        let stored = schemaCache.get(hash);
+
+        if (!stored && store) {
+            stored = store.get(hash);
+
+            if (stored) {
+                schemaCache.set(hash, stored);
+            }
+        }
+
+        if (stored) {
+            defineSchema(stored.fields);
+
+            return registry.schemas.get(hash) ?? null;
+        }
+
+        return null;
+    }
+
     // Decode fast path: cache last-used schema + fn to avoid Map lookup + property access
     let lastDecodeFn: ((buf: Uint8Array, pos: number, depth: number) => unknown) | null = null,
         lastDecodeHash = 0,
@@ -413,7 +448,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
             schema = matchSchema(obj);
 
             if (!schema) {
-                schema = inferAndRegister(obj, registry, helpers);
+                schema = inferAndRegister(obj, registry, helpers, schemaCache, store);
             }
 
             setCache(schema, obj);
@@ -523,7 +558,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                 let hash = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
                     schema = hash === lastDecodeHash && lastDecodeSchema
                         ? lastDecodeSchema
-                        : registry.schemas.get(hash);
+                        : (registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash));
 
                 if (!schema || !schema.decodeFn) {
                     return null;
@@ -537,7 +572,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
 
             case 18: {
                 let hash = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
-                    schema = registry.schemas.get(hash);
+                    schema = registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash);
 
                 if (!schema) {
                     return null;
@@ -1052,7 +1087,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                     schema = matchSchema(obj);
 
                     if (!schema) {
-                        schema = inferAndRegister(obj, registry, helpers);
+                        schema = inferAndRegister(obj, registry, helpers, schemaCache, store);
                     }
 
                     setCache(schema, obj);
@@ -1197,7 +1232,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                 return lastDecodeFn(buffer, 9, 0);
             }
 
-            let schema = registry.schemas.get(hash);
+            let schema = registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash);
 
             if (schema && schema.decodeFn) {
                 lastDecodeHash = hash;
@@ -1213,7 +1248,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
                 schema = hash === lastDecodeHash && lastDecodeSchema
                     ? lastDecodeSchema
-                    : registry.schemas.get(hash);
+                    : (registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash));
 
             if (schema) {
                 lastDecodeHash = hash;
@@ -1311,7 +1346,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                 schema = matchSchema(obj);
 
                 if (!schema) {
-                    schema = inferAndRegister(obj, registry, helpers);
+                    schema = inferAndRegister(obj, registry, helpers, schemaCache, store);
                 }
 
                 setCache(schema, obj);
@@ -1488,6 +1523,12 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
 
         compileSchema(schema, helpers);
         registry.schemas.set(hash, schema);
+
+        schemaCache.set(hash, { fields: sorted, hash });
+
+        if (store) {
+            store.set(hash, { fields: sorted, hash });
+        }
 
         // Index typed schemas by name hash for matchSchema lookup
         let hasStructural = false;
@@ -1842,7 +1883,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                     schema = weakCache.get(obj) ?? matchSchema(obj) ?? null;
 
                 if (!schema) {
-                    schema = inferAndRegister(obj, registry, helpers);
+                    schema = inferAndRegister(obj, registry, helpers, schemaCache, store);
                     setCache(schema, obj);
                 }
 
