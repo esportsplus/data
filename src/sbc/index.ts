@@ -54,7 +54,8 @@ type SchemaRegistry = {
 
 
 
-let MAX_ARRAY_COUNT = 1048576, // 2^20 — guard against DoS from untrusted u32 counts
+let FIELD_NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/,
+    MAX_ARRAY_COUNT = 1048576, // 2^20 — guard against DoS from untrusted u32 counts
     MAX_SCHEMA_COUNT = 1024; // guard against DoS from untrusted u16 schema count
 
 
@@ -1249,7 +1250,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             let hintSchema = resolveSchemaForDecode(lengthOrOptions.schema),
                 tag = buffer[0];
 
-            if ((tag === 8 || tag === 18) && len >= 5) {
+            if ((tag === 8 || tag === 18) && len >= 9) {
                 let bufHash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
 
                 if (bufHash === hintSchema.hash) {
@@ -1431,6 +1432,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         let tag = buffer[offset]!;
 
         if (tag === 8 || tag === 18) {
+            if (offset + 9 > buffer.length) {
+                throw new Error('Codec2: truncated tag-8/18 header at offset ' + offset);
+            }
+
             let dataLen = (buffer[offset + 5]! | (buffer[offset + 6]! << 8) | (buffer[offset + 7]! << 16) | (buffer[offset + 8]! << 24)) >>> 0;
 
             return decodeSbc(buffer, offset, 9 + dataLen, 0);
@@ -1445,6 +1450,12 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
     function defineSchema(fields: FieldSpec[]): number {
         // Sort by name (same order as inferAndRegister)
         let sorted = fields.slice().sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+
+        for (let i = 0, n = sorted.length; i < n; i++) {
+            if (!FIELD_NAME_RE.test(sorted[i]!.name)) {
+                throw new Error('Codec2: invalid field name: ' + sorted[i]!.name);
+            }
+        }
 
         let keys: string[] = new Array(sorted.length),
             types: string[] = new Array(sorted.length);
@@ -2064,6 +2075,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                 }
 
                 let name = readStr(data, pos, nameLen);
+
+                if (!FIELD_NAME_RE.test(name)) {
+                    throw new Error('Codec2: invalid field name in registry data: ' + name);
+                }
 
                 pos += nameLen;
 
