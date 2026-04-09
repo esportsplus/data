@@ -3,10 +3,10 @@
   "project": "@esportsplus/data",
   "last_audit": {
     "date": "2026-04-09",
-    "commit": "d3d0154",
-    "findings_total": 27,
-    "findings_new": 8,
-    "findings_recurring": 0
+    "commit": "d5db57c",
+    "findings_total": 56,
+    "findings_new": 30,
+    "findings_recurring": 26
   },
   "runs": [
     {
@@ -86,6 +86,26 @@
         "testing": { "status": "ok", "symbols": 37, "sub_targets": 4, "findings": 8 }
       },
       "agent_overlap": {},
+      "estimated_remaining": null
+    },
+    {
+      "date": "2026-04-09",
+      "commit": "d5db57c",
+      "mode": "incremental+first-time",
+      "files_audited": 75,
+      "files_skipped": 0,
+      "files_reaudited_probabilistic": 0,
+      "findings_new": 30,
+      "findings_recurring": 26,
+      "sqale_rating": "D",
+      "agent_results": {
+        "correctness": { "status": "ok", "symbols": 22, "sub_targets": 2, "findings": 7 },
+        "security": { "status": "ok", "symbols": 18, "sub_targets": 2, "findings": 1 },
+        "performance": { "status": "ok", "symbols": 12, "sub_targets": 1, "findings": 4 },
+        "architecture": { "status": "ok", "symbols": 40, "sub_targets": 2, "findings": 4 },
+        "testing": { "status": "ok", "symbols": 37, "sub_targets": 3, "findings": 14 }
+      },
+      "agent_overlap": { "correctness_security": { "overlap": 1, "symbol": "validators.inline" } },
       "estimated_remaining": null
     }
   ],
@@ -375,7 +395,37 @@
       "last_seen": "2026-04-09",
       "found_by": ["testing"],
       "priority_score": 43
-    }
+    },
+    "F-027": { "status": "open", "file": "src/compiler/proto/runtime.ts", "symbol": "_readVarint", "category": "correctness", "title": "_readVarint negative int32 corruption (shift mod 32)", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["correctness"], "priority_score": 129 },
+    "F-028": { "status": "open", "file": "src/compiler/proto/runtime.ts", "symbol": "_readBigInt", "category": "correctness", "title": "_readBigInt no sign extension — negative BigInt decode as positive", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["correctness"], "priority_score": 119 },
+    "F-029": { "status": "open", "file": "src/compiler/proto/runtime.ts", "symbol": "_read*", "category": "optimize", "title": "Decoder tuple [value,offset] allocation per scalar read", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["performance"], "priority_score": 110 },
+    "F-030": { "status": "open", "file": "src/compiler/proto/encoder.ts", "symbol": "generateEncoder,generateDecoder", "category": "correctness", "title": "Proto tag single-byte write for fieldNumber >= 16", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["correctness"], "priority_score": 105 },
+    "F-031": { "status": "open", "file": "src/compiler/validators.ts", "symbol": "validators.inline", "category": "correctness", "title": "validators.inline spurious quote chars in error messages", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["correctness", "security"], "priority_score": 97 },
+    "F-032": { "status": "open", "file": "src/compiler/proto/runtime.ts", "symbol": "_writeString", "category": "optimize", "title": "_writeString TextEncoder.encode() allocates per call", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["performance"], "priority_score": 87 },
+    "F-033": { "status": "open", "file": "src/compiler/proto/runtime.ts", "symbol": "_writeVarint", "category": "optimize", "title": "_writeVarint Math.floor(value/128) vs >>7 in negative loop", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["performance"], "priority_score": 83 },
+    "F-034": { "status": "open", "file": "src/compiler/type-analyzer.ts", "symbol": "analyzeType", "category": "correctness", "title": "analyzeType null|undefined union skips all validation", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["correctness"], "priority_score": 81 },
+    "F-035": { "status": "open", "file": "src/compiler/type-analyzer.ts", "symbol": "analyzeType", "category": "correctness", "title": "analyzeType WeakMap cache stale in watch/incremental mode", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["correctness"], "priority_score": 59 },
+    "F-036": { "status": "open", "file": "src/typed-array-codec.ts", "symbol": "encodeTypedArrayInto", "category": "correctness", "title": "encodeTypedArrayInto partial header write on buffer overflow", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["correctness"], "priority_score": 69 },
+    "F-037": { "status": "open", "file": "src/compiler/validators.ts", "symbol": "validators.inline", "category": "security", "title": "validators.inline unsanitized brand validator body — supply chain risk", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["security"], "priority_score": 47 },
+    "F-038": { "status": "open", "file": "src/typed-array-codec.ts", "symbol": "decodeTypedArray", "category": "optimize", "title": "decodeTypedArray double allocation in copy path", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["performance"], "priority_score": 51 },
+    "F-039": { "status": "open", "file": "src/compiler/proto/encoder.ts", "symbol": "EncoderState,DecoderState", "category": "dedup", "title": "encoder.ts/decoder.ts State type + processFields skeleton dedup", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["architecture"], "priority_score": 43 },
+    "F-040": { "status": "open", "file": "src/sbc/codegen.ts", "symbol": "compile*", "category": "dedup", "title": "codegen.ts ref-hash preamble dedup (21 LOC x 4 sites)", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["architecture"], "priority_score": 67 },
+    "F-041": { "status": "open", "file": "src/sbc/index.ts", "symbol": "createCodec", "category": "reorg", "title": "sbc/index.ts reorg (2144 LOC, 3 concerns)", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["architecture"], "priority_score": 61 },
+    "F-042": { "status": "open", "file": "src/sbc/index.ts", "symbol": "encode", "category": "dedup", "title": "encode() hint/plain dedup (~35 LOC x 2 sites)", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["architecture"], "priority_score": 57 },
+    "F-043": { "status": "open", "file": "src/compiler/proto/runtime.ts", "symbol": "analyzeRuntimeNeeds,buildRuntimeHelpers", "category": "coverage", "title": "analyzeRuntimeNeeds + buildRuntimeHelpers: 0 direct test refs", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 73 },
+    "F-044": { "status": "open", "file": "src/compiler/proto/encoder.ts", "symbol": "generateEncoder", "category": "test-quality", "title": "generateEncoder: negative bigint array + optional array untested", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 79 },
+    "F-045": { "status": "open", "file": "src/compiler/proto/decoder.ts", "symbol": "generateDecoder", "category": "test-quality", "title": "generateDecoder: SKIP_UNKNOWN_FIELD untested", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 79 },
+    "F-046": { "status": "open", "file": "src/compiler/sbc/index.ts", "symbol": "sbc-compiler", "category": "test-quality", "title": "sbc compiler: decode(buf, numericLiteral) transform untested", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 69 },
+    "F-047": { "status": "open", "file": "src/compiler/proto/index.ts", "symbol": "transformCodec", "category": "test-quality", "title": "transformCodec: defaults with undefined value untested", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 59 },
+    "F-048": { "status": "open", "file": "src/compiler/type-analyzer.ts", "symbol": "analyzeType", "category": "test-quality", "title": "analyzeType: cache hit path untested", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 55 },
+    "F-049": { "status": "open", "file": "src/compiler/type-analyzer.ts", "symbol": "resolveBrandedType", "category": "test-quality", "title": "resolveBrandedType: non-intersection path untested", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 49 },
+    "F-050": { "status": "open", "file": "src/compiler/validator.ts", "symbol": "generateValidator", "category": "test-quality", "title": "generateValidator: custom code guard runtime behavior untested", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 55 },
+    "F-051": { "status": "open", "file": "src/compiler/validators.ts", "symbol": "validators.clear,get,inline", "category": "coverage", "title": "validators.clear/get/inline: 0 direct test refs", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 49 },
+    "F-052": { "status": "open", "file": "src/compiler/index.ts", "symbol": "compiler-default", "category": "test-quality", "title": "compiler default: early return paths (no imports, no calls) untested", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 43 },
+    "F-053": { "status": "open", "file": "src/codec.ts", "symbol": "codec", "category": "coverage", "title": "codec sentinel: throw path untested", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 43 },
+    "F-054": { "status": "open", "file": "src/typed-array-codec.ts", "symbol": "decodeTypedArray,encodeTypedArrayInto,getTypedArrayType", "category": "coverage", "title": "typed-array-codec: all 3 exports have 0 test refs", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 69 },
+    "F-055": { "status": "open", "file": "src/validators/uuid.ts", "symbol": "uuid", "category": "test-quality", "title": "uuid: v2/v3/v5/v6/v8 sub-validators untested", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 63 },
+    "F-056": { "status": "open", "file": "src/validators/cc.ts", "symbol": "cc", "category": "test-quality", "title": "cc: too-long (>19 digits) branch untested", "first_seen": "2026-04-09", "last_seen": "2026-04-09", "found_by": ["testing"], "priority_score": 43 }
   },
   "clean_symbols": {
     "src/sbc/index.ts:createCodec": {
@@ -725,47 +775,47 @@
   "convergence": {
     "per_category": {
       "correctness": {
-        "findings_per_run": [4, 1, 4],
-        "successful_runs": 3,
-        "consecutive_zero": 0,
-        "last_agent_success": true,
-        "status": "NOT_CONVERGED",
-        "reason": "4 new findings on last run (refactored code)"
-      },
-      "security": {
-        "findings_per_run": [0, 1, 4],
-        "successful_runs": 3,
-        "consecutive_zero": 0,
-        "last_agent_success": true,
-        "status": "NOT_CONVERGED",
-        "reason": "4 new findings on last run (refactored code)"
-      },
-      "performance": {
-        "findings_per_run": [4, 2, 2],
-        "successful_runs": 3,
-        "consecutive_zero": 0,
-        "last_agent_success": true,
-        "status": "APPROACHING",
-        "reason": "findings stable at 2"
-      },
-      "architecture": {
-        "findings_per_run": [5, 1, 2],
-        "successful_runs": 3,
-        "consecutive_zero": 0,
-        "last_agent_success": true,
-        "status": "APPROACHING",
-        "reason": "findings low: 1 → 2"
-      },
-      "testing": {
-        "findings_per_run": [5, 8, 8, 8],
+        "findings_per_run": [4, 1, 4, 7],
         "successful_runs": 4,
         "consecutive_zero": 0,
         "last_agent_success": true,
         "status": "NOT_CONVERGED",
-        "reason": "8 new findings on run 4 (test-directory focused audit)"
+        "reason": "7 new findings on run 5 (first-time compiler/ audit)"
+      },
+      "security": {
+        "findings_per_run": [0, 1, 4, 1],
+        "successful_runs": 4,
+        "consecutive_zero": 0,
+        "last_agent_success": true,
+        "status": "NOT_CONVERGED",
+        "reason": "1 new finding on run 5"
+      },
+      "performance": {
+        "findings_per_run": [4, 2, 2, 4],
+        "successful_runs": 4,
+        "consecutive_zero": 0,
+        "last_agent_success": true,
+        "status": "NOT_CONVERGED",
+        "reason": "4 new findings on run 5 (first-time compiler/ audit)"
+      },
+      "architecture": {
+        "findings_per_run": [5, 1, 2, 4],
+        "successful_runs": 4,
+        "consecutive_zero": 0,
+        "last_agent_success": true,
+        "status": "NOT_CONVERGED",
+        "reason": "4 new findings on run 5 (first-time audit of full src/)"
+      },
+      "testing": {
+        "findings_per_run": [5, 8, 8, 8, 14],
+        "successful_runs": 5,
+        "consecutive_zero": 0,
+        "last_agent_success": true,
+        "status": "NOT_CONVERGED",
+        "reason": "14 new findings on run 5 (first-time compiler/root/validators audit)"
       }
     },
     "overall": "NOT_CONVERGED",
-    "reason": "correctness, security, testing still finding new issues"
+    "reason": "First-time audit of compiler/ and root files — all categories produced new findings. Re-run after P0 implementation."
   }
 }
