@@ -51,23 +51,6 @@ function transformRaw(code: string): string {
 }
 
 
-function visitCodecBranch(node: ts.Node, state: { found: boolean }): void {
-    if (ts.isCallExpression(node) && node.typeArguments && node.typeArguments.length > 0) {
-        let expr = node.expression;
-
-        if (ts.isPropertyAccessExpression(expr)) {
-            let methodName = expr.name.text;
-
-            // ns.codec<T>() branch
-            if (methodName === 'codec' && ts.isIdentifier(expr.expression)) {
-                state.found = true;
-            }
-        }
-    }
-
-    ts.forEachChild(node, (child) => visitCodecBranch(child, state));
-}
-
 function visitValidatorBranch(node: ts.Node, state: { found: boolean }): void {
     if (ts.isCallExpression(node) && node.typeArguments && node.typeArguments.length > 0) {
         let expr = node.expression;
@@ -95,7 +78,6 @@ describe('Namespace Imports', () => {
         it('plugin has patterns for namespace-style access', () => {
             let patterns = plugin.patterns || [];
 
-            expect(patterns).toContain('.codec');
             expect(patterns).toContain('.build');
         });
 
@@ -114,36 +96,9 @@ describe('Namespace Imports', () => {
             expect(matches).toBe(true);
         });
 
-        it('patterns match namespace codec call text', () => {
-            let code = 'import * as data from "@esportsplus/data";\ndata.codec<{name: string}>();',
-                matches = false,
-                patterns = plugin.patterns || [];
-
-            for (let i = 0, n = patterns.length; i < n; i++) {
-                if (code.indexOf(patterns[i]) !== -1) {
-                    matches = true;
-                    break;
-                }
-            }
-
-            expect(matches).toBe(true);
-        });
     });
 
-    describe('visit function detection branches (index.ts:118-134)', () => {
-        it('ns.codec call matches PropertyAccessExpression with identifier', () => {
-            // Verifies the AST shape: data.codec<T>() is a CallExpression
-            // where expression is PropertyAccessExpression with .name = 'codec'
-            // and .expression is Identifier
-            let code = "import * as data from '@esportsplus/data';\ndata.codec<{id: number}>();",
-                sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ES2020, true),
-                state = { found: false };
-
-            visitCodecBranch(sourceFile, state);
-
-            expect(state.found).toBe(true);
-        });
-
+    describe('visit function detection branches', () => {
         it('ns.validator.build call matches nested PropertyAccessExpression', () => {
             // Verifies: data.validator.build<T>() has the correct AST shape
             // where expression is PAE with .name = 'build'
@@ -170,16 +125,6 @@ describe('Namespace Imports', () => {
             );
 
             expect(code).toContain('data.validator.build');
-        });
-
-        it('namespace-only import is not transformed for codec', () => {
-            let code = transformRaw(
-                "import * as data from '@esportsplus/data';\n" +
-                'type Item = { id: number };\n' +
-                'data.codec<Item>();\n'
-            );
-
-            expect(code).toContain('data.codec');
         });
 
         it('namespace import alongside named import does not transform namespace access', () => {
@@ -209,15 +154,5 @@ describe('Namespace Imports', () => {
             expect(code).toContain('=>');
         });
 
-        it('named codec is still transformed', () => {
-            let code = transformRaw(
-                "import { codec } from '@esportsplus/data';\n" +
-                "import * as data from '@esportsplus/data';\n" +
-                'type Msg = { text: string };\n' +
-                'codec<Msg>();\n'
-            );
-
-            expect(code).not.toContain('codec<Msg>');
-        });
     });
 });

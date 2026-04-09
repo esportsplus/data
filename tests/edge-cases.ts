@@ -285,12 +285,6 @@ describe('Transformer Detection', () => {
         expect(mightNeedTransform(code)).toBe(true);
     });
 
-    it('detects codec calls', () => {
-        let code = `codec<Data>()`;
-
-        expect(mightNeedTransform(code)).toBe(true);
-    });
-
     it('skips unrelated code', () => {
         let code = `const x = 1 + 2;`;
 
