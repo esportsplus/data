@@ -50,15 +50,19 @@ interface SbcHelpers {
 }
 
 
-function compileSchema(schema: Schema, helpers: SbcHelpers, nullProto: boolean = true): void {
+// Shared frozen null-proto prototype — Object.prototype excluded from chain
+let _safeProto = Object.freeze(Object.create(null));
+
+
+function compileSchema(schema: Schema, helpers: SbcHelpers): void {
     let d = codegenDriver;
 
     schema.encodeFn = compileEncoder(schema, d, helpers);
-    schema.decodeFn = compileDecoder(schema, d, helpers, nullProto);
+    schema.decodeFn = compileDecoder(schema, d, helpers);
 
     if (schema.compressible) {
         schema.compressedEncodeFn = compileCompressedEncoder(schema, d, helpers);
-        schema.compressedDecodeFn = compileCompressedDecoder(schema, d, helpers, nullProto);
+        schema.compressedDecodeFn = compileCompressedDecoder(schema, d, helpers);
     }
 }
 
@@ -329,7 +333,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 }
 
 
-function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers, nullProto: boolean): (buf: Uint8Array, pos: number) => unknown {
+function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (buf: Uint8Array, pos: number) => unknown {
     let body = `'use strict';\n`,
         fields = schema.fields,
         n = fields.length;
@@ -612,38 +616,28 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers, n
         }
     }
 
-    // Build return object
-    if (nullProto) {
-        body += `let _r=Object.create(null);`;
+    // Build return object — constructor with frozen null-proto prototype for V8 hidden class + safety
+    body += `let _r=new _Ctor();`;
 
-        for (let i = 0; i < n; i++) {
-            body += `_r[${JSON.stringify(fields[i]!.name)}]=f${i};`;
-        }
-
-        body += `return _r;\n`;
+    for (let i = 0; i < n; i++) {
+        body += `_r[${JSON.stringify(fields[i]!.name)}]=f${i};`;
     }
-    else {
-        body += `return {`;
 
-        for (let i = 0; i < n; i++) {
-            if (i > 0) {
-                body += `,`;
-            }
+    body += `return _r;\n`;
 
-            body += `${JSON.stringify(fields[i]!.name)}:f${i}`;
-        }
+    // Create per-schema constructor — V8 creates stable hidden class for instances
+    let Ctor = new Function('') as new () => Record<string, unknown>;
 
-        body += `};\n`;
-    }
+    Ctor.prototype = _safeProto;
 
     let bindArgs = d.decoderBindArgs(),
         refDecParamNames = [...refHashes.values()],
         refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
 
     try {
-        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', ...refDecParamNames, `return function decode(b,pos,_d){${body}}`);
+        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_Ctor', ...refDecParamNames, `return function decode(b,pos,_d){${body}}`);
 
-        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, ...refDecBindValues);
+        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, Ctor, ...refDecBindValues);
     }
     catch (e) {
         throw new Error('Codec2: decoder compilation failed: ' + (e instanceof Error ? e.message : e));
@@ -651,7 +645,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers, n
 }
 
 
-function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers, nullProto: boolean): (buf: Uint8Array, pos: number, depth: number) => unknown {
+function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (buf: Uint8Array, pos: number, depth: number) => unknown {
     let body = `'use strict';\n`,
         fields = schema.fields,
         n = fields.length;
@@ -908,37 +902,26 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
         }
     }
 
-    // Build return object
-    if (nullProto) {
-        body += `let _r=Object.create(null);`;
+    // Build return object — constructor with frozen null-proto prototype for V8 hidden class + safety
+    body += `let _r=new _Ctor();`;
 
-        for (let i = 0; i < n; i++) {
-            body += `_r[${JSON.stringify(fields[i]!.name)}]=f${i};`;
-        }
-
-        body += `return _r;\n`;
+    for (let i = 0; i < n; i++) {
+        body += `_r[${JSON.stringify(fields[i]!.name)}]=f${i};`;
     }
-    else {
-        body += `return {`;
 
-        for (let i = 0; i < n; i++) {
-            if (i > 0) {
-                body += `,`;
-            }
+    body += `return _r;\n`;
 
-            body += `${JSON.stringify(fields[i]!.name)}:f${i}`;
-        }
+    let Ctor = new Function('') as new () => Record<string, unknown>;
 
-        body += `};\n`;
-    }
+    Ctor.prototype = _safeProto;
 
     let bindArgs = d.decoderBindArgs(),
         refDecParamNames = [...refHashes.values()],
         refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
 
     try {
-        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_rz', ...refDecParamNames, `return function decodeC(b,pos,_d){${body}}`)
-        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, readZigzag, ...refDecBindValues);
+        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_rz', '_Ctor', ...refDecParamNames, `return function decodeC(b,pos,_d){${body}}`)
+        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, readZigzag, Ctor, ...refDecBindValues);
     }
     catch (e) {
         throw new Error('Codec2: compressed decoder compilation failed: ' + (e instanceof Error ? e.message : e));

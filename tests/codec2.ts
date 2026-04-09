@@ -937,16 +937,26 @@ describe('Codec2', () => {
 
             expect(decoded['__proto__']).toBe('safe');
             expect(decoded['name']).toBe('test');
-            // Verify prototype was NOT polluted — should be null (Object.create(null))
-            expect(Object.getPrototypeOf(decoded)).toBe(null);
+            // Verify prototype chain excludes Object.prototype (frozen null-proto prototype)
+            let proto = Object.getPrototypeOf(decoded);
+
+            expect(proto).not.toBe(Object.prototype);
+            expect(Object.getPrototypeOf(proto)).toBe(null);
+            expect(Object.isFrozen(proto)).toBe(true);
         });
 
-        it('decoded objects use null prototype', () => {
+        it('decoded objects exclude Object.prototype from chain', () => {
             let data = { x: 1 },
                 decoded = codec.decode(codec.encode(data)) as Record<string, unknown>;
 
             expect(decoded.x).toBe(1);
-            expect(Object.getPrototypeOf(decoded)).toBe(null);
+
+            let proto = Object.getPrototypeOf(decoded);
+
+            expect(proto).not.toBe(Object.prototype);
+            expect(Object.getPrototypeOf(proto)).toBe(null);
+            expect((decoded as Record<string, unknown>).hasOwnProperty).toBeUndefined();
+            expect((decoded as Record<string, unknown>).toString).toBeUndefined();
         });
     });
 
