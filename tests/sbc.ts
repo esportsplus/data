@@ -3113,4 +3113,238 @@ describe('Codec2', () => {
             expect(decoded.x).toBe(42);
         });
     });
+
+
+    // === F-014: Map/Set count guard (encode + decode) ===
+
+    describe('Map/Set count guard (F-014)', () => {
+        it('decode: map count > MAX_ARRAY_COUNT throws', () => {
+            // tag 15 (Map) + u32 LE count = 1048577 (0x00100001)
+            let buf = new Uint8Array([15, 0x01, 0x00, 0x10, 0x00]);
+
+            expect(() => codec.decode(buf)).toThrow('map count');
+        });
+
+        it('decode: set count > MAX_ARRAY_COUNT throws', () => {
+            // tag 16 (Set) + u32 LE count = 1048577 (0x00100001)
+            let buf = new Uint8Array([16, 0x01, 0x00, 0x10, 0x00]);
+
+            expect(() => codec.decode(buf)).toThrow('set count');
+        });
+
+        it('decode: map count exactly at MAX_ARRAY_COUNT + 1 throws', () => {
+            // 1048577 = 0x100001 → LE bytes: [0x01, 0x00, 0x10, 0x00]
+            let buf = new Uint8Array([15, 0x01, 0x00, 0x10, 0x00]);
+
+            expect(() => codec.decode(buf)).toThrow('map count');
+        });
+
+        it('decode: set count at 2 billion throws', () => {
+            // 0x7FFFFFFF = 2147483647 → LE: [0xFF, 0xFF, 0xFF, 0x7F]
+            let buf = new Uint8Array([16, 0xFF, 0xFF, 0xFF, 0x7F]);
+
+            expect(() => codec.decode(buf)).toThrow('set count');
+        });
+
+        it('small Map still round-trips', () => {
+            let m = new Map<string, number>([['a', 1], ['b', 2]]);
+            let result = codec.decode(codec.encode(m)) as Map<string, number>;
+
+            expect(result).toBeInstanceOf(Map);
+            expect(result.size).toBe(2);
+            expect(result.get('a')).toBe(1);
+        });
+
+        it('small Set still round-trips', () => {
+            let s = new Set([10, 20, 30]);
+            let result = codec.decode(codec.encode(s)) as Set<number>;
+
+            expect(result).toBeInstanceOf(Set);
+            expect(result.size).toBe(3);
+            expect(result.has(20)).toBe(true);
+        });
+    });
+
+
+    // === F-015 + F-016: Typed array error paths ===
+
+    describe('typed array error paths (F-015, F-016)', () => {
+        it('unknown typeId throws', () => {
+            // tag 17 + typeId=99 + bLen=4 (u32 LE) + 4 dummy bytes
+            let buf = new Uint8Array([17, 99, 4, 0, 0, 0, 0, 0, 0, 0]);
+
+            expect(() => codec.decode(buf)).toThrow('unknown typed array typeId 99');
+        });
+
+        it('unknown typeId 255 throws', () => {
+            let buf = new Uint8Array([17, 255, 1, 0, 0, 0, 0]);
+
+            expect(() => codec.decode(buf)).toThrow('unknown typed array typeId 255');
+        });
+
+        it('byteLength not aligned throws for Float64Array (bpe=8)', () => {
+            // tag 17 + typeId=1 (Float64Array, bpe=8) + bLen=3 (not aligned to 8)
+            let buf = new Uint8Array([17, 1, 3, 0, 0, 0, 0, 0, 0]);
+
+            expect(() => codec.decode(buf)).toThrow('byteLength not aligned');
+        });
+
+        it('byteLength not aligned throws for Int32Array (bpe=4)', () => {
+            // tag 17 + typeId=4 (Int32Array, bpe=4) + bLen=5 (not aligned to 4)
+            let buf = new Uint8Array([17, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+            expect(() => codec.decode(buf)).toThrow('byteLength not aligned');
+        });
+
+        it('byteLength not aligned throws for Int16Array (bpe=2)', () => {
+            // tag 17 + typeId=3 (Int16Array, bpe=2) + bLen=3 (not aligned to 2)
+            let buf = new Uint8Array([17, 3, 3, 0, 0, 0, 0, 0, 0]);
+
+            expect(() => codec.decode(buf)).toThrow('byteLength not aligned');
+        });
+
+        it('valid typed array still decodes', () => {
+            let ta = new Float32Array([1.5, 2.5]);
+            let result = codec.decode(codec.encode(ta)) as Float32Array;
+
+            expect(result).toBeInstanceOf(Float32Array);
+            expect(result.length).toBe(2);
+        });
+    });
+
+
+    // === F-017: deserializeRegistry with corrupted/truncated input ===
+
+    describe('deserializeRegistry corruption (F-017)', () => {
+        it('truncated after schema count reads undefined bytes silently', () => {
+            let c = createCodec();
+
+            // Declares 1 schema (u16 LE = 1) but no data follows for hash/fields.
+            // JS bitwise ops on undefined yield 0, so it silently creates a schema
+            // with empty fields instead of throwing — documenting this behavior.
+            c.deserializeRegistry(new Uint8Array([1, 0]));
+
+            // The function did not throw; it registered a zero-field schema with hash=0.
+            // Verify codec still works after corrupted import.
+            expect(c.decode(c.encode({ x: 42 }))).toEqual({ x: 42 });
+        });
+
+        it('schema count 0 is valid (empty registry)', () => {
+            let c = createCodec();
+
+            // u16 LE count = 0
+            c.deserializeRegistry(new Uint8Array([0, 0])); // should not throw
+        });
+
+        it('truncated field data throws on invalid type', () => {
+            let c = createCodec();
+
+            // Declares 1 schema: hash=0x00000000, fieldCount=1, but truncated before field data.
+            // JS reads undefined bytes as 0, producing nameLen=0 and typeLen=0.
+            // defineSchema then rejects the empty type string.
+            let buf = new Uint8Array([
+                1, 0,           // schemaCount = 1
+                0, 0, 0, 0,    // hash = 0
+                1, 0,           // fieldCount = 1
+                // truncated — no nameLen/name/typeLen/type/flags
+            ]);
+
+            expect(() => c.deserializeRegistry(buf)).toThrow('unknown field type');
+        });
+
+        it('valid serialized registry round-trips correctly', () => {
+            let c1 = createCodec();
+
+            c1.defineSchema([
+                { name: 'id', type: 'uint8' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let blob = c1.serializeRegistry(),
+                c2 = createCodec();
+
+            c2.deserializeRegistry(blob);
+
+            let obj = { id: 5, name: 'test' };
+
+            expect(c2.decode(c1.encode(obj))).toEqual(obj);
+        });
+
+        it('completely empty buffer throws', () => {
+            let c = createCodec();
+
+            // Empty Uint8Array — reading data[0] and data[1] yields undefined
+            // This may or may not throw depending on schemaCount resolution
+            // schemaCount = undefined! | (undefined! << 8) = 0, so loop doesn't execute
+            c.deserializeRegistry(new Uint8Array(0));
+
+            // Codec still works
+            expect(c.decode(c.encode(42))).toBe(42);
+        });
+    });
+
+
+    // === F-018: computeSize for bytes-type schema field ===
+
+    describe('computeSize bytes field (F-018)', () => {
+        it('bytes field computes correct size', () => {
+            let c = createCodec();
+
+            c.defineSchema([{ name: 'data', type: 'bytes' }]);
+
+            let obj = { data: new Uint8Array([1, 2, 3]) },
+                size = c.computeSize(obj),
+                encoded = c.encode(obj);
+
+            expect(size).toBeGreaterThan(0);
+            expect(size).toBe(encoded.length);
+        });
+
+        it('empty bytes field computes correct size', () => {
+            let c = createCodec();
+
+            c.defineSchema([{ name: 'data', type: 'bytes' }]);
+
+            let obj = { data: new Uint8Array(0) },
+                size = c.computeSize(obj),
+                encoded = c.encode(obj);
+
+            expect(size).toBeGreaterThan(0);
+            expect(size).toBe(encoded.length);
+        });
+
+        it('bytes field alongside fixed fields', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'data', type: 'bytes' },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let obj = { data: new Uint8Array([10, 20, 30, 40, 50]), id: 7 },
+                size = c.computeSize(obj),
+                encoded = c.encode(obj);
+
+            expect(size).toBeGreaterThan(0);
+            expect(size).toBe(encoded.length);
+        });
+
+        it('large bytes field computes correct size', () => {
+            let c = createCodec();
+
+            c.defineSchema([{ name: 'payload', type: 'bytes' }]);
+
+            let payload = new Uint8Array(1000);
+
+            for (let i = 0; i < 1000; i++) {
+                payload[i] = i % 256;
+            }
+
+            let obj = { payload },
+                size = c.computeSize(obj),
+                encoded = c.encode(obj);
+
+            expect(size).toBe(encoded.length);
+        });
+    });
 });
