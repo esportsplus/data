@@ -1435,23 +1435,67 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                     break;
                 }
                 case 'array': {
-                    let flag = buffer[pos]!,
-                        count = (buffer[pos + 1]! | (buffer[pos + 2]! << 8) | (buffer[pos + 3]! << 16) | (buffer[pos + 4]! << 24)) >>> 0;
+                    if (f.elementType) {
+                        // Typed array: varint count + element-specific data
+                        let [count, np] = readVarint(buffer, pos);
 
-                    pos += 5;
+                        pos = np;
 
-                    if (flag === 1) {
-                        pos += count;
-                    }
-                    else if (flag === 2) {
-                        pos += count * 4;
-                    }
-                    else if (flag === 3) {
-                        pos += count * 8;
+                        let elemSize = f.elementType.base ? FIELD_SIZES[f.elementType.base] : 0;
+
+                        if (elemSize > 0) {
+                            pos += count * elemSize;
+                        }
+                        else if (f.elementType.base === 'string' || f.elementType.base === 'bytes') {
+                            for (let j = 0; j < count; j++) {
+                                let [el, enp] = readVarint(buffer, pos);
+
+                                pos = enp + el;
+                            }
+                        }
+                        else if (f.elementType.base === 'object' && f.elementType.hash !== undefined) {
+                            for (let j = 0; j < count; j++) {
+                                let fb = buffer[pos]!;
+
+                                if (fb < 128) {
+                                    pos += 1 + fb;
+                                }
+                                else if (fb === 8 || fb === 18) {
+                                    let dLen = (buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0;
+
+                                    pos += 9 + dLen;
+                                }
+                                else {
+                                    pos = decodeTagEnd(buffer, pos, 0);
+                                }
+                            }
+                        }
+                        else {
+                            for (let j = 0; j < count; j++) {
+                                pos = decodeTagEnd(buffer, pos, 0);
+                            }
+                        }
                     }
                     else {
-                        for (let j = 0; j < count; j++) {
-                            pos = decodeTagEnd(buffer, pos, 0);
+                        // Generic array: flag + u32 count
+                        let flag = buffer[pos]!,
+                            count = (buffer[pos + 1]! | (buffer[pos + 2]! << 8) | (buffer[pos + 3]! << 16) | (buffer[pos + 4]! << 24)) >>> 0;
+
+                        pos += 5;
+
+                        if (flag === 1) {
+                            pos += count;
+                        }
+                        else if (flag === 2) {
+                            pos += count * 4;
+                        }
+                        else if (flag === 3) {
+                            pos += count * 8;
+                        }
+                        else {
+                            for (let j = 0; j < count; j++) {
+                                pos = decodeTagEnd(buffer, pos, 0);
+                            }
                         }
                     }
 
@@ -1459,7 +1503,23 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                 }
                 case 'mixed':
                 case 'object': {
-                    if (buffer[pos] === 8 || buffer[pos] === 18) {
+                    if (f.refHash !== undefined) {
+                        // Typed object: varint dataLen or full tag-8 header
+                        let fb = buffer[pos]!;
+
+                        if (fb < 128) {
+                            pos += 1 + fb;
+                        }
+                        else if (fb === 8 || fb === 18) {
+                            let dLen = (buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0;
+
+                            pos += 9 + dLen;
+                        }
+                        else {
+                            pos = decodeTagEnd(buffer, pos, 0);
+                        }
+                    }
+                    else if (buffer[pos] === 8 || buffer[pos] === 18) {
                         let dLen = (buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0;
 
                         pos += 9 + dLen;
@@ -1491,9 +1551,42 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
 
                 return buffer.slice(np, np + len);
             }
-            case 'array':
+            case 'array': {
+                if (target.elementType) {
+                    // Typed array — use full object decode to get the field
+                    let s = registry.schemas.get(hash);
+
+                    if (s && s.decodeFn) {
+                        let obj = s.decodeFn(buffer, dataStart, 0) as Record<string, unknown>;
+
+                        return obj[fieldName];
+                    }
+
+                    return undefined;
+                }
+
+                let end = (buffer[pos] === 8 || buffer[pos] === 18)
+                    ? pos + 9 + ((buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0)
+                    : decodeTagEnd(buffer, pos, 0);
+
+                return decodeSbc(buffer, pos, end - pos, 0);
+            }
             case 'mixed':
+                return decodeSbc(buffer, pos, decodeTagEnd(buffer, pos, 0) - pos, 0);
             case 'object': {
+                if (target.refHash !== undefined) {
+                    // Typed object — use full object decode
+                    let s = registry.schemas.get(hash);
+
+                    if (s && s.decodeFn) {
+                        let obj = s.decodeFn(buffer, dataStart, 0) as Record<string, unknown>;
+
+                        return obj[fieldName];
+                    }
+
+                    return undefined;
+                }
+
                 let end = (buffer[pos] === 8 || buffer[pos] === 18)
                     ? pos + 9 + ((buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0)
                     : decodeTagEnd(buffer, pos, 0);
@@ -1575,6 +1668,34 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                     }
 
                     switch (f.type) {
+                        case 'array': {
+                            if (!f.elementType) {
+                                return -1;
+                            }
+
+                            let arr = v as unknown[],
+                                elemSize = FIELD_SIZES[f.elementType.base] ?? 0;
+
+                            if (elemSize > 0) {
+                                size += varintSize(arr.length) + arr.length * elemSize;
+                            }
+                            else if (f.elementType.base === 'string') {
+                                let arrSize = varintSize(arr.length);
+
+                                for (let j = 0, m = arr.length; j < m; j++) {
+                                    let bl = byteLen(arr[j] as string);
+
+                                    arrSize += varintSize(bl) + bl;
+                                }
+
+                                size += arrSize;
+                            }
+                            else {
+                                return -1;
+                            }
+
+                            break;
+                        }
                         case 'bytes': {
                             let bl = (v as Uint8Array).length;
 
@@ -1582,13 +1703,46 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                             break;
                         }
                         case 'object': {
-                            let nested = computeSize(v);
+                            if (f.refHash !== undefined) {
+                                // Typed object: 1 byte varint len + nested fields (assumes < 128)
+                                let refSchema = registry.schemas.get(f.refHash);
 
-                            if (nested === -1) {
-                                return -1;
+                                if (refSchema) {
+                                    let nestedFields = refSchema.fields,
+                                        nestedSize = refSchema.bitmapBytes;
+
+                                    for (let j = 0, m = nestedFields.length; j < m; j++) {
+                                        let nf = nestedFields[j]!,
+                                            nv = (v as Record<string, unknown>)[nf.name];
+
+                                        if (nf.nullable && nv == null) {
+                                            continue;
+                                        }
+
+                                        if (nf.fixedSize > 0) {
+                                            nestedSize += nf.fixedSize;
+                                        }
+                                        else {
+                                            return -1;
+                                        }
+                                    }
+
+                                    size += 1 + nestedSize;
+                                }
+                                else {
+                                    return -1;
+                                }
+                            }
+                            else {
+                                let nested = computeSize(v);
+
+                                if (nested === -1) {
+                                    return -1;
+                                }
+
+                                size += nested;
                             }
 
-                            size += nested;
                             break;
                         }
                         case 'string': {
