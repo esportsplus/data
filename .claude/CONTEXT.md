@@ -1,254 +1,251 @@
 ---
-generated: 2026-04-09T00:00:00Z
+generated: 2026-04-09T12:00:00Z
 ttl: 3600
 source-hash: a328e779
-partial-refresh: false
+partial-refresh: true
 sections-refreshed: [1,2,3,4,5,6,7,8,9,10,11]
 ---
 
-## 1. Project Overview
+### 1. Project Overview
 
-**@esportsplus/data** v0.4.0 — Compile-time data validation utility with binary codec (SBC).
-- Entry: `src/index.ts`
-- Exports: `.` (main), `./compiler/tsc`, `./compiler/vite`
-- Dependencies: `@esportsplus/utilities` (runtime), `@esportsplus/typescript` (dev/compiler)
-- Peer: `typescript >=5.0`, `esbuild >=0.17` (optional), `vite >=4.0` (optional)
-- Proto codec removed (36f1702); codec.ts deleted; registry.ts merged into sbc/index.ts
+- **Name**: @esportsplus/data v0.4.0 (compile-time data validation utility)
+- **Author**: ICJR
+- **Entry points**: `./build/index.js`, `./build/compiler/plugins/tsc.js`, `./build/compiler/plugins/vite.js`
+- **Dependencies**: `@esportsplus/utilities` (runtime), `@esportsplus/typescript` (dev), `msgpackr` (dev/bench)
+- **Total source files**: 74 (.ts in src/)
 
-## 2. File Tree (src/)
+### 2. File Tree
 
 ```
-src/ (72 files, ~7314 LOC)
-├── constants.ts (3 LOC) — PACKAGE_NAME constant
-├── index.ts (40 LOC) — main barrel re-exports
-├── typed-array-codec.ts (139 LOC) — typed array binary encode/decode
-├── types.ts (63 LOC) — shared validator types
-├── sbc/
-│   ├── cache.ts (113 LOC) — SIEVE cache for schema lookups
-│   ├── codegen.ts (1294 LOC) — schema compile, encode/decode codegen
-│   ├── index.ts (2144 LOC) — createCodec, SBC encode/decode engine, registry
-│   └── platform.ts (308 LOC) — Node/browser platform abstraction, I/O primitives
-├── compiler/
-│   ├── error.ts (47 LOC) — error code generation
-│   ├── index.ts (175 LOC) — TSC transform plugin entry
-│   ├── type-analyzer.ts (413 LOC) — TypeScript type analysis
-│   ├── types.ts (14 LOC) — compiler types
-│   ├── validator.ts (545 LOC) — validator code generation
-│   ├── validators.ts (119 LOC) — branded validator registry
-│   ├── plugins/
-│   │   ├── tsc.ts (7 LOC) — TSC plugin export
-│   │   └── vite.ts (11 LOC) — Vite plugin export
-│   └── sbc/
-│       └── index.ts (304 LOC) — SBC compiler transform
-└── validators/ (50 files, ~1575 LOC total) — individual validation functions
+src/
+  index.ts                 40 LOC  — Main entry: re-exports codec, validators, types
+  constants.ts              3 LOC  — PACKAGE_NAME
+  types.ts                 63 LOC  — Shared types: Validator, ErrorType, ValidatorFunction, Brand
+  typed-array-codec.ts    143 LOC  — TypedArray encode/decode: encodeTypedArrayInto, decodeTypedArray, getTypedArrayType
+  compiler/
+    error.ts               47 LOC  — Error code generation
+    index.ts              175 LOC  — Compiler transform: default export (handles codec/validator calls)
+    type-analyzer.ts      413 LOC  — TypeScript type analysis: analyzeType, resolveBrandedType
+    types.ts               14 LOC  — Compiler types: GeneratorContext, PathMode
+    validator.ts          545 LOC  — Validator code generation: generateValidator
+    validators.ts         125 LOC  — Branded validator registry: get, inline
+    plugins/
+      tsc.ts                7 LOC  — TSC plugin entry
+      vite.ts              11 LOC  — Vite plugin entry
+    sbc/
+      index.ts            304 LOC  — SBC compiler transform
+  sbc/
+    cache.ts              113 LOC  — SIEVE cache: get, set, StoredSchema
+    codegen.ts           1239 LOC  — JIT codegen: compileSchema (encoder/decoder/computeSize/compressed)
+    index.ts             2196 LOC  — SBC codec core: codec(), encode/decode, schema registry, extractField
+    platform.ts           325 LOC  — Platform abstraction: varint, zigzag, Buffer/DataView, typed array maps
+  validators/
+    index.ts               56 LOC  — Barrel: re-exports 56 validators
+    [56 validator files]  ~20 LOC avg — alpha, email, uuid, ip, cc, isbn, etc.
 ```
 
-## 3. Package Scripts
+### 3. Package Scripts
 
-| Script | Description |
-|--------|-------------|
-| `build` | `tsc` — TypeScript compilation |
-| `build:test` | Build then test |
-| `prepare` | Build on install |
-| `bench` | `vitest bench` — run benchmarks |
-| `test` | `vitest run` — run tests |
+| Script | Command | Description |
+|--------|---------|-------------|
+| build | tsc | TypeScript compilation |
+| test | vitest run | Run test suite |
+| bench | vitest bench | Run benchmarks |
+| build:test | pnpm build && pnpm test | Build + test |
 
-## 4. Key Exports
+### 4. Key Exports (src/index.ts)
 
-**src/index.ts** (main entry):
-- `codec` — SBC codec factory (re-export from ./sbc)
-- `decodeTypedArray`, `encodeTypedArrayInto`, `getTypedArrayType`, `TYPED_ARRAY_MARKER` — typed array codec
-- `validator` — compile-time validator stub (throws if untransformed)
-- Types: `CodecOptions`, `DecodeOptions`, `EncodeOptions`, `FieldSpec`, `PersistentStore`, `Schema`, `SchemaRegistry`, `StoredSchema`, `Validator`, `ValidatorFn`, `Brand`
+```typescript
+export { codec } from './sbc';           // SBC binary codec factory
+export { alpha, email, uuid, ... } from './validators';  // 56 validators
+export { validator };                     // validator() factory
+export * from './types';                  // Validator, ErrorType, etc.
+export type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, PersistentStore, Schema, SchemaRegistry, StoredSchema };
+```
 
-**src/compiler/plugins/tsc.ts** (./compiler/tsc):
-- `default` — TSC plugin instance
+### 5. Module Map (by dependency rank)
 
-**src/compiler/plugins/vite.ts** (./compiler/vite):
-- `default` — Vite plugin instance
+```
+src/types.ts — Shared type definitions (rank: 0.95, consumers: 56)
+  exports: Validator, ErrorType, ValidatorFunction, Brand, Codec, ...
+  imported by: all 56 validators, compiler/*, index.ts
 
-## 5. Module Map
-
-**src/types.ts** — Shared validator types (rank: #1, 56 consumers)
-  exports: Validator, ValidatorFn, Brand (types)
-  imported by: 52 validator files, compiler/error, compiler/validator, compiler/validators, index
-
-**src/sbc/platform.ts** — Platform I/O primitives (rank: #2, 2 consumers)
-  exports: allocBuf, allocUnsafe, byteLen, codegenDriver, copyBuf, isNode, readBI64, readF64, readStr, readVarint, readZigzag, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8, writeVarint, writeZigzag, CodegenDriver
-  imported by: sbc/codegen, sbc/index
-
-**src/sbc/codegen.ts** — Schema compilation, encode/decode codegen (rank: #3, 1 consumer)
-  exports: compileSchema, FieldDef, ParsedType, Schema, SbcHelpers (types)
-  imports from: ./platform
-  imported by: sbc/index
-
-**src/sbc/index.ts** — SBC codec engine + registry (rank: #4, 3 consumers)
-  exports: codec + types (CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, PersistentStore, Schema, SchemaRegistry, StoredSchema)
-  imports from: ./codegen, ./platform, ./cache
-  imported by: src/index, compiler/plugins/tsc, compiler/plugins/vite
-
-**src/compiler/type-analyzer.ts** — TypeScript type introspection (rank: #5, 4 consumers)
-  exports: analyzeType, resolveBrandedType, AnalyzedProperty, AnalyzedType (types)
-  imported by: compiler/index, compiler/sbc/index, compiler/validator, compiler/validators
-
-**src/compiler/validators.ts** — Branded validator registry (rank: #6, 3 consumers)
-  exports: default { clear, get, inline }, BrandedValidator (type)
-  imports from: ./type-analyzer, ./types, ./error
-  imported by: compiler/index, compiler/types, compiler/validator
-
-**src/compiler/error.ts** — Error code generation (rank: #7, 2 consumers)
-  exports: default { generate, resolvePath }, ERRORS_VARIABLE
-  imported by: compiler/validator, compiler/validators
-
-**src/compiler/validator.ts** — Validator code generation (rank: #8, 1 consumer)
-  exports: generateValidator
-  imports from: ./type-analyzer, ./types, ./error, ./validators
-  imported by: compiler/index
-
-**src/compiler/index.ts** — TSC transform plugin (rank: #9, 2 consumers)
-  exports: default (transform config)
-  imports from: ../constants, ./type-analyzer, ./validators, ./validator
-  imported by: compiler/plugins/tsc, compiler/plugins/vite
-
-**src/constants.ts** — Package name constant (rank: #10, 6 consumers)
+src/constants.ts — Package name constant (rank: 0.40, consumers: 4)
   exports: PACKAGE_NAME
-  imported by: compiler/index, compiler/plugins/vite, src/index, validators/max, validators/min, validators/range
+  imported by: index.ts, validators/max.ts, validators/min.ts, validators/range.ts, compiler/plugins/vite.ts
 
-**src/typed-array-codec.ts** — Typed array binary codec (rank: #11, 1 consumer)
+src/sbc/platform.ts — Platform abstraction layer (rank: 0.65, consumers: 2)
+  exports: _vr, allocBuf, allocUnsafe, byteLen, codegenDriver, copyBuf, isNode, readBI64, readF64, readStr, readVarint, readZigzag, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8, writeVarint, writeZigzag, CodegenDriver
+  imported by: sbc/codegen.ts, sbc/index.ts
+
+src/sbc/codegen.ts — JIT compiler for schema encode/decode (rank: 0.55, consumers: 1)
+  exports: compileSchema, FieldDef, ParsedType, Schema, SbcHelpers
+  imported by: sbc/index.ts
+
+src/sbc/cache.ts — SIEVE eviction cache (rank: 0.45, consumers: 1)
+  exports: get, set, StoredSchema
+  imported by: sbc/index.ts
+
+src/sbc/index.ts — SBC codec core (rank: 0.70, consumers: 3 via barrel)
+  exports: codec, CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, PersistentStore, Schema, SchemaRegistry, StoredSchema
+  imports from: ./codegen, ./platform, ./cache
+
+src/compiler/type-analyzer.ts — TS type introspection (rank: 0.60, consumers: 4)
+  exports: analyzeType, resolveBrandedType, AnalyzedProperty, AnalyzedType
+  imported by: compiler/index.ts, compiler/sbc/index.ts, compiler/validators.ts (+1)
+
+src/compiler/validators.ts — Branded validator registry (rank: 0.50, consumers: 3)
+  exports: default {get, inline}, BrandedValidator
+  imported by: compiler/index.ts, compiler/validator.ts, compiler/types.ts
+
+src/compiler/error.ts — Error codegen helpers (rank: 0.35, consumers: 2)
+  exports: default {generate, resolvePath}, ERRORS_VARIABLE
+  imported by: compiler/validator.ts, compiler/validators.ts
+
+src/compiler/validator.ts — Validator code generation (rank: 0.30, consumers: 1)
+  exports: generateValidator
+  imported by: compiler/index.ts
+
+src/compiler/types.ts — Compiler internal types (rank: 0.45, consumers: 3)
+  exports: GeneratorContext, PathMode
+  imported by: compiler/validator.ts, compiler/validators.ts, compiler/error.ts
+
+src/compiler/index.ts — Compiler transform entry (rank: 0.35, consumers: 2)
+  exports: default
+  imported by: compiler/plugins/tsc.ts, compiler/plugins/vite.ts
+
+src/compiler/sbc/index.ts — SBC compiler transform (rank: 0.30, consumers: 2)
+  exports: default
+  imported by: compiler/plugins/tsc.ts, compiler/plugins/vite.ts
+
+src/typed-array-codec.ts — TypedArray binary codec (rank: 0.20, consumers: 0 internal)
   exports: TYPED_ARRAY_MARKER, decodeTypedArray, encodeTypedArrayInto, getTypedArrayType
-  imported by: src/index
 
-**src/sbc/cache.ts** — SIEVE eviction cache (rank: #12, 1 consumer)
-  exports: default { get, set }, StoredSchema (type)
-  imported by: sbc/index
+src/validators/index.ts — Barrel file (rank: 0.35, consumers: 1)
+  re-exports: 56 validators from individual files
+  imported by: src/index.ts
+```
 
-**src/compiler/sbc/index.ts** — SBC compiler transform (rank: #13, 2 consumers)
-  exports: default (transform config)
-  imports from: ../type-analyzer
-  imported by: compiler/plugins/tsc, compiler/plugins/vite
+### 6. Dependency Graph
 
-**src/compiler/types.ts** — Compiler types (rank: #14, leaf)
-  exports: GeneratorContext, PathMode (types)
-  imported by: compiler/validator, compiler/validators, compiler/error
+#### 6a. Import Frequency
 
-**src/compiler/plugins/tsc.ts** — TSC plugin (rank: #15, package export)
-  exports: default plugin
-  imports from: ../sbc, ..
+| File | Consumers | Exports Used/Total | Rank |
+|------|-----------|-------------------|------|
+| src/types.ts | 56 | 3/8 | 0.95 |
+| src/sbc/index.ts | 3 (via barrel+plugins) | 1/9 | 0.70 |
+| src/sbc/platform.ts | 2 | 20/21 | 0.65 |
+| src/compiler/type-analyzer.ts | 4 | 4/4 | 0.60 |
+| src/sbc/codegen.ts | 1 | 5/5 | 0.55 |
+| src/compiler/validators.ts | 3 | 2/2 | 0.50 |
+| src/compiler/types.ts | 3 | 2/2 | 0.45 |
+| src/sbc/cache.ts | 1 | 2/2 | 0.45 |
+| src/constants.ts | 4 | 1/1 | 0.40 |
+| src/compiler/index.ts | 2 | 1/1 | 0.35 |
+| src/compiler/error.ts | 2 | 2/2 | 0.35 |
+| src/compiler/sbc/index.ts | 2 | 1/1 | 0.30 |
+| src/compiler/validator.ts | 1 | 1/1 | 0.30 |
+| src/typed-array-codec.ts | 0 | 0/4 | 0.20 |
 
-**src/compiler/plugins/vite.ts** — Vite plugin (rank: #16, package export)
-  exports: default plugin
-  imports from: ../sbc, .., ~/constants
+#### 6b. Low Utilization Exports
 
-**src/validators/index.ts** — Barrel (rank: #17, 1 consumer)
-  exports: 50 named validators (alpha through words)
-  imported by: src/index (re-export via `* from './types'` path)
+```
+src/types.ts — 3/8 exports used internally (37%)
+  ✓ ErrorType (56 consumers)
+  ✓ ValidatorFunction (9 consumers)
+  ✓ Validator (1 consumer — index.ts)
+  ? Codec, Brand, etc. — re-exported for external consumers
 
-## 6. Dependency Graph
+src/sbc/index.ts — 1/9 exports used directly (11%)
+  ✓ codec (re-exported by index.ts)
+  ? CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, PersistentStore, Schema, SchemaRegistry, StoredSchema — type-only re-exports
 
-### 6a. Import Frequency
+src/typed-array-codec.ts — 0/4 exports used internally (0%)
+  ✗ TYPED_ARRAY_MARKER (0 consumers)
+  ✗ decodeTypedArray (0 consumers)
+  ✗ encodeTypedArrayInto (0 consumers)
+  ✗ getTypedArrayType (0 consumers)
+  NOTE: may be consumed externally or by tests only
+```
 
-| File | Consumers | Key Role |
-|------|-----------|----------|
-| src/types.ts | 56 | Type hub — all validators + compiler + index |
-| src/constants.ts | 6 | Package name |
-| src/compiler/type-analyzer.ts | 4 | Type analysis |
-| src/sbc/index.ts | 3 | Codec engine |
-| src/compiler/validators.ts | 3 | Branded validator registry |
-| src/sbc/platform.ts | 2 | I/O primitives |
-| src/compiler/error.ts | 2 | Error codegen |
-| src/compiler/index.ts | 2 | Transform plugin |
-| src/compiler/sbc/index.ts | 2 | SBC compiler |
-| src/compiler/types.ts | 3 | Compiler types |
-| src/sbc/codegen.ts | 1 | Schema compilation |
-| src/sbc/cache.ts | 1 | SIEVE cache |
-| src/typed-array-codec.ts | 1 | Typed array codec |
-| src/compiler/validator.ts | 1 | Validator codegen |
+#### 6c. Circular Dependencies
 
-### 6c. No circular dependencies detected.
+None detected.
 
-## 7. File Metrics
+### 7. File Metrics
 
 | File | LOC | Exports | Consumers | Complexity |
 |------|-----|---------|-----------|------------|
-| src/sbc/index.ts | 2144 | 1+types | 3 | high |
-| src/sbc/codegen.ts | 1294 | 1+types | 1 | high |
+| src/sbc/index.ts | 2196 | 9 | 3 | high |
+| src/sbc/codegen.ts | 1239 | 5 | 1 | high |
 | src/compiler/validator.ts | 545 | 1 | 1 | high |
-| src/compiler/type-analyzer.ts | 413 | 2+types | 4 | medium |
-| src/sbc/platform.ts | 308 | 19+type | 2 | medium |
+| src/compiler/type-analyzer.ts | 413 | 4 | 4 | high |
+| src/sbc/platform.ts | 325 | 21 | 2 | medium |
 | src/compiler/sbc/index.ts | 304 | 1 | 2 | medium |
 | src/compiler/index.ts | 175 | 1 | 2 | medium |
-| src/typed-array-codec.ts | 139 | 4 | 1 | low |
-| src/compiler/validators.ts | 119 | 3+type | 3 | low |
-| src/sbc/cache.ts | 113 | 2+type | 1 | low |
+| src/typed-array-codec.ts | 143 | 4 | 0 | medium |
+| src/compiler/validators.ts | 125 | 2 | 3 | medium |
+| src/sbc/cache.ts | 113 | 2 | 1 | low |
 
-## 8. Risk Scoring
+### 8. Risk Scoring
 
 | Symbol | File | Risk | Conn | Bound | Test | Sec | Deps |
 |--------|------|------|------|-------|------|-----|------|
-| codec | sbc/index.ts | 0.55 | 0.20 | 0.15 | 0.05 | 0.05 | 0.10 |
-| compileSchema | sbc/codegen.ts | 0.45 | 0.10 | 0.00 | 0.05 | 0.20 | 0.10 |
-| readVarint | sbc/platform.ts | 0.55 | 0.15 | 0.00 | 0.05 | 0.20 | 0.05 |
-| writeVarint | sbc/platform.ts | 0.45 | 0.15 | 0.00 | 0.05 | 0.20 | 0.05 |
-| analyzeType | compiler/type-analyzer.ts | 0.50 | 0.25 | 0.15 | 0.05 | 0.00 | 0.05 |
-| generateValidator | compiler/validator.ts | 0.50 | 0.10 | 0.15 | 0.05 | 0.20 | 0.00 |
-| validators.inline | compiler/validators.ts | 0.55 | 0.15 | 0.15 | 0.05 | 0.20 | 0.00 |
-| encodeTypedArrayInto | typed-array-codec.ts | 0.45 | 0.05 | 0.15 | 0.30 | 0.00 | 0.00 |
-| decodeTypedArray | typed-array-codec.ts | 0.45 | 0.05 | 0.15 | 0.30 | 0.00 | 0.00 |
-| cache.get | sbc/cache.ts | 0.25 | 0.05 | 0.00 | 0.05 | 0.00 | 0.05 |
-| cache.set | sbc/cache.ts | 0.25 | 0.05 | 0.00 | 0.05 | 0.00 | 0.05 |
+| codec | src/sbc/index.ts | 0.70 | 0.25 | 0.15 | 0.05 | 0.20 | 0.05 |
+| compileSchema | src/sbc/codegen.ts | 0.55 | 0.15 | 0.00 | 0.05 | 0.20 | 0.15 |
+| analyzeType | src/compiler/type-analyzer.ts | 0.55 | 0.20 | 0.15 | 0.05 | 0.00 | 0.15 |
+| generateValidator | src/compiler/validator.ts | 0.50 | 0.15 | 0.15 | 0.05 | 0.00 | 0.15 |
+| readVarint | src/sbc/platform.ts | 0.50 | 0.15 | 0.00 | 0.05 | 0.20 | 0.10 |
+| validators.inline | src/compiler/validators.ts | 0.50 | 0.15 | 0.15 | 0.05 | 0.00 | 0.15 |
+| encodeTypedArrayInto | src/typed-array-codec.ts | 0.50 | 0.05 | 0.00 | 0.30 | 0.00 | 0.15 |
+| decodeTypedArray | src/typed-array-codec.ts | 0.50 | 0.05 | 0.00 | 0.30 | 0.00 | 0.15 |
+| default (compiler) | src/compiler/index.ts | 0.45 | 0.15 | 0.15 | 0.05 | 0.00 | 0.10 |
+| default (sbc compiler) | src/compiler/sbc/index.ts | 0.45 | 0.15 | 0.15 | 0.05 | 0.00 | 0.10 |
+| cache.get/set | src/sbc/cache.ts | 0.30 | 0.10 | 0.00 | 0.05 | 0.00 | 0.15 |
+| validators (56) | src/validators/*.ts | 0.15 | 0.05 | 0.00 | 0.05 | 0.00 | 0.05 |
 
-## 9. Test Map
+### 9. Test Map
 
 | Test File | Covers |
 |-----------|--------|
-| tests/sbc.ts | sbc/index (codec, encode/decode) |
-| tests/sbc-schema-hints.ts | sbc schema hints |
-| tests/sbc-schema-store.ts | sbc schema store/registry |
-| tests/compile-validators.ts | compiler validator generation |
-| tests/transformer.ts | compiler transform plugin |
-| tests/type-analyzer-edge.ts | compiler/type-analyzer edge cases |
-| tests/validators.ts | validators (basic) |
-| tests/validators-format.ts | format validators |
-| tests/validators-advanced.ts | advanced validators |
-| tests/validators-constraints.ts | constraint validators |
-| tests/validators-number-date.ts | number/date validators |
-| tests/primitives.ts | primitive type validation |
-| tests/complex.ts | complex type validation |
-| tests/unions.ts | union type validation |
-| tests/edge-cases.ts | edge cases |
-| tests/error-paths.ts | error path coverage |
-| tests/branded-strings.ts | branded string types |
-| tests/custom-messages.ts | custom error messages |
-| tests/namespace-imports.ts | namespace import handling |
-| tests/async-validators.ts | async validators |
-| tests/plugins.ts | plugin integration |
+| tests/sbc.ts | src/sbc/* (codec, encode/decode, schema) |
+| tests/sbc-schema-hints.ts | SBC schema hint paths |
+| tests/sbc-schema-store.ts | SBC persistent store |
+| tests/validators*.ts (5 files) | src/validators/* |
+| tests/compile-validators.ts | src/compiler/validators.ts |
+| tests/transformer.ts | src/compiler/index.ts |
+| tests/type-analyzer-edge.ts | src/compiler/type-analyzer.ts |
+| tests/complex.ts | Complex nested types |
+| tests/primitives.ts | Primitive codec roundtrips |
+| tests/unions.ts | Union type handling |
+| tests/edge-cases.ts | Edge cases across modules |
+| tests/error-paths.ts | Error handling paths |
+| **No test coverage** | src/typed-array-codec.ts |
 
-**Gaps**: typed-array-codec.ts has no dedicated test file. sbc/cache.ts tested indirectly via sbc.ts.
-
-## 10. Recent History
+### 10. Recent History
 
 ```
+4b255c8 refactor(sbc,compiler): dedup codegen/encode, remove dead export, add body guard
+579fc4b checkpoint: before batch 5 architecture fixes
+63ea8d1 perf(sbc): eliminate hot-path allocations in varint, matchSchema, encodeSbc
+202de27 checkpoint: before batch 4 performance fixes
+fea9a87 fix(compiler,typed-array): fix eager regex eval, null union validation, header overflow
+69d24bc checkpoint: before batch 3 compiler correctness fixes
+4c624fa checkpoint: before batch 2 correctness SBC fixes
+7fce799 fix(sbc): add input validation for readVarint, decodeTagEnd, deserializeRegistry
+e1a66dd checkpoint: before batch 1 security fixes
 633b053 Merge branch 'main' of https://github.com/esportsplus/data
-6f38a92 chore: remove completed spec and batch state files
-efe417b fix(bench): delete obsolete bench files, fix imports, update vitest excludes
-724708a checkpoint: before bench test fixes
-24276a2 chore: remove proto from benchmarks, delete obsolete audit files
-93b389d checkpoint: before Batch 3 cleanup
-f80dc39 test: remove proto and codec transform test files
-5e52e94 checkpoint: before Batch 2 proto test removal
-36f1702 refactor(compiler): remove proto codec compiler and codec<T>() API
-ff87e92 checkpoint: before Batch 1 proto removal
-dd98af5 checkpoint: before F-029
-e0eada2 fix(proto): sign-extend negative BigInt in _readBigInt
-fb2ef53 checkpoint: before F-028
-94acef7 fix(proto): sign-extend negative int32 in _readVarint
-46b3b88 checkpoint: before F-027
 ```
 
-## 11. Build & Dev
+### 11. Build & Dev
 
-- Build: `pnpm build` (tsc)
-- Test: `pnpm test` (vitest run)
-- Bench: `pnpm bench` (vitest bench)
+```bash
+pnpm build        # TypeScript compilation (tsc)
+pnpm test         # vitest run
+pnpm bench        # vitest bench
+pnpm build:test   # Build + test
+```
 
-## Token Usage: ~3200/4000
+No env vars required. ESM module (`"type": "module"`).
+
+### 12. Token Usage: ~3200/4000
