@@ -5,10 +5,14 @@ import { compileSchema } from './codegen';
 import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readStr, readVarint, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 
 import type { FieldDef, ParsedType, Schema, SbcHelpers } from './codegen';
+import type { SchemaCache, StoredSchema } from './cache';
+
+import { createSchemaCache } from './cache';
 
 
 type CodecOptions = {
     compress?: boolean;
+    store?: PersistentStore;
 };
 
 type DecodeOptions = {
@@ -24,6 +28,11 @@ type FieldSpec = {
     name: string;
     nullable?: boolean;
     type: string;
+};
+
+type PersistentStore = {
+    get(hash: number): StoredSchema | null;
+    set(hash: number, schema: StoredSchema): void;
 };
 
 type SchemaRegistry = {
@@ -2089,5 +2098,5 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
 };
 
 
-export { createCodec };
-export type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, Schema, SchemaRegistry };
+export { createCodec, createSchemaCache };
+export type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, PersistentStore, Schema, SchemaCache, SchemaRegistry, StoredSchema };
