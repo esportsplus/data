@@ -570,6 +570,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             }
 
             case 8: {
+                if (offset + 9 > buf.length) {
+                    throw new Error('Codec2: truncated tag-8/18 header');
+                }
+
                 let hash = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
                     schema = hash === lastDecodeHash && lastDecodeSchema
                         ? lastDecodeSchema
@@ -586,6 +590,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             }
 
             case 18: {
+                if (offset + 9 > buf.length) {
+                    throw new Error('Codec2: truncated tag-8/18 header');
+                }
+
                 let hash = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
                     schema = registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash);
 
@@ -1900,6 +1908,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                         return obj[fieldName];
                     }
 
+                    return undefined;
+                }
+
+                if (pos + 9 > buffer.length) {
                     return undefined;
                 }
 

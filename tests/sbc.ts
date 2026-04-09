@@ -3488,15 +3488,9 @@ describe('Codec2', () => {
             let buf = new Uint8Array([8, hash & 0xFF, (hash >> 8) & 0xFF, (hash >> 16) & 0xFF, (hash >> 24) & 0xFF, 0]);
 
             // With hint, the condition `len >= 9` fails, so it falls through to normal decode
-            // Normal decode path sees tag=8, but buffer.length=6 < 9 so it won't read the
-            // 9-byte header via the compiled schema path either — falls through to decodeSbc
-            // The key behavior: it does NOT crash by trying to read 9-byte header when < 9 bytes
-            let result = c.decode(buf, { schema: hash });
-
-            // The result is whatever decodeSbc produces for this malformed buffer,
-            // but the critical assertion is that it did NOT throw a truncation error
-            // from the hint path trying to read beyond buffer bounds
-            expect(result).toBeDefined();
+            // Normal decode path sees tag=8, but buffer.length=6 < 9 — decodeSbc bounds check
+            // correctly throws truncation error instead of reading OOB
+            expect(() => c.decode(buf, { schema: hash })).toThrow('Codec2: truncated tag-8/18 header');
         });
 
         it('decode with schema hint on 9+ byte tag-8 buffer uses hint fast path', () => {
@@ -3701,6 +3695,116 @@ describe('Codec2', () => {
                 encoded = comp.encode(obj);
 
             expect(plain.decode(encoded)).toEqual(obj);
+        });
+    });
+
+
+    describe('extractField bounds on truncated object headers', () => {
+        it('truncated untyped object field in target-field read returns undefined', () => {
+            let c = codec();
+
+            let innerHash = c.defineSchema([
+                { name: 'x', type: 'uint8' },
+                { name: 'y', type: 'int32' },
+            ]);
+
+            c.defineSchema([
+                { name: 'child', type: 'object' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            // Encode valid object with untyped nested object
+            let valid = c.encode({ child: { x: 1, y: 2 }, name: 'test' });
+
+            // Find where the 'child' field data starts (after outer 9-byte header + bitmap)
+            // Truncate so the child tag-8 header is incomplete (keep fewer than 9 bytes of child data)
+            // Outer header = 9 bytes, bitmap = 0 or 1 bytes, then child field starts
+            // We want to cut mid-way through the child's tag-8/18 header
+            // The child is the first field, so truncate at 9 + bitmapBytes + 5 (partial header)
+            let truncated = valid.slice(0, 15);
+
+            // extractField targeting 'child' should return undefined (not crash)
+            expect(c.extractField(truncated, 'child')).toBeUndefined();
+        });
+
+        it('truncated untyped mixed/object field in scan loop returns undefined', () => {
+            let c = codec();
+
+            c.defineSchema([
+                { name: 'data', type: 'object' },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let valid = c.encode({ data: { foo: 'bar' }, id: 7 });
+
+            // Truncate so the scan over 'data' (untyped object with tag-8) hits bounds check
+            let truncated = valid.slice(0, 14);
+
+            expect(c.extractField(truncated, 'id')).toBeUndefined();
+        });
+    });
+
+
+    describe('JIT decoder p+9 bounds guard (S6)', () => {
+        it('truncated nested untyped object tag-8 header throws in JIT decoder', () => {
+            let c = codec();
+
+            // Schema with an untyped 'object' field — the JIT decoder generates an
+            // unconditional p+9 bounds check before reading the tag-8 header
+            c.defineSchema([
+                { name: 'child', type: 'object' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let valid = c.encode({ child: { a: 1, b: 2 }, name: 'hello' });
+
+            // The child field starts at offset 9 (after outer 9-byte header)
+            // It's encoded as tag-8 with its own 9-byte header
+            // Truncate mid-way through the child's tag-8 header
+            let truncated = valid.slice(0, 14);
+
+            expect(() => c.decode(truncated)).toThrow('truncated');
+        });
+    });
+
+
+    describe('tiered array classification phases (F-PERF-5)', () => {
+        it('phase 2+3: uint8 fails at 300, int32 fails at 3.14 -> float64 (tag 13)', () => {
+            let c = codec(),
+                data = [0, 300, 3.14],
+                encoded = c.encode(data);
+
+            // Tag 13 = packed float64: first byte is 13
+            expect(encoded[0]).toBe(13);
+
+            let decoded = c.decode(encoded) as number[];
+
+            expect(decoded).toEqual(data);
+        });
+
+        it('phase 2+3: uint8 fails at 300, int32 fails at 2147483648 -> float64 (tag 13)', () => {
+            let c = codec(),
+                data = [0, 300, 2147483648],
+                encoded = c.encode(data);
+
+            expect(encoded[0]).toBe(13);
+
+            let decoded = c.decode(encoded) as number[];
+
+            expect(decoded).toEqual(data);
+        });
+
+        it('phase 2: uint8 fails immediately -> int32 path (tag 14)', () => {
+            let c = codec(),
+                data = [256, 1000, -1],
+                encoded = c.encode(data);
+
+            // Tag 14 = packed int32
+            expect(encoded[0]).toBe(14);
+
+            let decoded = c.decode(encoded) as number[];
+
+            expect(decoded).toEqual(data);
         });
     });
 });
