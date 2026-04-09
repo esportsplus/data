@@ -2888,6 +2888,196 @@ describe('Codec2', () => {
     });
 
 
+    // === COMPRESSED MODE (tag 18) — extractField, decodeAt, encode view+hint ===
+
+    describe('compressed mode (tag 18)', () => {
+        describe('extractField on tag-18 buffer', () => {
+            it('compressed buffer has tag 18 and round-trips via decode', () => {
+                let c = createCodec({ compress: true });
+
+                c.defineSchema([
+                    { name: 'active', type: 'boolean' },
+                    { name: 'age', type: 'uint8' },
+                    { name: 'score', type: 'int32' },
+                ]);
+
+                let obj = { active: true, age: 30, score: -500 },
+                    encoded = c.encode(obj);
+
+                expect(encoded[0]).toBe(18);
+                expect(c.decode(encoded)).toEqual(obj);
+            });
+
+            it.fails('BUG: extractField returns wrong value for int32 on compressed buffer (varint layout mismatch)', () => {
+                let c = createCodec({ compress: true });
+
+                c.defineSchema([
+                    { name: 'active', type: 'boolean' },
+                    { name: 'age', type: 'uint8' },
+                    { name: 'score', type: 'int32' },
+                ]);
+
+                let encoded = c.encode({ active: true, age: 30, score: -500 });
+
+                expect(encoded[0]).toBe(18);
+                expect(c.extractField(encoded, 'score')).toBe(-500);
+            });
+
+            it.fails('BUG: extractField returns wrong value for varint-encoded fields on tag-18', () => {
+                let c = createCodec({ compress: true });
+
+                c.defineSchema([
+                    { name: 'count', type: 'uint16' },
+                    { name: 'id', type: 'uint8' },
+                    { name: 'value', type: 'int32' },
+                ]);
+
+                let encoded = c.encode({ count: 1000, id: 42, value: -99999 });
+
+                expect(encoded[0]).toBe(18);
+                expect(c.extractField(encoded, 'id')).toBe(42);
+            });
+
+            it.fails('BUG: extractField on compressed nullable buffer gives wrong results', () => {
+                let c = createCodec({ compress: true });
+
+                c.defineSchema([
+                    { name: 'id', type: 'uint8' },
+                    { name: 'optional', type: 'int32', nullable: true },
+                ]);
+
+                let encoded = c.encode({ id: 5, optional: 123 });
+
+                expect(encoded[0]).toBe(18);
+                expect(c.extractField(encoded, 'optional')).toBe(123);
+            });
+        });
+
+        describe('decodeAt on tag-18 buffer', () => {
+            it('decodeAt offset 0 on compressed buffer', () => {
+                let c = createCodec({ compress: true });
+
+                c.defineSchema([
+                    { name: 'id', type: 'uint8' },
+                    { name: 'value', type: 'int32' },
+                ]);
+
+                let obj = { id: 7, value: 12345 },
+                    encoded = c.encode(obj);
+
+                expect(encoded[0]).toBe(18);
+                expect(c.decodeAt(encoded, 0)).toEqual(obj);
+            });
+
+            it('decodeAt non-zero offset on compressed buffer', () => {
+                let c = createCodec({ compress: true });
+
+                c.defineSchema([
+                    { name: 'active', type: 'boolean' },
+                    { name: 'score', type: 'int32' },
+                ]);
+
+                let obj = { active: true, score: -42 },
+                    encoded = c.encode(obj),
+                    padded = new Uint8Array(8 + encoded.length);
+
+                padded.set(encoded, 8);
+
+                expect(c.decodeAt(padded, 8)).toEqual(obj);
+            });
+
+            it('decodeAt concatenated compressed values', () => {
+                let c = createCodec({ compress: true });
+
+                c.defineSchema([
+                    { name: 'x', type: 'uint8' },
+                    { name: 'y', type: 'int32' },
+                ]);
+
+                let a = c.encode({ x: 1, y: 100 }),
+                    b = c.encode({ x: 2, y: 200 }),
+                    combined = new Uint8Array(a.length + b.length);
+
+                combined.set(a, 0);
+                combined.set(b, a.length);
+
+                expect(c.decodeAt(combined, 0)).toEqual({ x: 1, y: 100 });
+                expect(c.decodeAt(combined, a.length)).toEqual({ x: 2, y: 200 });
+            });
+        });
+
+        describe('encode with compress + view + schema hint', () => {
+            it('view=true with schema hint produces decodable tag-18 buffer', () => {
+                let c = createCodec({ compress: true });
+
+                let hash = c.defineSchema([
+                    { name: 'id', type: 'uint8' },
+                    { name: 'value', type: 'int32' },
+                ]);
+
+                let obj = { id: 10, value: 9999 },
+                    view = c.encode(obj, { schema: hash, view: true });
+
+                expect(view[0]).toBe(18);
+
+                // View is decodable before next encode
+                let decoded = c.decode(view) as Record<string, unknown>;
+
+                expect(decoded).toEqual(obj);
+            });
+
+            it('view=true + schema hint + multiple fields', () => {
+                let c = createCodec({ compress: true });
+
+                let hash = c.defineSchema([
+                    { name: 'active', type: 'boolean' },
+                    { name: 'count', type: 'uint16' },
+                    { name: 'id', type: 'uint8' },
+                    { name: 'score', type: 'int32' },
+                ]);
+
+                let obj = { active: true, count: 500, id: 42, score: -100 },
+                    view = c.encode(obj, { schema: hash, view: true });
+
+                expect(view[0]).toBe(18);
+                expect(c.decode(view)).toEqual(obj);
+            });
+
+            it('view=true + schema as FieldSpec[] with compress', () => {
+                let c = createCodec({ compress: true });
+
+                let fields: { name: string; type: string }[] = [
+                    { name: 'a', type: 'uint8' },
+                    { name: 'b', type: 'int32' },
+                ];
+
+                c.defineSchema(fields);
+
+                let obj = { a: 5, b: -999 },
+                    view = c.encode(obj, { schema: fields, view: true });
+
+                expect(view[0]).toBe(18);
+                expect(c.decode(view)).toEqual(obj);
+            });
+
+            it('view=true alias is overwritten by next encode (compressed)', () => {
+                let c = createCodec({ compress: true });
+
+                c.defineSchema([
+                    { name: 'id', type: 'uint8' },
+                    { name: 'value', type: 'int32' },
+                ]);
+
+                let first = c.encode({ id: 1, value: 100 }, { view: true }),
+                    second = c.encode({ id: 2, value: 200 }, { view: true });
+
+                // Both views share the same underlying ArrayBuffer
+                expect(first.buffer).toBe(second.buffer);
+            });
+        });
+    });
+
+
     // === VIEW MODE (encode buffer aliasing) ===
 
     describe('view mode aliasing', () => {
