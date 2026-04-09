@@ -3,3 +3,6 @@
 .idea
 build
 node_modules
+
+# Claude batch state (ephemeral, session-specific)
+.claude/storage/batch-state*
