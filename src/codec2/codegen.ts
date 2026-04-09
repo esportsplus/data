@@ -68,6 +68,30 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
         fields = schema.fields,
         n = fields.length;
 
+    // Collect unique ref hashes for direct-call encode
+    let refHashes: Map<number, string> = new Map(),
+        refIdx = 0;
+
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!;
+
+        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
+            let rs = helpers.registry.get(f.refHash);
+
+            if (rs && rs.encodeFn) {
+                refHashes.set(f.refHash, `_re${refIdx++}`);
+            }
+        }
+
+        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
+            let rs = helpers.registry.get(f.elementType.hash);
+
+            if (rs && rs.encodeFn) {
+                refHashes.set(f.elementType.hash, `_re${refIdx++}`);
+            }
+        }
+    }
+
     body += d.preamble('b');
     body += `let p=pos;\n`;
 
@@ -227,8 +251,23 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'object':
+                if (f.refHash !== undefined) {
+                    let rp = refHashes.get(f.refHash);
 
-                body += `p=_encObj(${val},b,p);\n`;
+                    if (rp) {
+                        // Direct encode: reserve 1 byte for varint len, call ref encoder
+                        body += `{let _lp=p;p+=1;let _end=${rp}(${val},b,p);let _dl=_end-p;`;
+                        body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
+                        body += `else{p=_encObj(${val},b,_lp);}}\n`;
+                    }
+                    else {
+                        body += `p=_encObj(${val},b,p);\n`;
+                    }
+                }
+                else {
+                    body += `p=_encObj(${val},b,p);\n`;
+                }
+
                 break;
 
             case 'map':
@@ -260,12 +299,14 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
     body += `return p;\n`;
 
     let bindArgs = d.encoderBindArgs(),
-        params = d.encoderParams();
+        params = d.encoderParams(),
+        refEncParamNames = [...refHashes.values()],
+        refEncBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.encodeFn!);
 
     try {
         return (
-            new Function(params, '_enc', '_encObj', '_wv', `return function encode(o,b,pos){${body}}`)
-        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint);
+            new Function(params, '_enc', '_encObj', '_wv', ...refEncParamNames, `return function encode(o,b,pos){${body}}`)
+        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint, ...refEncBindValues);
     }
     catch (e) {
         throw new Error('Codec2: encoder compilation failed: ' + (e instanceof Error ? e.message : e));
@@ -277,6 +318,30 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
     let body = `'use strict';\n`,
         fields = schema.fields,
         n = fields.length;
+
+    // Collect unique ref hashes for direct-call decode
+    let refHashes: Map<number, string> = new Map(),
+        refIdx = 0;
+
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!;
+
+        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
+            let rs = helpers.registry.get(f.refHash);
+
+            if (rs && rs.decodeFn) {
+                refHashes.set(f.refHash, `_rd${refIdx++}`);
+            }
+        }
+
+        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
+            let rs = helpers.registry.get(f.elementType.hash);
+
+            if (rs && rs.decodeFn) {
+                refHashes.set(f.elementType.hash, `_rd${refIdx++}`);
+            }
+        }
+    }
 
     body += d.preamble('b');
     body += `let p=pos;\n`;
@@ -447,14 +512,42 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'object':
-                // Inline tag-8 fast path: skip decodeTagEnd + decodeSbc switch overhead
-                body += `{if(b[p]===8){`;
-                body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
-                body += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                body += `_s=_reg.get(_h);`;
-                body += `if(_s&&_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}`;
-                body += `p+=9+_dl;}`;
-                body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
+                if (f.refHash !== undefined) {
+                    let rp = refHashes.get(f.refHash);
+
+                    if (rp) {
+                        // Direct decode: 1-byte varint len fast path, fallback to tag-8 header
+                        body += `{let _dl=b[p];`;
+                        body += `if(_dl<128){p+=1;f${i}=${rp}(b,p,_d+1);p+=_dl;}`;
+                        body += `else if(b[p]===8||b[p]===18){`;
+                        body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                        body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                        body += `_s=_reg.get(_h);`;
+                        body += `if(_s&&_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}`;
+                        body += `p+=9+_dl2;}`;
+                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
+                    }
+                    else {
+                        // Ref schema not compiled — generic path
+                        body += `{if(b[p]===8){`;
+                        body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                        body += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                        body += `_s=_reg.get(_h);`;
+                        body += `if(_s&&_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}`;
+                        body += `p+=9+_dl;}`;
+                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
+                    }
+                }
+                else {
+                    // Inline tag-8 fast path: skip decodeTagEnd + decodeSbc switch overhead
+                    body += `{if(b[p]===8){`;
+                    body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                    body += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                    body += `_s=_reg.get(_h);`;
+                    body += `if(_s&&_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}`;
+                    body += `p+=9+_dl;}`;
+                    body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
+                }
 
                 break;
 
@@ -485,12 +578,14 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
     body += `return _r;\n`;
 
-    let bindArgs = d.decoderBindArgs();
+    let bindArgs = d.decoderBindArgs(),
+        refDecParamNames = [...refHashes.values()],
+        refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
 
     try {
-        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', `return function decode(b,pos,_d){${body}}`);
+        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', ...refDecParamNames, `return function decode(b,pos,_d){${body}}`);
 
-        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint);
+        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, ...refDecBindValues);
     }
     catch (e) {
         throw new Error('Codec2: decoder compilation failed: ' + (e instanceof Error ? e.message : e));
