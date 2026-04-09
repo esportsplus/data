@@ -17,7 +17,7 @@ const ERRORS_PUSH_REGEX = /errors\.push\((['"`])(.+?)\1\)/g;
 const VALUE_WORD_REGEX = /\bvalue\b/g;
 
 
-let cache = new Map<string, Map<string, BrandedValidator>>();
+let cache = new WeakMap<ts.SourceFile, Map<string, BrandedValidator>>();
 
 
 function parse(node: ts.CallExpression, checker: ts.TypeChecker): BrandedValidator | null {
@@ -73,26 +73,21 @@ function visit(node: ts.Node, validators: Map<string, BrandedValidator>, checker
 
 
 const get = (path: string | null | undefined, program: ts.Program) => {
-    if (!path) {
-        return new Map();
-    }
-
-    if (cache.has(path)) {
-        return cache.get(path)!;
-    }
-
-    let file = program.getSourceFile(path);
+    let file = path ? program.getSourceFile(path) : undefined;
 
     if (!file) {
-        cache.set(path, new Map());
         return new Map();
+    }
+
+    if (cache.has(file)) {
+        return cache.get(file)!;
     }
 
     let validators = new Map<string, BrandedValidator>();
 
     visit(file, validators, program.getTypeChecker());
 
-    cache.set(path, validators);
+    cache.set(file, validators);
 
     return validators;
 };

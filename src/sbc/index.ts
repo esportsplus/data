@@ -418,6 +418,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         cacheFields: (FieldDef[] | null)[] = [null, null, null, null],
         cacheIdx = 0,
         cacheSchemas: (Schema | null)[] = [null, null, null, null],
+        typedSchemaFieldCounts = new Set<number>(),
         typedSchemas = new Map<number, Schema>(),  // nameHash → schema for defineSchema with structural types
         weakCache = new WeakMap<object, Schema>();
 
@@ -1215,7 +1216,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         }
 
         // Last resort: check pre-defined typed schemas by field names only
-        if (typedSchemas.size > 0) {
+        if (typedSchemas.size > 0 && typedSchemaFieldCounts.has(keyCount)) {
             let sortedKeys = Object.keys(obj).sort(),
                 nameHash = computeNameHash(sortedKeys),
                 typed = typedSchemas.get(nameHash);
@@ -1567,6 +1568,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             }
             else {
                 typedSchemas.set(nameHash, schema);
+                typedSchemaFieldCounts.add(schema.fields.length);
             }
         }
 

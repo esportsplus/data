@@ -408,21 +408,37 @@ function generateTupleValidation(
 ): string {
     let parts: string[] = [],
         path = pathMode.path,
+        requiredCount = 0,
         tupleTypes = prop.tupleTypes || [];
 
     for (let i = 0, n = tupleTypes.length; i < n; i++) {
-        parts.push(
-            generateTypeValidation(
-                tupleTypes[i],
-                `${varname}[${i}]`,
-                { kind: 'static', path: [...path, `[${i}]`] },
-                context
-            )
-        );
+        if (!tupleTypes[i].optional) {
+            requiredCount++;
+        }
     }
 
+    for (let i = 0, n = tupleTypes.length; i < n; i++) {
+        let elementValidation = generateTypeValidation(
+            tupleTypes[i],
+            `${varname}[${i}]`,
+            { kind: 'static', path: [...path, `[${i}]`] },
+            context
+        );
+
+        if (tupleTypes[i].optional) {
+            parts.push(`if (${varname}.length > ${i}) { ${elementValidation} }`);
+        }
+        else {
+            parts.push(elementValidation);
+        }
+    }
+
+    let lengthCheck = requiredCount === tupleTypes.length
+        ? `${varname}.length !== ${tupleTypes.length}`
+        : `${varname}.length < ${requiredCount} || ${varname}.length > ${tupleTypes.length}`;
+
     return `
-        if (!Array.isArray(${varname}) || ${varname}.length !== ${tupleTypes.length}) {
+        if (!Array.isArray(${varname}) || ${lengthCheck}) {
             ${error.generate('invalid tuple type', pathMode, context)}
         }
         else {
@@ -455,6 +471,9 @@ function generateUnionValidation(prop: AnalyzedProperty, varname: string, pathMo
     // Add type checks
     for (let i = 0, n = unionTypes.length; i < n; i++) {
         switch (unionTypes[i].type) {
+            case 'bigint':
+                checks.push(`typeof ${varname} !== 'bigint'`);
+                break;
             case 'boolean':
                 checks.push(`typeof ${varname} !== 'boolean'`);
                 break;

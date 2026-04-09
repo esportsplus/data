@@ -242,12 +242,15 @@ function analyzeTupleType(
     checker: ts.TypeChecker,
     visited: Set<ts.Type>
 ): AnalyzedProperty {
-    let elements = checker.getTypeArguments(type as ts.TypeReference),
+    let elementFlags = type.elementFlags,
+        elements = checker.getTypeArguments(type as ts.TypeReference),
         tupleTypes: AnalyzedProperty[] = [];
 
     for (let i = 0, n = elements.length; i < n; i++) {
+        let isOptional = !!(elementFlags && elementFlags[i]! & ts.ElementFlags.Optional);
+
         tupleTypes.push(
-            analyzePropertyType(elements[i], `${i}`, false, checker, visited)
+            analyzePropertyType(elements[i], `${i}`, isOptional, checker, visited)
         );
     }
 
