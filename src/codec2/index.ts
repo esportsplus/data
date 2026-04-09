@@ -5,9 +5,9 @@ import { compileSchema } from './codegen';
 import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readStr, readVarint, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 
 import type { FieldDef, ParsedType, Schema, SbcHelpers } from './codegen';
-import type { SchemaCache, StoredSchema } from './cache';
+import type { StoredSchema } from './cache';
 
-import { createSchemaCache } from './cache';
+import cache from './cache';
 
 
 type CodecOptions = {
@@ -41,8 +41,6 @@ type SchemaRegistry = {
 };
 
 
-// Module-level SIEVE cache — shared across all codec instances
-let schemaCache = createSchemaCache();
 
 
 let MAX_ARRAY_COUNT = 1048576; // 2^20 — guard against DoS from untrusted u32 counts
@@ -247,7 +245,7 @@ function inferType(value: unknown): string {
 }
 
 
-function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers, schemaCache: SchemaCache, store: PersistentStore | null): Schema {
+function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers, store: PersistentStore | null): Schema {
     let keys = Object.keys(obj).sort(),
         types: string[] = new Array(keys.length);
 
@@ -346,7 +344,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         storedFields[i] = { name: keys[i]!, type: types[i]! };
     }
 
-    schemaCache.set(hash, { fields: storedFields, hash });
+    cache.set(hash, { fields: storedFields, hash });
 
     if (store) {
         store.set(hash, { fields: storedFields, hash });
@@ -419,13 +417,13 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
     }
 
     function resolveSchemaFromCacheOrStore(hash: number): Schema | null {
-        let stored = schemaCache.get(hash);
+        let stored = cache.get(hash);
 
         if (!stored && store) {
             stored = store.get(hash);
 
             if (stored) {
-                schemaCache.set(hash, stored);
+                cache.set(hash, stored);
             }
         }
 
@@ -451,7 +449,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
             schema = matchSchema(obj);
 
             if (!schema) {
-                schema = inferAndRegister(obj, registry, helpers, schemaCache, store);
+                schema = inferAndRegister(obj, registry, helpers, store);
             }
 
             setCache(schema, obj);
@@ -1090,7 +1088,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                     schema = matchSchema(obj);
 
                     if (!schema) {
-                        schema = inferAndRegister(obj, registry, helpers, schemaCache, store);
+                        schema = inferAndRegister(obj, registry, helpers, store);
                     }
 
                     setCache(schema, obj);
@@ -1349,7 +1347,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                 schema = matchSchema(obj);
 
                 if (!schema) {
-                    schema = inferAndRegister(obj, registry, helpers, schemaCache, store);
+                    schema = inferAndRegister(obj, registry, helpers, store);
                 }
 
                 setCache(schema, obj);
@@ -1527,7 +1525,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
         compileSchema(schema, helpers);
         registry.schemas.set(hash, schema);
 
-        schemaCache.set(hash, { fields: sorted, hash });
+        cache.set(hash, { fields: sorted, hash });
 
         if (store) {
             store.set(hash, { fields: sorted, hash });
@@ -1886,7 +1884,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                     schema = weakCache.get(obj) ?? matchSchema(obj) ?? null;
 
                 if (!schema) {
-                    schema = inferAndRegister(obj, registry, helpers, schemaCache, store);
+                    schema = inferAndRegister(obj, registry, helpers, store);
                     setCache(schema, obj);
                 }
 
@@ -2142,5 +2140,5 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
 };
 
 
-export { createCodec, createSchemaCache };
-export type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, PersistentStore, Schema, SchemaCache, SchemaRegistry, StoredSchema };
+export { createCodec };
+export type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, PersistentStore, Schema, SchemaRegistry, StoredSchema };

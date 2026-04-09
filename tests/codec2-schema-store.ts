@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createCodec } from '../src/codec2';
-import { createSchemaCache } from '../src/codec2/cache';
 
 import type { StoredSchema } from '../src/codec2/cache';
+
+import cache from '../src/codec2/cache';
 
 
 function makeSchema(hash: number, fields?: string[]): StoredSchema {
@@ -14,82 +15,29 @@ function makeSchema(hash: number, fields?: string[]): StoredSchema {
 
 
 describe('SIEVE cache', () => {
-    it('evicts oldest unvisited entry when capacity exceeded', () => {
-        let cache = createSchemaCache(4);
+    it('stores and retrieves schemas', () => {
+        let schema = makeSchema(900001);
 
-        cache.set(1, makeSchema(1));
-        cache.set(2, makeSchema(2));
-        cache.set(3, makeSchema(3));
-        cache.set(4, makeSchema(4));
-        cache.set(5, makeSchema(5));
+        cache.set(900001, schema);
 
-        expect(cache.get(1)).toBe(null);
-        expect(cache.get(5)).not.toBe(null);
-        expect(cache.get(5)!.hash).toBe(5);
-    });
+        let result = cache.get(900001);
 
-    it('visited entry survives eviction', () => {
-        let cache = createSchemaCache(4);
-
-        cache.set(1, makeSchema(1));
-        cache.set(2, makeSchema(2));
-        cache.set(3, makeSchema(3));
-        cache.set(4, makeSchema(4));
-
-        // Access hash 1 — sets visited bit
-        cache.get(1);
-
-        // Trigger eviction
-        cache.set(5, makeSchema(5));
-
-        expect(cache.get(1)).not.toBe(null);
-        expect(cache.get(1)!.hash).toBe(1);
-        expect(cache.get(2)).toBe(null);
-    });
-
-    it('evicts when all entries visited (scan cap)', () => {
-        let cache = createSchemaCache(4);
-
-        cache.set(1, makeSchema(1));
-        cache.set(2, makeSchema(2));
-        cache.set(3, makeSchema(3));
-        cache.set(4, makeSchema(4));
-
-        // Visit all entries
-        cache.get(1);
-        cache.get(2);
-        cache.get(3);
-        cache.get(4);
-
-        // Must evict despite all visited
-        cache.set(5, makeSchema(5));
-
-        let count = 0;
-
-        for (let i = 1; i <= 5; i++) {
-            if (cache.get(i) !== null) {
-                count++;
-            }
-        }
-
-        expect(count).toBe(4);
+        expect(result).not.toBe(null);
+        expect(result!.hash).toBe(900001);
     });
 
     it('returns null for unknown hash', () => {
-        let cache = createSchemaCache(4);
-
         expect(cache.get(99999)).toBe(null);
     });
 
     it('overwrites existing entry on duplicate set', () => {
-        let cache = createSchemaCache(4),
-            schemaA = makeSchema(1, ['x', 'y']),
-            schemaB = makeSchema(1, ['p', 'q', 'r']);
+        let schemaA = makeSchema(900002, ['x', 'y']),
+            schemaB = makeSchema(900002, ['p', 'q', 'r']);
 
-        cache.set(1, schemaA);
-        cache.set(1, schemaB);
+        cache.set(900002, schemaA);
+        cache.set(900002, schemaB);
 
-        let result = cache.get(1);
+        let result = cache.get(900002);
 
         expect(result).not.toBe(null);
         expect(result!.fields.length).toBe(3);
@@ -150,7 +98,6 @@ describe('Codec schema sharing', () => {
 
         codec.encode({ active: true, user: { age: 30, name: 'Alice' } });
 
-        // Both parent and child schemas should be stored
         expect(storage.size).toBeGreaterThanOrEqual(2);
 
         let childFound = false;

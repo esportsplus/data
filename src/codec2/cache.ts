@@ -1,4 +1,4 @@
-// Codec2 — SIEVE-evicted bounded schema cache
+// Codec2 — SIEVE-evicted bounded schema cache (module singleton)
 
 
 type CacheEntry = {
@@ -15,105 +15,98 @@ type FieldSpec = {
     type: string;
 };
 
-type SchemaCache = {
-    get(hash: number): StoredSchema | null;
-    set(hash: number, schema: StoredSchema): void;
-};
-
 type StoredSchema = {
     fields: FieldSpec[];
     hash: number;
 };
 
 
-const createSchemaCache = (maxSize = 1024): SchemaCache => {
-    let hand: CacheEntry | null = null,
-        head: CacheEntry | null = null,
-        map = new Map<number, CacheEntry>(),
-        tail: CacheEntry | null = null;
+let hand: CacheEntry | null = null,
+    head: CacheEntry | null = null,
+    map = new Map<number, CacheEntry>(),
+    maxSize = 1024,
+    tail: CacheEntry | null = null;
 
-    function evictOne(): void {
-        let o = hand ?? tail;
 
-        if (!o) {
-            return;
-        }
+function evictOne(): void {
+    let o = hand ?? tail;
 
-        for (let i = 0, n = 64; i < n && o.visited; i++) {
-            o.visited = false;
-            o = o.prev ?? tail!;
-        }
-
-        hand = o.prev;
-        unlinkEntry(o);
-        map.delete(o.hash);
+    if (!o) {
+        return;
     }
 
-    function unlinkEntry(entry: CacheEntry): void {
-        if (entry.prev) {
-            entry.prev.next = entry.next;
-        }
-        else {
-            head = entry.next;
-        }
-
-        if (entry.next) {
-            entry.next.prev = entry.prev;
-        }
-        else {
-            tail = entry.prev;
-        }
-
-        if (hand === entry) {
-            hand = entry.prev;
-        }
-
-        entry.prev = entry.next = null;
+    for (let i = 0, n = 64; i < n && o.visited; i++) {
+        o.visited = false;
+        o = o.prev ?? tail!;
     }
 
-    return {
-        get(hash: number): StoredSchema | null {
-            let entry = map.get(hash);
+    hand = o.prev;
+    unlinkEntry(o);
+    map.delete(o.hash);
+}
 
-            if (!entry) {
-                return null;
-            }
+function get(hash: number): StoredSchema | null {
+    let entry = map.get(hash);
 
-            entry.visited = true;
+    if (!entry) {
+        return null;
+    }
 
-            return entry.schema;
-        },
+    entry.visited = true;
 
-        set(hash: number, schema: StoredSchema): void {
-            let entry = map.get(hash);
+    return entry.schema;
+}
 
-            if (entry) {
-                entry.schema = schema;
-                entry.visited = true;
+function set(hash: number, schema: StoredSchema): void {
+    let entry = map.get(hash);
 
-                return;
-            }
+    if (entry) {
+        entry.schema = schema;
+        entry.visited = true;
 
-            while (map.size >= maxSize) {
-                evictOne();
-            }
+        return;
+    }
 
-            entry = { hash, next: null, prev: null, schema, visited: false };
+    while (map.size >= maxSize) {
+        evictOne();
+    }
 
-            if (head) {
-                entry.next = head;
-                head.prev = entry;
-            }
-            else {
-                tail = entry;
-            }
+    entry = { hash, next: null, prev: null, schema, visited: false };
 
-            head = entry;
-            map.set(hash, entry);
-        },
-    };
-};
+    if (head) {
+        entry.next = head;
+        head.prev = entry;
+    }
+    else {
+        tail = entry;
+    }
+
+    head = entry;
+    map.set(hash, entry);
+}
+
+function unlinkEntry(entry: CacheEntry): void {
+    if (entry.prev) {
+        entry.prev.next = entry.next;
+    }
+    else {
+        head = entry.next;
+    }
+
+    if (entry.next) {
+        entry.next.prev = entry.prev;
+    }
+    else {
+        tail = entry.prev;
+    }
+
+    if (hand === entry) {
+        hand = entry.prev;
+    }
+
+    entry.prev = entry.next = null;
+}
 
 
-export { createSchemaCache };
-export type { SchemaCache, StoredSchema };
+export default { get, set };
+export type { StoredSchema };
