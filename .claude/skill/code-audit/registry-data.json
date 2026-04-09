@@ -2,10 +2,10 @@
   "version": 4,
   "project": "@esportsplus/data",
   "last_audit": {
-    "date": "2026-04-07",
-    "commit": "f4201f1",
-    "findings_total": 13,
-    "findings_new": 13,
+    "date": "2026-04-09",
+    "commit": "d3d0154",
+    "findings_total": 27,
+    "findings_new": 8,
     "findings_recurring": 0
   },
   "runs": [
@@ -47,563 +47,725 @@
       },
       "agent_overlap": {},
       "estimated_remaining": null
+    },
+    {
+      "date": "2026-04-08",
+      "commit": "d3d0154",
+      "mode": "incremental",
+      "files_audited": 5,
+      "files_skipped": 0,
+      "files_reaudited_probabilistic": 0,
+      "findings_new": 19,
+      "findings_recurring": 0,
+      "sqale_rating": "D",
+      "agent_results": {
+        "correctness": { "status": "ok", "symbols": 14, "sub_targets": 1, "findings": 4 },
+        "security": { "status": "ok", "symbols": 11, "sub_targets": 1, "findings": 4 },
+        "performance": { "status": "ok", "symbols": 11, "sub_targets": 1, "findings": 2 },
+        "architecture": { "status": "ok", "symbols": 39, "sub_targets": 1, "findings": 2 },
+        "testing": { "status": "ok", "symbols": 10, "sub_targets": 1, "findings": 8 }
+      },
+      "agent_overlap": {},
+      "estimated_remaining": null
+    },
+    {
+      "date": "2026-04-09",
+      "commit": "d3d0154",
+      "mode": "test-directory",
+      "files_audited": 34,
+      "files_skipped": 0,
+      "files_reaudited_probabilistic": 0,
+      "findings_new": 8,
+      "findings_recurring": 0,
+      "sqale_rating": "C",
+      "agent_results": {
+        "correctness": { "status": "skipped", "symbols": 0, "sub_targets": 0, "findings": 0 },
+        "security": { "status": "skipped", "symbols": 0, "sub_targets": 0, "findings": 0 },
+        "performance": { "status": "skipped", "symbols": 0, "sub_targets": 0, "findings": 0 },
+        "architecture": { "status": "skipped", "symbols": 0, "sub_targets": 0, "findings": 0 },
+        "testing": { "status": "ok", "symbols": 37, "sub_targets": 4, "findings": 8 }
+      },
+      "agent_overlap": {},
+      "estimated_remaining": null
     }
   ],
   "findings": {
     "F-001": {
       "status": "open",
-      "file": "src/sbc/codegen.ts",
-      "symbol": "compileFieldExtractors",
-      "category": "correctness",
-      "title": "extractField returns undefined for non-null nullable variable-length fields",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
-      "found_by": ["correctness"],
-      "priority_score": 85
+      "file": "src/sbc/platform.ts",
+      "symbol": "readVarint",
+      "category": "security",
+      "title": "readVarint CPU DoS via all-continuation-bit input",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["security"],
+      "priority_score": 123
     },
     "F-002": {
       "status": "open",
       "file": "src/sbc/index.ts",
-      "symbol": "encodeValue",
+      "symbol": "decodeTagEnd",
       "category": "security",
-      "title": "allocUnsafe fast-path encode returns unsliced buffer",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
+      "title": "decodeTagEnd unchecked end offsets for tags 5/6/12/13/14/17",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
       "found_by": ["security"],
-      "priority_score": 58
+      "priority_score": 119
     },
     "F-003": {
       "status": "open",
       "file": "src/sbc/index.ts",
-      "symbol": "encodeSbc",
-      "category": "optimize",
-      "title": "keysOut array allocated unconditionally on every object encode",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
-      "found_by": ["performance"],
-      "priority_score": 55
+      "symbol": "decode",
+      "category": "correctness",
+      "title": "lastDecodeFn stale pointer after tag-18 decode",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["correctness"],
+      "priority_score": 103
     },
     "F-004": {
       "status": "open",
       "file": "src/sbc/index.ts",
-      "symbol": "encodeValue",
+      "symbol": "matchSchema",
       "category": "optimize",
-      "title": "Double lookupSchema for plain objects without computeSize",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
+      "title": "matchSchema for-in key counting + redundant WeakMap lookup",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
       "found_by": ["performance"],
-      "priority_score": 65
+      "priority_score": 103
     },
     "F-005": {
       "status": "open",
       "file": "src/sbc/platform.ts",
-      "symbol": "textEncoder",
-      "category": "loc",
-      "title": "Dead exports textEncoder and readShortStr",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
-      "found_by": ["architecture"],
-      "priority_score": 45
+      "symbol": "readVarint",
+      "category": "optimize",
+      "title": "readVarint allocates [number, number] tuple per call",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["performance"],
+      "priority_score": 99
     },
     "F-006": {
       "status": "open",
       "file": "src/sbc/index.ts",
-      "symbol": "decode",
-      "category": "coverage",
-      "title": "decode() uncompressed object path not tested",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
-      "found_by": ["testing"],
-      "priority_score": 55
+      "symbol": "matchSchema",
+      "category": "correctness",
+      "title": "Ring-buffer false positive for structural element types",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["correctness"],
+      "priority_score": 79
     },
     "F-007": {
       "status": "open",
       "file": "src/sbc/index.ts",
-      "symbol": "extractField",
-      "category": "test-quality",
-      "title": "extractField nullable non-null path not tested",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
-      "found_by": ["testing"],
-      "priority_score": 60
+      "symbol": "defineSchema",
+      "category": "correctness",
+      "title": "typedSchemas last-writer-wins on shared name-hash",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["correctness"],
+      "priority_score": 83
     },
     "F-008": {
       "status": "open",
-      "file": "src/sbc/platform.ts",
-      "symbol": "readVarint",
-      "category": "coverage",
-      "title": "readVarint/writeVarint no behavioral test coverage",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
-      "found_by": ["testing"],
-      "priority_score": 50
+      "file": "src/sbc/index.ts",
+      "symbol": "encode",
+      "category": "security",
+      "title": "encode(view=true) returns alias of shared mutable encodeBuf",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["security"],
+      "priority_score": 79
     },
     "F-009": {
       "status": "open",
-      "file": "src/sbc/platform.ts",
-      "symbol": "readZigzag",
-      "category": "coverage",
-      "title": "readZigzag/writeZigzag no behavioral test coverage",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
-      "found_by": ["testing"],
-      "priority_score": 50
+      "file": "src/sbc/index.ts",
+      "symbol": "deserializeRegistry",
+      "category": "security",
+      "title": "deserializeRegistry uncapped loop bounds — DoS",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["security"],
+      "priority_score": 79
     },
     "F-010": {
       "status": "open",
-      "file": "src/sbc/registry.ts",
-      "symbol": "deserializeRegistry",
-      "category": "test-quality",
-      "title": "deserializeRegistry error paths and legacy format not tested",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
-      "found_by": ["testing"],
-      "priority_score": 45
+      "file": "src/sbc/index.ts",
+      "symbol": "serializeRegistry",
+      "category": "correctness",
+      "title": "serialize/deserializeRegistry truncate non-Latin-1 field names",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["correctness"],
+      "priority_score": 49
     },
     "F-011": {
       "status": "open",
-      "file": "src/sbc/registry.ts",
-      "symbol": "createSchemaStore",
-      "category": "coverage",
-      "title": "createSchemaStore no test coverage (110 LOC)",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
-      "found_by": ["testing"],
-      "priority_score": 50
+      "file": "src/sbc/platform.ts",
+      "symbol": "zigzagDecode",
+      "category": "loc",
+      "title": "Dead export zigzagDecode",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["architecture"],
+      "priority_score": 53
     },
     "F-012": {
       "status": "open",
-      "file": "src/sbc/registry.ts",
-      "symbol": "createInternPool",
-      "category": "coverage",
-      "title": "createInternPool no test coverage (160 LOC)",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
-      "found_by": ["testing"],
-      "priority_score": 50
+      "file": "src/sbc/platform.ts",
+      "symbol": "zigzagEncode",
+      "category": "loc",
+      "title": "Dead export zigzagEncode",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["architecture"],
+      "priority_score": 53
     },
     "F-013": {
       "status": "open",
-      "file": "src/sbc/codegen.ts",
-      "symbol": "compileFieldExtractors",
+      "file": "src/sbc/index.ts",
+      "symbol": "extractField,decodeAt,encode",
       "category": "test-quality",
-      "title": "Missing regression test for nullable extractField",
-      "first_seen": "2026-04-07",
-      "last_seen": "2026-04-07",
-      "found_by": ["testing", "correctness"],
+      "title": "Compressed mode (tag 18) untested across extractField/decodeAt/encode",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["testing"],
+      "priority_score": 79
+    },
+    "F-014": {
+      "status": "open",
+      "file": "src/sbc/index.ts",
+      "symbol": "encodeSbc,decodeSbc",
+      "category": "test-quality",
+      "title": "Map/Set DoS count guard untested",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["testing"],
+      "priority_score": 73
+    },
+    "F-015": {
+      "status": "open",
+      "file": "src/sbc/index.ts",
+      "symbol": "decodeSbc",
+      "category": "coverage",
+      "title": "Unknown typed array typeId error path untested",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["testing"],
+      "priority_score": 73
+    },
+    "F-016": {
+      "status": "open",
+      "file": "src/sbc/index.ts",
+      "symbol": "decodeSbc",
+      "category": "coverage",
+      "title": "Typed array byteLength not aligned error path untested",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["testing"],
+      "priority_score": 73
+    },
+    "F-017": {
+      "status": "open",
+      "file": "src/sbc/index.ts",
+      "symbol": "deserializeRegistry",
+      "category": "coverage",
+      "title": "deserializeRegistry with corrupted/truncated input untested",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["testing"],
+      "priority_score": 69
+    },
+    "F-018": {
+      "status": "open",
+      "file": "src/sbc/index.ts",
+      "symbol": "computeSize",
+      "category": "coverage",
+      "title": "computeSize for bytes-type schema field untested",
+      "first_seen": "2026-04-08",
+      "last_seen": "2026-04-08",
+      "found_by": ["testing"],
+      "priority_score": 73
+    },
+    "F-019": {
+      "status": "open",
+      "file": "src/sbc/codegen.ts",
+      "symbol": "compileCompressedEncoder",
+      "category": "test-quality",
+      "title": "Multi-boolean (>8) bitmap boundary untested in compressed encoder/decoder",
+      "first_seen": "2026-04-09",
+      "last_seen": "2026-04-09",
+      "found_by": ["testing"],
+      "priority_score": 99
+    },
+    "F-020": {
+      "status": "open",
+      "file": "src/compiler/proto/runtime.ts",
+      "symbol": "_writeBigInt",
+      "category": "test-quality",
+      "title": "Negative bigint roundtrip untested — potential correctness bug",
+      "first_seen": "2026-04-09",
+      "last_seen": "2026-04-09",
+      "found_by": ["testing"],
+      "priority_score": 93
+    },
+    "F-021": {
+      "status": "open",
+      "file": "src/validators/iso.ts",
+      "symbol": "iso.dateTime",
+      "category": "test-quality",
+      "title": "iso.dateTime missing timezone rejection boundary tests",
+      "first_seen": "2026-04-09",
+      "last_seen": "2026-04-09",
+      "found_by": ["testing"],
+      "priority_score": 83
+    },
+    "F-022": {
+      "status": "open",
+      "file": "src/sbc/index.ts",
+      "symbol": "extractField",
+      "category": "test-quality",
+      "title": "extractField with compressed (tag-18) buffer not tested",
+      "first_seen": "2026-04-09",
+      "last_seen": "2026-04-09",
+      "found_by": ["testing"],
+      "priority_score": 79
+    },
+    "F-023": {
+      "status": "open",
+      "file": "src/validators/uuid.ts",
+      "symbol": "uuid",
+      "category": "coverage",
+      "title": "uuid v2, v3, v5, v6, v8 variants have zero test coverage",
+      "first_seen": "2026-04-09",
+      "last_seen": "2026-04-09",
+      "found_by": ["testing"],
+      "priority_score": 63
+    },
+    "F-024": {
+      "status": "open",
+      "file": "src/sbc/cache.ts",
+      "symbol": "cache.get",
+      "category": "test-quality",
+      "title": "SIEVE cache visited flag not verified for eviction survival",
+      "first_seen": "2026-04-09",
+      "last_seen": "2026-04-09",
+      "found_by": ["testing"],
+      "priority_score": 59
+    },
+    "F-025": {
+      "status": "open",
+      "file": "src/sbc/cache.ts",
+      "symbol": "cache.set",
+      "category": "test-quality",
+      "title": "SIEVE cache eviction at maxSize=1024 boundary not tested",
+      "first_seen": "2026-04-09",
+      "last_seen": "2026-04-09",
+      "found_by": ["testing"],
       "priority_score": 55
+    },
+    "F-026": {
+      "status": "open",
+      "file": "src/codec.ts",
+      "symbol": "codec",
+      "category": "test-quality",
+      "title": "codec() untransformed throw path never tested",
+      "first_seen": "2026-04-09",
+      "last_seen": "2026-04-09",
+      "found_by": ["testing"],
+      "priority_score": 43
     }
   },
   "clean_symbols": {
-    "src/sbc/codegen.ts:buildSchema": {
-      "groups": ["correctness", "performance", "architecture"],
-      "file_hash": "92680d9e",
-      "confidence": 3,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/codegen.ts:buildSchemaFromDef": {
-      "groups": ["correctness", "architecture"],
-      "file_hash": "92680d9e",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/codegen.ts:compileSchema": {
-      "groups": ["correctness", "performance", "architecture"],
-      "file_hash": "92680d9e",
-      "confidence": 3,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/codegen.ts:compileCompressedDecoder": {
-      "groups": ["correctness", "performance", "architecture"],
-      "file_hash": "92680d9e",
-      "confidence": 3,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/codegen.ts:compileCompressedEncoder": {
-      "groups": ["correctness", "performance", "architecture"],
-      "file_hash": "92680d9e",
-      "confidence": 3,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/codegen.ts:validateFieldName": {
-      "groups": ["correctness", "architecture"],
-      "file_hash": "92680d9e",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/codegen.ts:validateFieldTypeString": {
-      "groups": ["correctness", "architecture"],
-      "file_hash": "92680d9e",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/codegen.ts:emitVar": {
-      "groups": ["correctness", "performance"],
-      "file_hash": "92680d9e",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/codegen.ts:emitVarInner": {
-      "groups": ["correctness"],
-      "file_hash": "92680d9e",
-      "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/codegen.ts:emitArrayElements": {
-      "groups": ["correctness"],
-      "file_hash": "92680d9e",
-      "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
-    },
     "src/sbc/index.ts:createCodec": {
-      "groups": ["correctness", "performance", "architecture"],
-      "file_hash": "88419b26",
-      "confidence": 3,
-      "runs_clean": [2],
-      "last_run": 2
+      "groups": ["correctness", "performance", "architecture", "security", "testing"],
+      "file_hash": "1c3a8a95",
+      "confidence": 5,
+      "runs_clean": [3, 4],
+      "last_run": 4
     },
     "src/sbc/index.ts:decodeSbc": {
-      "groups": ["correctness", "performance"],
-      "file_hash": "88419b26",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/index.ts:decodeAt": {
-      "groups": ["correctness", "performance"],
-      "file_hash": "88419b26",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:readVarint": {
-      "groups": ["correctness", "performance"],
-      "file_hash": "4e3911dd",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:writeVarint": {
-      "groups": ["correctness", "performance"],
-      "file_hash": "4e3911dd",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:readZigzag": {
-      "groups": ["correctness", "performance"],
-      "file_hash": "4e3911dd",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:writeZigzag": {
-      "groups": ["correctness", "performance"],
-      "file_hash": "4e3911dd",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:byteLen": {
-      "groups": ["correctness", "performance", "security"],
-      "file_hash": "4e3911dd",
+      "groups": ["correctness", "performance", "testing"],
+      "file_hash": "1c3a8a95",
       "confidence": 3,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3, 4],
+      "last_run": 4
     },
-    "src/sbc/platform.ts:getDv": {
-      "groups": ["correctness", "performance", "security"],
-      "file_hash": "4e3911dd",
+    "src/sbc/index.ts:decodeTagEnd": {
+      "groups": ["correctness"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:encodeSbc": {
+      "groups": ["correctness", "performance", "testing"],
+      "file_hash": "1c3a8a95",
       "confidence": 3,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3, 4],
+      "last_run": 4
+    },
+    "src/sbc/index.ts:encode": {
+      "groups": ["testing"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [4],
+      "last_run": 4
+    },
+    "src/sbc/index.ts:decode": {
+      "groups": ["testing"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [4],
+      "last_run": 4
+    },
+    "src/sbc/index.ts:encodeObj": {
+      "groups": ["correctness", "performance", "architecture"],
+      "file_hash": "1c3a8a95",
+      "confidence": 3,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:inferAndRegister": {
+      "groups": ["correctness"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:resolveSchemaFromCacheOrStore": {
+      "groups": ["correctness"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:extractField": {
+      "groups": ["correctness", "security"],
+      "file_hash": "1c3a8a95",
+      "confidence": 2,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:computeSize": {
+      "groups": ["correctness", "performance"],
+      "file_hash": "1c3a8a95",
+      "confidence": 2,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:readFixedField": {
+      "groups": ["performance"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:setCache": {
+      "groups": ["performance"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:computeShapeHash": {
+      "groups": ["performance"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/codegen.ts:compileSchema": {
+      "groups": ["correctness", "security", "performance", "architecture", "testing"],
+      "file_hash": "977dd4d4",
+      "confidence": 5,
+      "runs_clean": [3, 4],
+      "last_run": 4
+    },
+    "src/sbc/cache.ts:get": {
+      "groups": ["security", "architecture"],
+      "file_hash": "a4b32e7a",
+      "confidence": 2,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/cache.ts:set": {
+      "groups": ["security", "architecture"],
+      "file_hash": "a4b32e7a",
+      "confidence": 2,
+      "runs_clean": [3],
+      "last_run": 3
     },
     "src/sbc/platform.ts:allocBuf": {
+      "groups": ["architecture"],
+      "file_hash": "c59db467",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/platform.ts:allocUnsafe": {
       "groups": ["security", "architecture"],
-      "file_hash": "4e3911dd",
+      "file_hash": "c59db467",
       "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/platform.ts:byteLen": {
+      "groups": ["architecture"],
+      "file_hash": "c59db467",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/platform.ts:codegenDriver": {
+      "groups": ["architecture"],
+      "file_hash": "c59db467",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
     },
     "src/sbc/platform.ts:copyBuf": {
       "groups": ["architecture"],
-      "file_hash": "4e3911dd",
+      "file_hash": "c59db467",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:fromUtf8": {
-      "groups": ["architecture"],
-      "file_hash": "4e3911dd",
-      "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
     },
     "src/sbc/platform.ts:isNode": {
       "groups": ["architecture"],
-      "file_hash": "4e3911dd",
+      "file_hash": "c59db467",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:driver": {
-      "groups": ["architecture"],
-      "file_hash": "4e3911dd",
-      "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:textDecoder": {
-      "groups": ["architecture"],
-      "file_hash": "4e3911dd",
-      "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:FIELD_SIZES": {
-      "groups": ["architecture"],
-      "file_hash": "4e3911dd",
-      "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
     },
     "src/sbc/platform.ts:readBI64": {
       "groups": ["architecture"],
-      "file_hash": "4e3911dd",
+      "file_hash": "c59db467",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
     },
     "src/sbc/platform.ts:readF64": {
       "groups": ["architecture"],
-      "file_hash": "4e3911dd",
+      "file_hash": "c59db467",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
     },
-    "src/sbc/platform.ts:readU16": {
+    "src/sbc/platform.ts:readStr": {
       "groups": ["architecture"],
-      "file_hash": "4e3911dd",
+      "file_hash": "c59db467",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
     },
-    "src/sbc/platform.ts:readU32": {
-      "groups": ["architecture"],
-      "file_hash": "4e3911dd",
-      "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:readUtf8": {
-      "groups": ["architecture"],
-      "file_hash": "4e3911dd",
-      "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:toUtf8": {
-      "groups": ["architecture"],
-      "file_hash": "4e3911dd",
-      "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:varintResult": {
-      "groups": ["architecture"],
-      "file_hash": "4e3911dd",
-      "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+    "src/sbc/platform.ts:readZigzag": {
+      "groups": ["security", "architecture", "testing"],
+      "file_hash": "c59db467",
+      "confidence": 3,
+      "runs_clean": [3, 4],
+      "last_run": 4
     },
     "src/sbc/platform.ts:writeBI64": {
       "groups": ["architecture"],
-      "file_hash": "4e3911dd",
+      "file_hash": "c59db467",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
     },
     "src/sbc/platform.ts:writeF64": {
       "groups": ["architecture"],
-      "file_hash": "4e3911dd",
+      "file_hash": "c59db467",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:writeU16": {
-      "groups": ["architecture"],
-      "file_hash": "4e3911dd",
-      "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/platform.ts:writeU32": {
-      "groups": ["architecture"],
-      "file_hash": "4e3911dd",
-      "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
     },
     "src/sbc/platform.ts:writeUtf8": {
       "groups": ["architecture"],
-      "file_hash": "4e3911dd",
+      "file_hash": "c59db467",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
     },
-    "src/sbc/registry.ts:lookupSchema": {
-      "groups": ["correctness", "performance", "architecture"],
-      "file_hash": "eccc4805",
-      "confidence": 3,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/registry.ts:inferSchema": {
-      "groups": ["correctness", "architecture"],
-      "file_hash": "eccc4805",
+    "src/sbc/platform.ts:writeVarint": {
+      "groups": ["architecture", "testing"],
+      "file_hash": "c59db467",
       "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3, 4],
+      "last_run": 4
     },
-    "src/sbc/registry.ts:resolveSchema": {
-      "groups": ["correctness", "architecture"],
-      "file_hash": "eccc4805",
+    "src/sbc/platform.ts:writeZigzag": {
+      "groups": ["architecture", "testing"],
+      "file_hash": "c59db467",
       "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3, 4],
+      "last_run": 4
     },
-    "src/sbc/registry.ts:createRegistry": {
-      "groups": ["correctness", "security", "architecture"],
-      "file_hash": "eccc4805",
-      "confidence": 3,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/registry.ts:registerSchema": {
-      "groups": ["correctness", "architecture"],
-      "file_hash": "eccc4805",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/registry.ts:serializeRegistry": {
-      "groups": ["correctness", "security", "architecture"],
-      "file_hash": "eccc4805",
-      "confidence": 3,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/registry.ts:decodeFieldDefs": {
-      "groups": ["security", "architecture"],
-      "file_hash": "eccc4805",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/registry.ts:inferFieldType": {
+    "src/sbc/platform.ts:TYPED_ARRAY_BPE": {
       "groups": ["architecture"],
-      "file_hash": "eccc4805",
+      "file_hash": "c59db467",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
     },
-    "src/sbc/registry.ts:parseFieldType": {
+    "src/sbc/platform.ts:TYPED_ARRAY_CTORS": {
       "groups": ["architecture"],
-      "file_hash": "eccc4805",
+      "file_hash": "c59db467",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
     },
-    "src/sbc/registry.ts:serializeFieldType": {
+    "src/sbc/platform.ts:TYPED_ARRAY_IDS": {
       "groups": ["architecture"],
-      "file_hash": "eccc4805",
+      "file_hash": "c59db467",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
     },
-    "src/sbc/typed-array-codec.ts:decodeTypedArray": {
-      "groups": ["correctness", "security", "architecture"],
-      "file_hash": "79d9d560",
-      "confidence": 3,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/typed-array-codec.ts:encodeTypedArrayInto": {
-      "groups": ["correctness", "architecture"],
-      "file_hash": "79d9d560",
-      "confidence": 2,
-      "runs_clean": [2],
-      "last_run": 2
-    },
-    "src/sbc/typed-array-codec.ts:getTypedArrayType": {
+    "src/sbc/platform.ts:CodegenDriver": {
       "groups": ["architecture"],
-      "file_hash": "79d9d560",
+      "file_hash": "c59db467",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
     },
-    "src/sbc/typed-array-codec.ts:TYPED_ARRAY_MARKER": {
+    "src/compiler/sbc/index.ts:default": {
       "groups": ["architecture"],
-      "file_hash": "79d9d560",
+      "file_hash": "c3ecf1d7",
       "confidence": 1,
-      "runs_clean": [2],
-      "last_run": 2
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/codegen.ts:FieldDef": {
+      "groups": ["architecture"],
+      "file_hash": "977dd4d4",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/codegen.ts:ParsedType": {
+      "groups": ["architecture"],
+      "file_hash": "977dd4d4",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/codegen.ts:Schema": {
+      "groups": ["architecture"],
+      "file_hash": "977dd4d4",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/codegen.ts:SbcHelpers": {
+      "groups": ["architecture"],
+      "file_hash": "977dd4d4",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/cache.ts:StoredSchema": {
+      "groups": ["architecture"],
+      "file_hash": "a4b32e7a",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:CodecOptions": {
+      "groups": ["architecture"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:DecodeOptions": {
+      "groups": ["architecture"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:EncodeOptions": {
+      "groups": ["architecture"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:FieldSpec": {
+      "groups": ["architecture"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:PersistentStore": {
+      "groups": ["architecture"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:SchemaRegistry": {
+      "groups": ["architecture"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
+    },
+    "src/sbc/index.ts:StoredSchema": {
+      "groups": ["architecture"],
+      "file_hash": "1c3a8a95",
+      "confidence": 1,
+      "runs_clean": [3],
+      "last_run": 3
     }
   },
   "convergence": {
     "per_category": {
       "correctness": {
-        "findings_per_run": [4, 1],
-        "successful_runs": 2,
+        "findings_per_run": [4, 1, 4],
+        "successful_runs": 3,
         "consecutive_zero": 0,
         "last_agent_success": true,
         "status": "NOT_CONVERGED",
-        "reason": "1 new finding on last run"
+        "reason": "4 new findings on last run (refactored code)"
       },
       "security": {
-        "findings_per_run": [0, 1],
-        "successful_runs": 2,
+        "findings_per_run": [0, 1, 4],
+        "successful_runs": 3,
         "consecutive_zero": 0,
         "last_agent_success": true,
         "status": "NOT_CONVERGED",
-        "reason": "1 new finding on last run"
+        "reason": "4 new findings on last run (refactored code)"
       },
       "performance": {
-        "findings_per_run": [4, 2],
-        "successful_runs": 2,
+        "findings_per_run": [4, 2, 2],
+        "successful_runs": 3,
         "consecutive_zero": 0,
         "last_agent_success": true,
         "status": "APPROACHING",
-        "reason": "findings declining: 4 -> 2"
+        "reason": "findings stable at 2"
       },
       "architecture": {
-        "findings_per_run": [5, 1],
-        "successful_runs": 2,
+        "findings_per_run": [5, 1, 2],
+        "successful_runs": 3,
         "consecutive_zero": 0,
         "last_agent_success": true,
         "status": "APPROACHING",
-        "reason": "findings declining: 5 -> 1"
+        "reason": "findings low: 1 → 2"
       },
       "testing": {
-        "findings_per_run": [5, 8],
-        "successful_runs": 2,
+        "findings_per_run": [5, 8, 8, 8],
+        "successful_runs": 4,
         "consecutive_zero": 0,
         "last_agent_success": true,
         "status": "NOT_CONVERGED",
-        "reason": "8 new findings on last run"
+        "reason": "8 new findings on run 4 (test-directory focused audit)"
       }
     },
     "overall": "NOT_CONVERGED",
-    "reason": "correctness, security, testing categories still finding new issues"
+    "reason": "correctness, security, testing still finding new issues"
   }
 }
