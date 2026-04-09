@@ -112,6 +112,10 @@ const encodeTypedArrayInto = (value: ArrayBufferView, buf: Uint8Array, pos: numb
 
     let byteLen = value.byteLength;
 
+    if (pos + 4 + byteLen > buf.length) {
+        return -1;
+    }
+
     buf[pos] = TYPED_ARRAY_MARKER;
     buf[pos + 1] = typeId;
     buf[pos + 2] = 0;

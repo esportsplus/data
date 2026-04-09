@@ -314,7 +314,7 @@ function analyzeUnionType(
         return { literals, name, nullable, optional, type: 'union', unionTypes: types };
     }
 
-    return { name, nullable, optional: true, type: 'unknown' };
+    return { name, nullable, optional: true, type: 'null' };
 }
 
 function extractProperties(type: ts.Type, checker: ts.TypeChecker, visited: Set<ts.Type>): AnalyzedProperty[] {

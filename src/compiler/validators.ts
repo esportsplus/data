@@ -111,7 +111,7 @@ const inline = (body: string, path: PathMode, varname: string): string => {
 
     return body
         .replace(VALUE_WORD_REGEX, varname)
-        .replace(ERRORS_PUSH_REGEX, error.generate('$1$2$1', path));
+        .replace(ERRORS_PUSH_REGEX, (_match, _quote, msg) => error.generate(msg, path));
 }
 
 
