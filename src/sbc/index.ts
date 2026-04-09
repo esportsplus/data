@@ -1316,6 +1316,56 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
     }
 
 
+    function encodeObject(schema: Schema, obj: Record<string, unknown>, view: boolean): Uint8Array {
+        let end: number,
+            h = schema.hash,
+            useCompressed = compress && schema.compressible && schema.compressedEncodeFn;
+
+        if (useCompressed) {
+            end = schema.compressedEncodeFn!(obj, encodeBuf, 9);
+
+            while (end > encodeBuf.length) {
+                encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+                end = schema.compressedEncodeFn!(obj, encodeBuf, 9);
+            }
+
+            encodeBuf[0] = 18;
+        }
+        else {
+            end = schema.encodeFn!(obj, encodeBuf, 9);
+
+            while (end > encodeBuf.length) {
+                encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+                end = schema.encodeFn!(obj, encodeBuf, 9);
+            }
+
+            encodeBuf[0] = 8;
+        }
+
+        encodeBuf[1] = h & 0xFF;
+        encodeBuf[2] = (h >>> 8) & 0xFF;
+        encodeBuf[3] = (h >>> 16) & 0xFF;
+        encodeBuf[4] = (h >>> 24) & 0xFF;
+
+        let dataLen = end - 9;
+
+        encodeBuf[5] = dataLen & 0xFF;
+        encodeBuf[6] = (dataLen >>> 8) & 0xFF;
+        encodeBuf[7] = (dataLen >>> 16) & 0xFF;
+        encodeBuf[8] = (dataLen >>> 24) & 0xFF;
+
+        if (view) {
+            return encodeBuf.subarray(0, end);
+        }
+
+        let result = allocUnsafe(end);
+
+        copyBuf(encodeBuf, result, 0, 0, end);
+
+        return result;
+    }
+
+
     // view=true returns a subarray into the shared encode buffer (zero-copy).
     // BORROW SEMANTICS: the returned slice is invalidated by the next encode() call.
     // Callers must consume the view synchronously or copy it before re-encoding.
@@ -1336,53 +1386,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
         // Schema hint fast path — skip typeof check, WeakMap, matchSchema, inferAndRegister
         if (hintSchema) {
-            let obj = value as Record<string, unknown>,
-                end: number,
-                h = hintSchema.hash,
-                useCompressed = compress && hintSchema.compressible && hintSchema.compressedEncodeFn;
-
-            if (useCompressed) {
-                end = hintSchema.compressedEncodeFn!(obj, encodeBuf, 9);
-
-                while (end > encodeBuf.length) {
-                    encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
-                    end = hintSchema.compressedEncodeFn!(obj, encodeBuf, 9);
-                }
-
-                encodeBuf[0] = 18;
-            }
-            else {
-                end = hintSchema.encodeFn!(obj, encodeBuf, 9);
-
-                while (end > encodeBuf.length) {
-                    encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
-                    end = hintSchema.encodeFn!(obj, encodeBuf, 9);
-                }
-
-                encodeBuf[0] = 8;
-            }
-
-            encodeBuf[1] = h & 0xFF;
-            encodeBuf[2] = (h >>> 8) & 0xFF;
-            encodeBuf[3] = (h >>> 16) & 0xFF;
-            encodeBuf[4] = (h >>> 24) & 0xFF;
-
-            let dataLen = end - 9;
-
-            encodeBuf[5] = dataLen & 0xFF;
-            encodeBuf[6] = (dataLen >>> 8) & 0xFF;
-            encodeBuf[7] = (dataLen >>> 16) & 0xFF;
-            encodeBuf[8] = (dataLen >>> 24) & 0xFF;
-
-            if (view) {
-                return encodeBuf.subarray(0, end);
-            }
-
-            let result = allocUnsafe(end);
-
-            copyBuf(encodeBuf, result, 0, 0, end);
-
-            return result;
+            return encodeObject(hintSchema, value as Record<string, unknown>, view);
         }
 
         // Fast path: plain object
@@ -1400,52 +1404,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                 setCache(schema, obj);
             }
 
-            let end: number,
-                h = schema.hash,
-                useCompressed = compress && schema.compressible && schema.compressedEncodeFn;
-
-            if (useCompressed) {
-                end = schema.compressedEncodeFn!(obj, encodeBuf, 9);
-
-                while (end > encodeBuf.length) {
-                    encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
-                    end = schema.compressedEncodeFn!(obj, encodeBuf, 9);
-                }
-
-                encodeBuf[0] = 18;
-            }
-            else {
-                end = schema.encodeFn!(obj, encodeBuf, 9);
-
-                while (end > encodeBuf.length) {
-                    encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
-                    end = schema.encodeFn!(obj, encodeBuf, 9);
-                }
-
-                encodeBuf[0] = 8;
-            }
-
-            encodeBuf[1] = h & 0xFF;
-            encodeBuf[2] = (h >>> 8) & 0xFF;
-            encodeBuf[3] = (h >>> 16) & 0xFF;
-            encodeBuf[4] = (h >>> 24) & 0xFF;
-
-            let dataLen = end - 9;
-
-            encodeBuf[5] = dataLen & 0xFF;
-            encodeBuf[6] = (dataLen >>> 8) & 0xFF;
-            encodeBuf[7] = (dataLen >>> 16) & 0xFF;
-            encodeBuf[8] = (dataLen >>> 24) & 0xFF;
-
-            if (view) {
-                return encodeBuf.subarray(0, end);
-            }
-
-            let result = allocUnsafe(end);
-
-            copyBuf(encodeBuf, result, 0, 0, end);
-
-            return result;
+            return encodeObject(schema, obj, view);
         }
 
         // Generic path

@@ -54,6 +54,39 @@ interface SbcHelpers {
 let _safeProto = Object.freeze(Object.create(null));
 
 
+function collectRefHashes(
+    fields: FieldDef[],
+    registry: Map<number, Schema>,
+    fnKey: 'decodeFn' | 'encodeFn',
+    prefix: string
+): Map<number, string> {
+    let refHashes: Map<number, string> = new Map(),
+        refIdx = 0;
+
+    for (let i = 0, n = fields.length; i < n; i++) {
+        let f = fields[i]!;
+
+        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
+            let rs = registry.get(f.refHash);
+
+            if (rs && rs[fnKey]) {
+                refHashes.set(f.refHash, `${prefix}${refIdx++}`);
+            }
+        }
+
+        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
+            let rs = registry.get(f.elementType.hash);
+
+            if (rs && rs[fnKey]) {
+                refHashes.set(f.elementType.hash, `${prefix}${refIdx++}`);
+            }
+        }
+    }
+
+    return refHashes;
+}
+
+
 function compileSchema(schema: Schema, helpers: SbcHelpers): void {
     let d = codegenDriver;
 
@@ -72,29 +105,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
         fields = schema.fields,
         n = fields.length;
 
-    // Collect unique ref hashes for direct-call encode
-    let refHashes: Map<number, string> = new Map(),
-        refIdx = 0;
-
-    for (let i = 0; i < n; i++) {
-        let f = fields[i]!;
-
-        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
-            let rs = helpers.registry.get(f.refHash);
-
-            if (rs && rs.encodeFn) {
-                refHashes.set(f.refHash, `_re${refIdx++}`);
-            }
-        }
-
-        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
-            let rs = helpers.registry.get(f.elementType.hash);
-
-            if (rs && rs.encodeFn) {
-                refHashes.set(f.elementType.hash, `_re${refIdx++}`);
-            }
-        }
-    }
+    let refHashes = collectRefHashes(fields, helpers.registry, 'encodeFn', '_re');
 
     body += d.preamble('b');
     body += `let p=pos;\n`;
@@ -338,29 +349,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
         fields = schema.fields,
         n = fields.length;
 
-    // Collect unique ref hashes for direct-call decode
-    let refHashes: Map<number, string> = new Map(),
-        refIdx = 0;
-
-    for (let i = 0; i < n; i++) {
-        let f = fields[i]!;
-
-        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
-            let rs = helpers.registry.get(f.refHash);
-
-            if (rs && rs.decodeFn) {
-                refHashes.set(f.refHash, `_rd${refIdx++}`);
-            }
-        }
-
-        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
-            let rs = helpers.registry.get(f.elementType.hash);
-
-            if (rs && rs.decodeFn) {
-                refHashes.set(f.elementType.hash, `_rd${refIdx++}`);
-            }
-        }
-    }
+    let refHashes = collectRefHashes(fields, helpers.registry, 'decodeFn', '_rd');
 
     body += d.preamble('b');
     body += `let p=pos;\n`;
@@ -650,29 +639,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
         fields = schema.fields,
         n = fields.length;
 
-    // Collect unique ref hashes for direct-call decode
-    let refHashes: Map<number, string> = new Map(),
-        refIdx = 0;
-
-    for (let i = 0; i < n; i++) {
-        let f = fields[i]!;
-
-        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
-            let rs = helpers.registry.get(f.refHash);
-
-            if (rs && rs.decodeFn) {
-                refHashes.set(f.refHash, `_rd${refIdx++}`);
-            }
-        }
-
-        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
-            let rs = helpers.registry.get(f.elementType.hash);
-
-            if (rs && rs.decodeFn) {
-                refHashes.set(f.elementType.hash, `_rd${refIdx++}`);
-            }
-        }
-    }
+    let refHashes = collectRefHashes(fields, helpers.registry, 'decodeFn', '_rd');
 
     body += d.preamble('b');
     body += `let p=pos;\n`;
@@ -934,29 +901,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
         fields = schema.fields,
         n = fields.length;
 
-    // Collect unique ref hashes for direct-call encode
-    let refHashes: Map<number, string> = new Map(),
-        refIdx = 0;
-
-    for (let i = 0; i < n; i++) {
-        let f = fields[i]!;
-
-        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
-            let rs = helpers.registry.get(f.refHash);
-
-            if (rs && rs.encodeFn) {
-                refHashes.set(f.refHash, `_re${refIdx++}`);
-            }
-        }
-
-        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
-            let rs = helpers.registry.get(f.elementType.hash);
-
-            if (rs && rs.encodeFn) {
-                refHashes.set(f.elementType.hash, `_re${refIdx++}`);
-            }
-        }
-    }
+    let refHashes = collectRefHashes(fields, helpers.registry, 'encodeFn', '_re');
 
     body += d.preamble('b');
     body += `let p=pos;\n`;

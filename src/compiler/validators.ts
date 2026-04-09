@@ -72,10 +72,6 @@ function visit(node: ts.Node, validators: Map<string, BrandedValidator>, checker
 }
 
 
-const clear = (): void => {
-    cache.clear();
-};
-
 const get = (path: string | null | undefined, program: ts.Program) => {
     if (!path) {
         return new Map();
@@ -101,9 +97,19 @@ const get = (path: string | null | undefined, program: ts.Program) => {
     return validators;
 };
 
-// TODO: Research if this is fragile, what is the value word replacing?
+const DISALLOWED_BODY_REGEX = /\b(eval|Function)\s*\(/;
+
+// Inline validator body into generated code — input is compile-time source only.
+// Trust boundary: the body originates from the user's own TypeScript AST via
+// `fn.body.getText()`. Supply-chain risk (compromised dependency injecting
+// malicious validator bodies) is mitigated by rejecting bodies that contain
+// obvious code-generation escape patterns.
 const inline = (body: string, path: PathMode, varname: string): string => {
     body = body.trim();
+
+    if (DISALLOWED_BODY_REGEX.test(body)) {
+        throw new Error('Validator: body contains disallowed pattern (eval/Function)');
+    }
 
     if (body.startsWith('{') && body.endsWith('}')) {
         body = body.slice(1, -1).trim();
@@ -115,5 +121,5 @@ const inline = (body: string, path: PathMode, varname: string): string => {
 }
 
 
-export default { clear, get, inline };
+export default { get, inline };
 export type { BrandedValidator };
