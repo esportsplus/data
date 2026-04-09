@@ -50,22 +50,45 @@ function _writeVarint(buffer: Uint8Array, offset: number, value: number): number
 }
 
 function _readVarint(buffer: Uint8Array, offset: number): [number, number] {
-    let result = 0,
-        shift = 0;
+    let byte = buffer[offset++],
+        result = byte & 0x7f;
 
-    while (offset < buffer.length) {
-        let byte = buffer[offset++];
-
-        result |= (byte & 0x7f) << shift;
-
-        if ((byte & 0x80) === 0) {
-            break;
-        }
-
-        shift += 7;
+    if (byte < 128) {
+        return [result, offset];
     }
 
-    return [result, offset];
+    byte = buffer[offset++];
+    result |= (byte & 0x7f) << 7;
+
+    if (byte < 128) {
+        return [result, offset];
+    }
+
+    byte = buffer[offset++];
+    result |= (byte & 0x7f) << 14;
+
+    if (byte < 128) {
+        return [result, offset];
+    }
+
+    byte = buffer[offset++];
+    result |= (byte & 0x7f) << 21;
+
+    if (byte < 128) {
+        return [result, offset];
+    }
+
+    byte = buffer[offset++];
+    result |= (byte & 0x0f) << 28;
+
+    if (byte < 128) {
+        return [result | 0, offset];
+    }
+
+    // Negative int32 encoded as 10-byte varint; skip remaining bytes
+    while (buffer[offset++] & 0x80) {}
+
+    return [result | 0, offset];
 }
 
 
@@ -324,6 +347,20 @@ describe('Runtime: Varint', () => {
 
                 expect(val).toBe(values[i]);
                 expect(off).toBe(end);
+            }
+        });
+
+        it('roundtrips negative int32 values', () => {
+            let values = [-1, -2, -5, -100, -128, -256, -1000, -100000, -2147483648];
+
+            for (let i = 0, n = values.length; i < n; i++) {
+                let buf = new Uint8Array(10),
+                    end = _writeVarint(buf, 0, values[i]),
+                    [val, off] = _readVarint(buf, 0);
+
+                expect(val).toBe(values[i]);
+                expect(off).toBe(end);
+                expect(end).toBe(10); // Negative int32 always 10 bytes
             }
         });
 

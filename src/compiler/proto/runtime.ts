@@ -232,22 +232,45 @@ const HELPER_VARINT = `
     }
 
     function _readVarint(buffer, offset) {
-        let result = 0,
-            shift = 0;
+        let byte = buffer[offset++],
+            result = byte & 0x7f;
 
-        while (offset < buffer.length) {
-            let byte = buffer[offset++];
-
-            result |= (byte & 0x7f) << shift;
-
-            if ((byte & 0x80) === 0) {
-                break;
-            }
-
-            shift += 7;
+        if (byte < 128) {
+            return [result, offset];
         }
 
-        return [result, offset];
+        byte = buffer[offset++];
+        result |= (byte & 0x7f) << 7;
+
+        if (byte < 128) {
+            return [result, offset];
+        }
+
+        byte = buffer[offset++];
+        result |= (byte & 0x7f) << 14;
+
+        if (byte < 128) {
+            return [result, offset];
+        }
+
+        byte = buffer[offset++];
+        result |= (byte & 0x7f) << 21;
+
+        if (byte < 128) {
+            return [result, offset];
+        }
+
+        byte = buffer[offset++];
+        result |= (byte & 0x0f) << 28;
+
+        if (byte < 128) {
+            return [result | 0, offset];
+        }
+
+        // Negative int32 encoded as 10-byte varint; skip remaining bytes
+        while (buffer[offset++] & 0x80) {}
+
+        return [result | 0, offset];
     }
 `;
 
