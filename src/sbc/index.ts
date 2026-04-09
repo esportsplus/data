@@ -54,7 +54,8 @@ type SchemaRegistry = {
 
 
 
-let MAX_ARRAY_COUNT = 1048576; // 2^20 — guard against DoS from untrusted u32 counts
+let MAX_ARRAY_COUNT = 1048576, // 2^20 — guard against DoS from untrusted u32 counts
+    MAX_SCHEMA_COUNT = 1024; // guard against DoS from untrusted u16 schema count
 
 
 // FNV-1a
@@ -751,10 +752,20 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                 return offset + 9;
             case 5: {
                 let sLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (offset + 5 + sLen > buf.length) {
+                    throw new Error('Codec2: truncated string at offset ' + offset);
+                }
+
                 return offset + 5 + sLen;
             }
             case 6: {
                 let bLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (offset + 5 + bLen > buf.length) {
+                    throw new Error('Codec2: truncated bytes at offset ' + offset);
+                }
+
                 return offset + 5 + bLen;
             }
             case 7: {
@@ -780,14 +791,41 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                 return offset + 5;
             case 12: {
                 let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (count > MAX_ARRAY_COUNT) {
+                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                }
+
+                if (offset + 5 + count > buf.length) {
+                    throw new Error('Codec2: truncated packed uint8 array at offset ' + offset);
+                }
+
                 return offset + 5 + count;
             }
             case 13: {
                 let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (count > MAX_ARRAY_COUNT) {
+                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                }
+
+                if (offset + 5 + count * 8 > buf.length) {
+                    throw new Error('Codec2: truncated packed float64 array at offset ' + offset);
+                }
+
                 return offset + 5 + count * 8;
             }
             case 14: {
                 let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+
+                if (count > MAX_ARRAY_COUNT) {
+                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                }
+
+                if (offset + 5 + count * 4 > buf.length) {
+                    throw new Error('Codec2: truncated packed int32 array at offset ' + offset);
+                }
+
                 return offset + 5 + count * 4;
             }
             case 15: {
@@ -822,6 +860,11 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             }
             case 17: {
                 let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
+
+                if (offset + 6 + bLen > buf.length) {
+                    throw new Error('Codec2: truncated typed array at offset ' + offset);
+                }
+
                 return offset + 6 + bLen;
             }
             default:
@@ -2001,12 +2044,25 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
 
     function deserializeRegistry(data: Uint8Array): void {
-        let pos = 0;
+        let len = data.length,
+            pos = 0;
+
+        if (pos + 2 > len) {
+            throw new Error('Codec2: registry data truncated at schema count');
+        }
 
         let schemaCount = data[pos]! | (data[pos + 1]! << 8);
         pos += 2;
 
+        if (schemaCount > MAX_SCHEMA_COUNT) {
+            throw new Error('Codec2: schema count ' + schemaCount + ' exceeds limit');
+        }
+
         for (let i = 0; i < schemaCount; i++) {
+            if (pos + 6 > len) {
+                throw new Error('Codec2: registry data truncated at schema ' + i);
+            }
+
             let hash = (data[pos]! | (data[pos + 1]! << 8) | (data[pos + 2]! << 16) | (data[pos + 3]! << 24)) >>> 0;
             pos += 4;
 
@@ -2016,8 +2072,20 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             let fields: FieldSpec[] = [];
 
             for (let j = 0; j < fieldCount; j++) {
+                if (pos + 2 > len) {
+                    throw new Error('Codec2: registry data truncated at field name length');
+                }
+
                 let nameLen = data[pos]! | (data[pos + 1]! << 8);
                 pos += 2;
+
+                if (nameLen === 0) {
+                    throw new Error('Codec2: empty field name in registry data');
+                }
+
+                if (pos + nameLen > len) {
+                    throw new Error('Codec2: registry data truncated at field name');
+                }
 
                 let name = '';
 
@@ -2027,8 +2095,20 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
                 pos += nameLen;
 
+                if (pos + 2 > len) {
+                    throw new Error('Codec2: registry data truncated at field type length');
+                }
+
                 let typeLen = data[pos]! | (data[pos + 1]! << 8);
                 pos += 2;
+
+                if (typeLen === 0) {
+                    throw new Error('Codec2: empty field type in registry data');
+                }
+
+                if (pos + typeLen > len) {
+                    throw new Error('Codec2: registry data truncated at field type');
+                }
 
                 let type = '';
 
@@ -2037,6 +2117,14 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                 }
 
                 pos += typeLen;
+
+                // Validate type is known (parseFieldType will throw for unknown types during defineSchema,
+                // but we validate early to reject garbage before any schema registration)
+                parseFieldType(type);
+
+                if (pos + 1 > len) {
+                    throw new Error('Codec2: registry data truncated at field flags');
+                }
 
                 let flags = data[pos]!;
                 pos += 1;

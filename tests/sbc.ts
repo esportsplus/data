@@ -1948,6 +1948,46 @@ describe('Codec2', () => {
             expect(c.decode(c.encode(obj))).toEqual(obj);
         });
 
+        it('varint exceeds 5 bytes throws', () => {
+            // Encode a compressed schema with a string field, then corrupt the string
+            // length varint to have 6 consecutive continuation bytes (all 0x80).
+            // The compressed decoder calls readVarint for string lengths >= 128.
+            let c = codec({ compress: true });
+
+            c.defineSchema([{ name: 'msg', type: 'string' }]);
+
+            // Encode a valid object to get a proper header (tag, hash, dataLen)
+            let valid = c.encode({ msg: 'x' }),
+                corrupt = new Uint8Array(valid.length + 5);
+
+            // Copy header (9 bytes: tag + hash + dataLen)
+            corrupt.set(valid.subarray(0, 9));
+
+            // Replace data with 6 bytes of 0x80 (multi-byte varint that never terminates within 5 bytes)
+            for (let i = 0; i < 6; i++) {
+                corrupt[9 + i] = 0x80;
+            }
+
+            expect(() => c.decode(corrupt)).toThrow('varint');
+        });
+
+        it('varint read past end of buffer throws', () => {
+            // Encode a compressed schema with a string field, then provide a buffer
+            // where the string length varint byte has continuation bit set but no next byte.
+            let c = codec({ compress: true });
+
+            c.defineSchema([{ name: 'msg', type: 'string' }]);
+
+            let valid = c.encode({ msg: 'x' }),
+                // 9 bytes header + 1 byte (0x80 — continuation bit set, no following byte)
+                corrupt = new Uint8Array(10);
+
+            corrupt.set(valid.subarray(0, 9));
+            corrupt[9] = 0x80;
+
+            expect(() => c.decode(corrupt)).toThrow('varint');
+        });
+
         it('zigzag negative values', () => {
             let c = codec({ compress: true });
 
@@ -3216,17 +3256,11 @@ describe('Codec2', () => {
     // === F-017: deserializeRegistry with corrupted/truncated input ===
 
     describe('deserializeRegistry corruption (F-017)', () => {
-        it('truncated after schema count reads undefined bytes silently', () => {
+        it('truncated after schema count throws', () => {
             let c = codec();
 
             // Declares 1 schema (u16 LE = 1) but no data follows for hash/fields.
-            // JS bitwise ops on undefined yield 0, so it silently creates a schema
-            // with empty fields instead of throwing — documenting this behavior.
-            c.deserializeRegistry(new Uint8Array([1, 0]));
-
-            // The function did not throw; it registered a zero-field schema with hash=0.
-            // Verify codec still works after corrupted import.
-            expect(c.decode(c.encode({ x: 42 }))).toEqual({ x: 42 });
+            expect(() => c.deserializeRegistry(new Uint8Array([1, 0]))).toThrow('truncated');
         });
 
         it('schema count 0 is valid (empty registry)', () => {
@@ -3236,12 +3270,11 @@ describe('Codec2', () => {
             c.deserializeRegistry(new Uint8Array([0, 0])); // should not throw
         });
 
-        it('truncated field data throws on invalid type', () => {
+        it('truncated field data throws on truncation', () => {
             let c = codec();
 
             // Declares 1 schema: hash=0x00000000, fieldCount=1, but truncated before field data.
-            // JS reads undefined bytes as 0, producing nameLen=0 and typeLen=0.
-            // defineSchema then rejects the empty type string.
+            // Bounds checking detects truncation before field name read.
             let buf = new Uint8Array([
                 1, 0,           // schemaCount = 1
                 0, 0, 0, 0,    // hash = 0
@@ -3249,7 +3282,7 @@ describe('Codec2', () => {
                 // truncated — no nameLen/name/typeLen/type/flags
             ]);
 
-            expect(() => c.deserializeRegistry(buf)).toThrow('unknown field type');
+            expect(() => c.deserializeRegistry(buf)).toThrow('truncated');
         });
 
         it('valid serialized registry round-trips correctly', () => {
@@ -3273,13 +3306,15 @@ describe('Codec2', () => {
         it('completely empty buffer throws', () => {
             let c = codec();
 
-            // Empty Uint8Array — reading data[0] and data[1] yields undefined
-            // This may or may not throw depending on schemaCount resolution
-            // schemaCount = undefined! | (undefined! << 8) = 0, so loop doesn't execute
-            c.deserializeRegistry(new Uint8Array(0));
+            // Empty Uint8Array — no bytes available for schema count
+            expect(() => c.deserializeRegistry(new Uint8Array(0))).toThrow('truncated');
+        });
 
-            // Codec still works
-            expect(c.decode(c.encode(42))).toBe(42);
+        it('schema count exceeding MAX_SCHEMA_COUNT (1024) throws', () => {
+            let c = codec();
+
+            // u16 LE: 0x01 | (0x04 << 8) = 1025, which exceeds MAX_SCHEMA_COUNT (1024)
+            expect(() => c.deserializeRegistry(new Uint8Array([0x01, 0x04]))).toThrow('schema count');
         });
     });
 

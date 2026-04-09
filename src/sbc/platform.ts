@@ -219,13 +219,24 @@ let codegenDriver: CodegenDriver = isNode
 
 function readVarint(buf: Uint8Array, pos: number): [number, number] {
     let b: number,
+        i = 0,
+        len = buf.length,
         shift = 0,
         value = 0;
 
     do {
+        if (pos >= len) {
+            throw new Error('Codec2: varint read past end of buffer');
+        }
+
+        if (i >= 5) {
+            throw new Error('Codec2: varint exceeds 5 bytes');
+        }
+
         b = buf[pos++]!;
         value |= (b & 0x7F) << shift;
         shift += 7;
+        i++;
     } while (b & 0x80);
 
     return [value >>> 0, pos];
