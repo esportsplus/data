@@ -1011,7 +1011,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
                     let p = pos + 5;
 
-                    for (let [k, v] of value) { p = encodeSbc(k, buf, p); p = encodeSbc(v, buf, p); }
+                    value.forEach((v: unknown, k: unknown) => { p = encodeSbc(k, buf, p); p = encodeSbc(v, buf, p); });
                     return p;
                 }
 
@@ -1675,6 +1675,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                     pos += f.fixedSize;
                 }
 
+                if (pos + target.fixedSize > buffer.length) {
+                    throw new Error('Codec2: buffer too short for field at offset ' + pos);
+                }
+
                 return readFixedField(buffer, pos, target.type);
             }
         }
@@ -1806,6 +1810,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
         // pos now points to target field data
         if (target.fixedSize > 0) {
+            if (pos + target.fixedSize > buffer.length) {
+                throw new Error('Codec2: buffer too short for field at offset ' + pos);
+            }
+
             return readFixedField(buffer, pos, target.type);
         }
 
@@ -1994,7 +2002,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                                         }
                                     }
 
-                                    size += 1 + nestedSize;
+                                    size += (nestedSize < 128 ? 1 : 9) + nestedSize;
                                 }
                                 else {
                                     return -1;
