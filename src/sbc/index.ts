@@ -1129,19 +1129,8 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
 
 
     function matchSchema(obj: Record<string, unknown>): Schema | null {
-        // O(1) WeakMap lookup for repeated objects
-        let cached = weakCache.get(obj);
-
-        if (cached) {
-            return cached;
-        }
-
-        // Fallback: ring buffer cache — match on key names AND value types
-        let keyCount = 0;
-
-        for (let _ in obj) {
-            keyCount++;
-        }
+        // Ring buffer cache — match on key names AND value types
+        let keyCount = Object.keys(obj).length;
 
         for (let i = 0; i < 4; i++) {
             let schema = cacheSchemas[i];
