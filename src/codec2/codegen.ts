@@ -50,15 +50,15 @@ interface SbcHelpers {
 }
 
 
-function compileSchema(schema: Schema, helpers: SbcHelpers): void {
+function compileSchema(schema: Schema, helpers: SbcHelpers, nullProto: boolean = true): void {
     let d = codegenDriver;
 
     schema.encodeFn = compileEncoder(schema, d, helpers);
-    schema.decodeFn = compileDecoder(schema, d, helpers);
+    schema.decodeFn = compileDecoder(schema, d, helpers, nullProto);
 
     if (schema.compressible) {
         schema.compressedEncodeFn = compileCompressedEncoder(schema, d, helpers);
-        schema.compressedDecodeFn = compileCompressedDecoder(schema, d, helpers);
+        schema.compressedDecodeFn = compileCompressedDecoder(schema, d, helpers, nullProto);
     }
 }
 
@@ -329,7 +329,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 }
 
 
-function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (buf: Uint8Array, pos: number) => unknown {
+function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers, nullProto: boolean): (buf: Uint8Array, pos: number) => unknown {
     let body = `'use strict';\n`,
         fields = schema.fields,
         n = fields.length;
@@ -612,14 +612,29 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
         }
     }
 
-    // Build return object — use computed properties to prevent __proto__ pollution
-    body += `let _r=Object.create(null);`;
+    // Build return object
+    if (nullProto) {
+        body += `let _r=Object.create(null);`;
 
-    for (let i = 0; i < n; i++) {
-        body += `_r[${JSON.stringify(fields[i]!.name)}]=f${i};`;
+        for (let i = 0; i < n; i++) {
+            body += `_r[${JSON.stringify(fields[i]!.name)}]=f${i};`;
+        }
+
+        body += `return _r;\n`;
     }
+    else {
+        body += `return {`;
 
-    body += `return _r;\n`;
+        for (let i = 0; i < n; i++) {
+            if (i > 0) {
+                body += `,`;
+            }
+
+            body += `${JSON.stringify(fields[i]!.name)}:f${i}`;
+        }
+
+        body += `};\n`;
+    }
 
     let bindArgs = d.decoderBindArgs(),
         refDecParamNames = [...refHashes.values()],
@@ -636,7 +651,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 }
 
 
-function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (buf: Uint8Array, pos: number, depth: number) => unknown {
+function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers, nullProto: boolean): (buf: Uint8Array, pos: number, depth: number) => unknown {
     let body = `'use strict';\n`,
         fields = schema.fields,
         n = fields.length;
@@ -894,13 +909,28 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
     }
 
     // Build return object
-    body += `let _r=Object.create(null);`;
+    if (nullProto) {
+        body += `let _r=Object.create(null);`;
 
-    for (let i = 0; i < n; i++) {
-        body += `_r[${JSON.stringify(fields[i]!.name)}]=f${i};`;
+        for (let i = 0; i < n; i++) {
+            body += `_r[${JSON.stringify(fields[i]!.name)}]=f${i};`;
+        }
+
+        body += `return _r;\n`;
     }
+    else {
+        body += `return {`;
 
-    body += `return _r;\n`;
+        for (let i = 0; i < n; i++) {
+            if (i > 0) {
+                body += `,`;
+            }
+
+            body += `${JSON.stringify(fields[i]!.name)}:f${i}`;
+        }
+
+        body += `};\n`;
+    }
 
     let bindArgs = d.decoderBindArgs(),
         refDecParamNames = [...refHashes.values()],

@@ -9,6 +9,7 @@ import type { FieldDef, ParsedType, Schema, SbcHelpers } from './codegen';
 
 type CodecOptions = {
     compress?: boolean;
+    nullProto?: boolean;
 };
 
 type DecodeOptions = {
@@ -234,7 +235,7 @@ function inferType(value: unknown): string {
 }
 
 
-function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers): Schema {
+function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers, nullProto: boolean = true): Schema {
     let keys = Object.keys(obj).sort(),
         types: string[] = new Array(keys.length);
 
@@ -324,7 +325,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         nullableCount: 0,
     };
 
-    compileSchema(schema, helpers);
+    compileSchema(schema, helpers, nullProto);
     registry.schemas.set(hash, schema);
 
     return schema;
@@ -370,6 +371,7 @@ function readFixedField(buf: Uint8Array, pos: number, type: string): unknown {
 const createCodec = (options?: CodecOptions): { computeSize(value: unknown): number; decode(buffer: Uint8Array, lengthOrOptions?: number | DecodeOptions): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; deserializeRegistry(data: Uint8Array): void; encode(value: unknown, viewOrOptions?: boolean | EncodeOptions): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown; serializeRegistry(): Uint8Array } => {
     let compress = options?.compress ?? false,
         encodeBuf = allocBuf(65536),
+        nullProto = options?.nullProto ?? true,
         registry: SchemaRegistry = {
             nextId: 1,
             schemas: new Map(),
@@ -404,7 +406,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
             schema = matchSchema(obj);
 
             if (!schema) {
-                schema = inferAndRegister(obj, registry, helpers);
+                schema = inferAndRegister(obj, registry, helpers, nullProto);
             }
 
             setCache(schema, obj);
@@ -1043,7 +1045,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                     schema = matchSchema(obj);
 
                     if (!schema) {
-                        schema = inferAndRegister(obj, registry, helpers);
+                        schema = inferAndRegister(obj, registry, helpers, nullProto);
                     }
 
                     setCache(schema, obj);
@@ -1302,7 +1304,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                 schema = matchSchema(obj);
 
                 if (!schema) {
-                    schema = inferAndRegister(obj, registry, helpers);
+                    schema = inferAndRegister(obj, registry, helpers, nullProto);
                 }
 
                 setCache(schema, obj);
@@ -1477,7 +1479,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
             nullableCount,
         };
 
-        compileSchema(schema, helpers);
+        compileSchema(schema, helpers, nullProto);
         registry.schemas.set(hash, schema);
 
         // Index typed schemas by name hash for matchSchema lookup
@@ -1833,7 +1835,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
                     schema = weakCache.get(obj) ?? matchSchema(obj) ?? null;
 
                 if (!schema) {
-                    schema = inferAndRegister(obj, registry, helpers);
+                    schema = inferAndRegister(obj, registry, helpers, nullProto);
                     setCache(schema, obj);
                 }
 
