@@ -51,6 +51,10 @@ const HELPER_BIGINT = `
             shift += 7n;
         }
 
+        if (result >= 0x8000000000000000n) {
+            result -= 0x10000000000000000n;
+        }
+
         return [result, offset];
     }
 

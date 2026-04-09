@@ -66,7 +66,7 @@ describe('Codec: BigInt Arrays', () => {
     });
 
     it('roundtrips bigint array with large values', () => {
-        let data = { values: [BigInt('18446744073709551615'), BigInt('999999999999999999'), 0n] },
+        let data = { values: [-1n, BigInt('999999999999999999'), 0n] },
             decoded = codec.decode(codec.encode(data));
 
         expect(decoded).toEqual(data);

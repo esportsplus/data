@@ -196,6 +196,10 @@ function _readBigInt(buffer: Uint8Array, offset: number): [bigint, number] {
         shift += 7n;
     }
 
+    if (result >= 0x8000000000000000n) {
+        result -= 0x10000000000000000n;
+    }
+
     return [result, offset];
 }
 
@@ -553,6 +557,20 @@ describe('Runtime: BigInt', () => {
 
                 expect(val).toBe(values[i]);
                 expect(off).toBe(end);
+            }
+        });
+
+        it('roundtrips negative BigInt values', () => {
+            let values = [-1n, -2n, -5n, -100n, -128n, -1000n, -100000n, -9223372036854775808n];
+
+            for (let i = 0, n = values.length; i < n; i++) {
+                let buf = new Uint8Array(10),
+                    end = _writeBigInt(buf, 0, values[i]),
+                    [val, off] = _readBigInt(buf, 0);
+
+                expect(val).toBe(values[i]);
+                expect(off).toBe(end);
+                expect(end).toBe(10); // Negative bigint always 10 bytes
             }
         });
 
