@@ -11,6 +11,15 @@ type CodecOptions = {
     compress?: boolean;
 };
 
+type DecodeOptions = {
+    schema?: number | FieldSpec[];
+};
+
+type EncodeOptions = {
+    schema?: number | FieldSpec[];
+    view?: boolean;
+};
+
 type FieldSpec = {
     name: string;
     nullable?: boolean;
@@ -358,7 +367,7 @@ function readFixedField(buf: Uint8Array, pos: number, type: string): unknown {
 // 16 = set (u32 count + elements)
 // 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
-const createCodec = (options?: CodecOptions): { computeSize(value: unknown): number; decode(buffer: Uint8Array, length?: number): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; deserializeRegistry(data: Uint8Array): void; encode(value: unknown, view?: boolean): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown; serializeRegistry(): Uint8Array } => {
+const createCodec = (options?: CodecOptions): { computeSize(value: unknown): number; decode(buffer: Uint8Array, lengthOrOptions?: number | DecodeOptions): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; deserializeRegistry(data: Uint8Array): void; encode(value: unknown, viewOrOptions?: boolean | EncodeOptions): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown; serializeRegistry(): Uint8Array } => {
     let compress = options?.compress ?? false,
         encodeBuf = allocBuf(65536),
         registry: SchemaRegistry = {
@@ -1140,8 +1149,36 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
     }
 
 
-    function decode(buffer: Uint8Array, length?: number): unknown {
-        let len = length ?? buffer.length;
+    function decode(buffer: Uint8Array, lengthOrOptions?: number | DecodeOptions): unknown {
+        let len = buffer.length;
+
+        if (typeof lengthOrOptions === 'number') {
+            len = lengthOrOptions;
+        }
+        else if (lengthOrOptions && lengthOrOptions.schema != null) {
+            let hintSchema = resolveSchemaForDecode(lengthOrOptions.schema),
+                tag = buffer[0];
+
+            if ((tag === 8 || tag === 18) && len >= 5) {
+                let bufHash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
+
+                if (bufHash === hintSchema.hash) {
+                    lastDecodeHash = bufHash;
+                    lastDecodeSchema = hintSchema;
+
+                    if (tag === 18 && hintSchema.compressedDecodeFn) {
+                        return hintSchema.compressedDecodeFn(buffer, 9, 0);
+                    }
+
+                    if (hintSchema.decodeFn) {
+                        lastDecodeFn = hintSchema.decodeFn;
+
+                        return hintSchema.decodeFn(buffer, 9, 0);
+                    }
+                }
+            }
+            // Hash mismatch or non-object tag — fall through to normal decode
+        }
 
         // Fast path: tag 8 (uncompressed object) — hottest path, minimize overhead
         if (buffer[0] === 8 && len === buffer.length) {
@@ -1190,7 +1227,72 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
     // view=true returns a subarray into the shared encode buffer (zero-copy).
     // BORROW SEMANTICS: the returned slice is invalidated by the next encode() call.
     // Callers must consume the view synchronously or copy it before re-encoding.
-    function encode(value: unknown, view?: boolean): Uint8Array {
+    function encode(value: unknown, viewOrOptions?: boolean | EncodeOptions): Uint8Array {
+        let hintSchema: Schema | null = null,
+            view = false;
+
+        if (typeof viewOrOptions === 'boolean') {
+            view = viewOrOptions;
+        }
+        else if (viewOrOptions) {
+            view = viewOrOptions.view ?? false;
+
+            if (viewOrOptions.schema != null) {
+                hintSchema = resolveSchemaForEncode(viewOrOptions.schema);
+            }
+        }
+
+        // Schema hint fast path — skip typeof check, WeakMap, matchSchema, inferAndRegister
+        if (hintSchema) {
+            let obj = value as Record<string, unknown>,
+                end: number,
+                h = hintSchema.hash,
+                useCompressed = compress && hintSchema.compressible && hintSchema.compressedEncodeFn;
+
+            if (useCompressed) {
+                end = hintSchema.compressedEncodeFn!(obj, encodeBuf, 9);
+
+                while (end > encodeBuf.length) {
+                    encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+                    end = hintSchema.compressedEncodeFn!(obj, encodeBuf, 9);
+                }
+
+                encodeBuf[0] = 18;
+            }
+            else {
+                end = hintSchema.encodeFn!(obj, encodeBuf, 9);
+
+                while (end > encodeBuf.length) {
+                    encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+                    end = hintSchema.encodeFn!(obj, encodeBuf, 9);
+                }
+
+                encodeBuf[0] = 8;
+            }
+
+            encodeBuf[1] = h & 0xFF;
+            encodeBuf[2] = (h >>> 8) & 0xFF;
+            encodeBuf[3] = (h >>> 16) & 0xFF;
+            encodeBuf[4] = (h >>> 24) & 0xFF;
+
+            let dataLen = end - 9;
+
+            encodeBuf[5] = dataLen & 0xFF;
+            encodeBuf[6] = (dataLen >>> 8) & 0xFF;
+            encodeBuf[7] = (dataLen >>> 16) & 0xFF;
+            encodeBuf[8] = (dataLen >>> 24) & 0xFF;
+
+            if (view) {
+                return encodeBuf.subarray(0, end);
+            }
+
+            let result = allocUnsafe(end);
+
+            copyBuf(encodeBuf, result, 0, 0, end);
+
+            return result;
+        }
+
         // Fast path: plain object
         if (typeof value === 'object' && value !== null && ((value as object).constructor === Object || (value as object).constructor === undefined)) {
             let obj = value as Record<string, unknown>,
@@ -1393,6 +1495,34 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
         }
 
         return hash;
+    }
+
+
+    function resolveSchemaForDecode(hint: number | FieldSpec[]): Schema {
+        if (typeof hint === 'number') {
+            let s = registry.schemas.get(hint);
+
+            if (!s) {
+                throw new Error('Codec2: unknown schema hash ' + hint);
+            }
+
+            return s;
+        }
+
+        let hash = defineSchema(hint);
+
+        return registry.schemas.get(hash)!;
+    }
+
+
+    function resolveSchemaForEncode(hint: number | FieldSpec[]): Schema | null {
+        if (typeof hint === 'number') {
+            return registry.schemas.get(hint) ?? null;
+        }
+
+        let hash = defineSchema(hint);
+
+        return registry.schemas.get(hash)!;
     }
 
 
@@ -1960,4 +2090,4 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
 
 
 export { createCodec };
-export type { CodecOptions, Schema, SchemaRegistry };
+export type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, Schema, SchemaRegistry };
