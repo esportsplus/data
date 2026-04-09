@@ -617,14 +617,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                     throw new Error('Codec2: array count ' + count + ' exceeds limit');
                 }
 
-                let arr = new Array(count),
-                    p = offset + 5;
-
-                for (let i = 0; i < count; i++) {
-                    arr[i] = buf[p + i]!;
-                }
-
-                return arr;
+                return Array.from(buf.subarray(offset + 5, offset + 5 + count));
             }
 
             case 13: {
@@ -726,10 +719,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                     throw new Error('Codec2: typed array byteLength not aligned');
                 }
 
-                let aligned = new Uint8Array(bLen);
+                let start = buf.byteOffset + offset + 6,
+                    copied = buf.buffer.slice(start, start + bLen) as ArrayBuffer;
 
-                aligned.set(buf.subarray(offset + 6, offset + 6 + bLen));
-                return new (Ctor as new (buf: ArrayBuffer, off: number, len: number) => ArrayBufferView)(aligned.buffer, 0, bLen / bpe);
+                return new (Ctor as new (buf: ArrayBuffer, off: number, len: number) => ArrayBufferView)(copied, 0, bLen / bpe);
             }
 
             default:
@@ -1768,6 +1761,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                                     pos += 1 + fb;
                                 }
                                 else if (fb === 8 || fb === 18) {
+                                    if (pos + 9 > buffer.length) {
+                                        return undefined;
+                                    }
+
                                     let dLen = (buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0;
 
                                     pos += 9 + dLen;
@@ -1818,6 +1815,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                             pos += 1 + fb;
                         }
                         else if (fb === 8 || fb === 18) {
+                            if (pos + 9 > buffer.length) {
+                                return undefined;
+                            }
+
                             let dLen = (buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0;
 
                             pos += 9 + dLen;
@@ -1827,6 +1828,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                         }
                     }
                     else if (buffer[pos] === 8 || buffer[pos] === 18) {
+                        if (pos + 9 > buffer.length) {
+                            return undefined;
+                        }
+
                         let dLen = (buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0;
 
                         pos += 9 + dLen;
