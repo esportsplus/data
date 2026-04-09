@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createCodec } from '../src/sbc';
+import { codec } from '../src/sbc';
 
 import type { StoredSchema } from '../src/sbc/cache';
 
@@ -48,8 +48,8 @@ describe('SIEVE cache', () => {
 
 describe('Codec schema sharing', () => {
     it('cross-instance encode/decode via shared SIEVE cache (no store)', () => {
-        let codecA = createCodec(),
-            codecB = createCodec();
+        let codecA = codec(),
+            codecB = codec();
 
         let encoded = codecA.encode({ age: 30, name: 'Alice' }),
             decoded = codecB.decode(encoded) as Record<string, unknown>;
@@ -65,8 +65,8 @@ describe('Codec schema sharing', () => {
                 set(h: number, s: StoredSchema) { storage.set(h, s); },
             };
 
-        let codecA = createCodec({ store }),
-            codecB = createCodec({ store });
+        let codecA = codec({ store }),
+            codecB = codec({ store });
 
         let buf = codecA.encode({ x: 1, y: 2 }),
             decoded = codecB.decode(buf) as Record<string, unknown>;
@@ -77,11 +77,11 @@ describe('Codec schema sharing', () => {
     });
 
     it('local registry hit on repeated decode', () => {
-        let codec = createCodec();
+        let c = codec();
 
-        let buf = codec.encode({ a: 1 }),
-            first = codec.decode(buf) as Record<string, unknown>,
-            second = codec.decode(buf) as Record<string, unknown>;
+        let buf = c.encode({ a: 1 }),
+            first = c.decode(buf) as Record<string, unknown>,
+            second = c.decode(buf) as Record<string, unknown>;
 
         expect(first.a).toBe(1);
         expect(second.a).toBe(1);
@@ -94,9 +94,9 @@ describe('Codec schema sharing', () => {
                 set(h: number, s: StoredSchema) { storage.set(h, s); },
             };
 
-        let codec = createCodec({ store });
+        let c = codec({ store });
 
-        codec.encode({ active: true, user: { age: 30, name: 'Alice' } });
+        c.encode({ active: true, user: { age: 30, name: 'Alice' } });
 
         expect(storage.size).toBeGreaterThanOrEqual(2);
 
@@ -115,8 +115,8 @@ describe('Codec schema sharing', () => {
     });
 
     it('compressed codec cross-instance via shared cache', () => {
-        let codecA = createCodec({ compress: true }),
-            codecB = createCodec({ compress: true });
+        let codecA = codec({ compress: true }),
+            codecB = codec({ compress: true });
 
         let data = { active: true, age: 30, score: 99.5 },
             encoded = codecA.encode(data),

@@ -401,7 +401,7 @@ function readFixedField(buf: Uint8Array, pos: number, type: string): unknown {
 // 16 = set (u32 count + elements)
 // 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
-const createCodec = (options?: CodecOptions): { computeSize(value: unknown): number; decode(buffer: Uint8Array, lengthOrOptions?: number | DecodeOptions): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; deserializeRegistry(data: Uint8Array): void; encode(value: unknown, viewOrOptions?: boolean | EncodeOptions): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown; serializeRegistry(): Uint8Array } => {
+const codec = (options?: CodecOptions): { computeSize(value: unknown): number; decode(buffer: Uint8Array, lengthOrOptions?: number | DecodeOptions): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; deserializeRegistry(data: Uint8Array): void; encode(value: unknown, viewOrOptions?: boolean | EncodeOptions): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown; serializeRegistry(): Uint8Array } => {
     let compress = options?.compress ?? false,
         encodeBuf = allocBuf(65536),
         registry: SchemaRegistry = {
@@ -2140,5 +2140,5 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
 };
 
 
-export { createCodec };
+export { codec };
 export type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, PersistentStore, Schema, SchemaRegistry, StoredSchema };

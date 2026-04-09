@@ -3,10 +3,10 @@
 
 import { afterAll, bench, describe } from 'vitest';
 import { pack, unpack } from 'msgpackr';
-import { createCodec } from '../../src/sbc';
+import { codec } from '../../src/sbc';
 
 
-let codec = createCodec();
+let c = codec();
 
 
 // Test data
@@ -18,11 +18,11 @@ let arrayData = { items: Array.from({ length: 100 }, (_, i) => i) },
 
 
 // Pre-encode for decode benchmarks
-let codec2ArrayEncoded = codec.encode(arrayData),
-    codec2LargeEncoded = codec.encode(largeData),
-    codec2MultiEncoded = codec.encode(multiData),
-    codec2NestedEncoded = codec.encode(nestedData),
-    codec2SimpleEncoded = codec.encode(simpleData);
+let codec2ArrayEncoded = c.encode(arrayData),
+    codec2LargeEncoded = c.encode(largeData),
+    codec2MultiEncoded = c.encode(multiData),
+    codec2NestedEncoded = c.encode(nestedData),
+    codec2SimpleEncoded = c.encode(simpleData);
 
 let msgArrayEncoded = pack(arrayData),
     msgLargeEncoded = pack(largeData),
@@ -33,16 +33,16 @@ let msgArrayEncoded = pack(arrayData),
 
 // Warmup — 2000 iterations each to stabilize JIT
 for (let i = 0; i < 2000; i++) {
-    codec.encode(simpleData);
-    codec.decode(codec2SimpleEncoded);
-    codec.encode(multiData);
-    codec.decode(codec2MultiEncoded);
-    codec.encode(nestedData);
-    codec.decode(codec2NestedEncoded);
-    codec.encode(arrayData);
-    codec.decode(codec2ArrayEncoded);
-    codec.encode(largeData);
-    codec.decode(codec2LargeEncoded);
+    c.encode(simpleData);
+    c.decode(codec2SimpleEncoded);
+    c.encode(multiData);
+    c.decode(codec2MultiEncoded);
+    c.encode(nestedData);
+    c.decode(codec2NestedEncoded);
+    c.encode(arrayData);
+    c.decode(codec2ArrayEncoded);
+    c.encode(largeData);
+    c.decode(codec2LargeEncoded);
     pack(simpleData);
     unpack(msgSimpleEncoded);
     pack(multiData);
@@ -57,7 +57,7 @@ for (let i = 0; i < 2000; i++) {
 
 // Verify correctness
 function verify(original: unknown, encoded: Uint8Array): void {
-    let decoded = codec.decode(encoded);
+    let decoded = c.decode(encoded);
     let a = JSON.stringify(original),
         b = JSON.stringify(decoded);
 
@@ -106,11 +106,11 @@ function cooldown(): void {
 
 describe('Codec2 Encode', () => {
     afterAll(() => cooldown());
-    bench('simple { name }', () => { codec.encode(simpleData); }, opts);
-    bench('multi { active, age, name }', () => { codec.encode(multiData); }, opts);
-    bench('nested { address, name }', () => { codec.encode(nestedData); }, opts);
-    bench('array { items[100] }', () => { codec.encode(arrayData); }, opts);
-    bench('large { 6 fields }', () => { codec.encode(largeData); }, opts);
+    bench('simple { name }', () => { c.encode(simpleData); }, opts);
+    bench('multi { active, age, name }', () => { c.encode(multiData); }, opts);
+    bench('nested { address, name }', () => { c.encode(nestedData); }, opts);
+    bench('array { items[100] }', () => { c.encode(arrayData); }, opts);
+    bench('large { 6 fields }', () => { c.encode(largeData); }, opts);
 });
 
 
@@ -130,11 +130,11 @@ describe('MsgPack Encode', () => {
 
 describe('Codec2 Decode', () => {
     afterAll(() => cooldown());
-    bench('simple { name }', () => { codec.decode(codec2SimpleEncoded); }, opts);
-    bench('multi { active, age, name }', () => { codec.decode(codec2MultiEncoded); }, opts);
-    bench('nested { address, name }', () => { codec.decode(codec2NestedEncoded); }, opts);
-    bench('array { items[100] }', () => { codec.decode(codec2ArrayEncoded); }, opts);
-    bench('large { 6 fields }', () => { codec.decode(codec2LargeEncoded); }, opts);
+    bench('simple { name }', () => { c.decode(codec2SimpleEncoded); }, opts);
+    bench('multi { active, age, name }', () => { c.decode(codec2MultiEncoded); }, opts);
+    bench('nested { address, name }', () => { c.decode(codec2NestedEncoded); }, opts);
+    bench('array { items[100] }', () => { c.decode(codec2ArrayEncoded); }, opts);
+    bench('large { 6 fields }', () => { c.decode(codec2LargeEncoded); }, opts);
 });
 
 

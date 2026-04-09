@@ -18,7 +18,7 @@ const validator: Validator = {
 };
 
 
-export { createCodec } from './sbc';
+export { codec } from './sbc';
 export {
     decodeTypedArray,
     encodeTypedArrayInto,

@@ -2,7 +2,7 @@ import { coordinator } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
 import { describe, expect, test } from 'vitest';
 
-import { createCodec } from '../src/sbc';
+import { codec } from '../src/sbc';
 import sbcPlugin from '../src/compiler/sbc';
 
 
@@ -183,124 +183,124 @@ describe('codec2 compiler plugin transformations', () => {
 // Part 2: Runtime Round-Trip Tests
 describe('codec2 schema hints runtime', () => {
     test('encode with hash hint matches normal encode', () => {
-        let codec = createCodec();
-        let hash = codec.defineSchema([
+        let c = codec();
+        let hash = c.defineSchema([
             { name: 'age', type: 'uint8' },
             { name: 'name', type: 'string' },
         ]);
         let obj = { age: 25, name: 'Alice' };
-        let normal = codec.encode(obj);
-        let hinted = codec.encode(obj, { schema: hash });
+        let normal = c.encode(obj);
+        let hinted = c.encode(obj, { schema: hash });
 
         expect(hinted).toEqual(normal);
-        expect(codec.decode(hinted)).toEqual(obj);
+        expect(c.decode(hinted)).toEqual(obj);
     });
 
     test('encode with FieldSpec[] auto-registers and matches', () => {
-        let codec = createCodec();
+        let c = codec();
         let specs = [
             { name: 'age', type: 'uint8' },
             { name: 'name', type: 'string' },
         ];
         let obj = { age: 30, name: 'Bob' };
-        let hinted = codec.encode(obj, { schema: specs });
-        let decoded = codec.decode(hinted);
+        let hinted = c.encode(obj, { schema: specs });
+        let decoded = c.decode(hinted);
 
         expect(decoded).toEqual(obj);
     });
 
     test('decode with hash hint', () => {
-        let codec = createCodec();
-        let hash = codec.defineSchema([
+        let c = codec();
+        let hash = c.defineSchema([
             { name: 'active', type: 'boolean' },
             { name: 'score', type: 'float64' },
         ]);
         let obj = { active: true, score: 99.5 };
-        let encoded = codec.encode(obj, { schema: hash });
-        let decoded = codec.decode(encoded, { schema: hash });
+        let encoded = c.encode(obj, { schema: hash });
+        let decoded = c.decode(encoded, { schema: hash });
 
         expect(decoded).toEqual(obj);
     });
 
     test('decode with wrong hash falls through to normal decode', () => {
-        let codec = createCodec();
-        let hash1 = codec.defineSchema([{ name: 'name', type: 'string' }]);
-        let hash2 = codec.defineSchema([{ name: 'age', type: 'uint8' }]);
+        let c = codec();
+        let hash1 = c.defineSchema([{ name: 'name', type: 'string' }]);
+        let hash2 = c.defineSchema([{ name: 'age', type: 'uint8' }]);
         let obj = { name: 'test' };
-        let encoded = codec.encode(obj, { schema: hash1 });
-        let decoded = codec.decode(encoded, { schema: hash2 });
+        let encoded = c.encode(obj, { schema: hash1 });
+        let decoded = c.decode(encoded, { schema: hash2 });
 
         expect(decoded).toEqual(obj);
     });
 
     test('decode with unknown hash throws', () => {
-        let codec = createCodec();
+        let c = codec();
 
-        expect(() => codec.decode(
+        expect(() => c.decode(
             new Uint8Array([8, 0, 0, 0, 0, 0, 0, 0, 0]),
             { schema: 99999 }
         )).toThrow('Codec2: unknown schema hash');
     });
 
     test('encode with unknown hash falls through to inference', () => {
-        let codec = createCodec();
+        let c = codec();
         let obj = { name: 'test' };
-        let encoded = codec.encode(obj, { schema: 12345 });
-        let decoded = codec.decode(encoded);
+        let encoded = c.encode(obj, { schema: 12345 });
+        let decoded = c.decode(encoded);
 
         expect(decoded).toEqual(obj);
     });
 
     test('encode with view option and schema hint', () => {
-        let codec = createCodec();
-        let hash = codec.defineSchema([{ name: 'x', type: 'uint8' }]);
+        let c = codec();
+        let hash = c.defineSchema([{ name: 'x', type: 'uint8' }]);
         let obj = { x: 42 };
-        let view = codec.encode(obj, { schema: hash, view: true });
+        let view = c.encode(obj, { schema: hash, view: true });
 
         expect(view).toBeInstanceOf(Uint8Array);
-        expect(codec.decode(view)).toEqual(obj);
+        expect(c.decode(view)).toEqual(obj);
     });
 
     test('backward compat: encode(value, true) still works', () => {
-        let codec = createCodec();
+        let c = codec();
         let obj = { name: 'test' };
-        let result = codec.encode(obj, true);
+        let result = c.encode(obj, true);
 
         expect(result).toBeInstanceOf(Uint8Array);
-        expect(codec.decode(result)).toEqual(obj);
+        expect(c.decode(result)).toEqual(obj);
     });
 
     test('backward compat: decode(buffer, length) still works', () => {
-        let codec = createCodec();
+        let c = codec();
         let obj = { name: 'test' };
-        let encoded = codec.encode(obj);
-        let decoded = codec.decode(encoded, encoded.length);
+        let encoded = c.encode(obj);
+        let decoded = c.decode(encoded, encoded.length);
 
         expect(decoded).toEqual(obj);
     });
 
     test('nullable field round-trip with schema hint', () => {
-        let codec = createCodec();
-        let hash = codec.defineSchema([
+        let c = codec();
+        let hash = c.defineSchema([
             { name: 'email', nullable: true, type: 'string' },
             { name: 'name', type: 'string' },
         ]);
         let obj = { email: null, name: 'Carol' };
-        let encoded = codec.encode(obj, { schema: hash });
-        let decoded = codec.decode(encoded, { schema: hash });
+        let encoded = c.encode(obj, { schema: hash });
+        let decoded = c.decode(encoded, { schema: hash });
 
         expect(decoded).toEqual(obj);
     });
 
     test('compressed schema hint', () => {
-        let codec = createCodec({ compress: true });
-        let hash = codec.defineSchema([
+        let c = codec({ compress: true });
+        let hash = c.defineSchema([
             { name: 'active', type: 'boolean' },
             { name: 'score', type: 'float64' },
         ]);
         let obj = { active: true, score: 42.5 };
-        let encoded = codec.encode(obj, { schema: hash });
-        let decoded = codec.decode(encoded, { schema: hash });
+        let encoded = c.encode(obj, { schema: hash });
+        let decoded = c.decode(encoded, { schema: hash });
 
         expect(decoded).toEqual(obj);
     });
@@ -324,10 +324,10 @@ describe('codec2 compile + run round-trip', () => {
         expect(schemaMatch).not.toBeNull();
 
         let schema = JSON.parse(schemaMatch![1]);
-        let codec = createCodec();
+        let c = codec();
         let user = { age: 25, name: 'Alice' };
-        let encoded = codec.encode(user, { schema });
-        let decoded = codec.decode(encoded, { schema });
+        let encoded = c.encode(user, { schema });
+        let decoded = c.decode(encoded, { schema });
 
         expect(decoded).toEqual(user);
     });
@@ -346,10 +346,10 @@ describe('codec2 compile + run round-trip', () => {
         expect(schemaMatch).not.toBeNull();
 
         let schema = JSON.parse(schemaMatch![1]);
-        let codec = createCodec();
+        let c = codec();
         let obj = { active: true, score: 99.5 };
-        let encoded = codec.encode(obj, { schema });
-        let decoded = codec.decode(encoded, { schema });
+        let encoded = c.encode(obj, { schema });
+        let decoded = c.decode(encoded, { schema });
 
         expect(decoded).toEqual(obj);
     });
@@ -369,19 +369,19 @@ describe('codec2 compile + run round-trip', () => {
         expect(schemaMatch).not.toBeNull();
 
         let schema = JSON.parse(schemaMatch![1]);
-        let codec = createCodec();
+        let c = codec();
 
         // With null value
         let obj1 = { email: null, name: 'Test' };
-        let encoded1 = codec.encode(obj1, { schema });
-        let decoded1 = codec.decode(encoded1, { schema });
+        let encoded1 = c.encode(obj1, { schema });
+        let decoded1 = c.decode(encoded1, { schema });
 
         expect(decoded1).toEqual(obj1);
 
         // With non-null value
         let obj2 = { email: 'test@example.com', name: 'Test' };
-        let encoded2 = codec.encode(obj2, { schema });
-        let decoded2 = codec.decode(encoded2, { schema });
+        let encoded2 = c.encode(obj2, { schema });
+        let decoded2 = c.decode(encoded2, { schema });
 
         expect(decoded2).toEqual(obj2);
     });
@@ -402,10 +402,10 @@ describe('codec2 compile + run round-trip', () => {
         expect(schemaMatch).not.toBeNull();
 
         let schema = JSON.parse(schemaMatch![1]);
-        let codec = createCodec();
+        let c = codec();
         let packet = { id: 42, label: 'hello' };
-        let encoded = codec.encode(packet, { schema });
-        let decoded = codec.decode(encoded, { schema });
+        let encoded = c.encode(packet, { schema });
+        let decoded = c.decode(encoded, { schema });
 
         expect(decoded).toEqual(packet);
     });
@@ -430,19 +430,19 @@ describe('codec2 compile + run round-trip', () => {
         expect(schemaMatch).not.toBeNull();
 
         let schema = JSON.parse(schemaMatch![1]);
-        let codec = createCodec();
+        let c = codec();
 
         // Register via defineSchema
-        let hash = codec.defineSchema([
+        let hash = c.defineSchema([
             { name: 'age', type: 'float64' },
             { name: 'name', type: 'string' },
         ]);
 
         // Encode with compiler-generated schema
-        let encoded = codec.encode({ age: 25, name: 'Alice' }, { schema });
+        let encoded = c.encode({ age: 25, name: 'Alice' }, { schema });
 
         // Decode with defineSchema hash — should work since same fields
-        let decoded = codec.decode(encoded, { schema: hash });
+        let decoded = c.decode(encoded, { schema: hash });
 
         expect(decoded).toEqual({ age: 25, name: 'Alice' });
     });

@@ -3,10 +3,10 @@
 
 import { performance } from 'perf_hooks';
 import { pack, unpack } from 'msgpackr';
-import { createCodec } from '../../src/sbc';
+import { codec } from '../../src/sbc';
 
 
-let codec = createCodec();
+let c = codec();
 
 // Test data
 let arrayData = { items: Array.from({ length: 100 }, (_, i) => i) },
@@ -17,11 +17,11 @@ let arrayData = { items: Array.from({ length: 100 }, (_, i) => i) },
 
 
 // Pre-encode
-let c2Simple = codec.encode(simpleData),
-    c2Multi = codec.encode(multiData),
-    c2Nested = codec.encode(nestedData),
-    c2Array = codec.encode(arrayData),
-    c2Large = codec.encode(largeData);
+let c2Simple = c.encode(simpleData),
+    c2Multi = c.encode(multiData),
+    c2Nested = c.encode(nestedData),
+    c2Array = c.encode(arrayData),
+    c2Large = c.encode(largeData);
 
 let mpSimple = pack(simpleData),
     mpMulti = pack(multiData),
@@ -32,7 +32,7 @@ let mpSimple = pack(simpleData),
 
 // Verify correctness
 function verify(name: string, original: unknown, encoded: Uint8Array): void {
-    let decoded = codec.decode(encoded),
+    let decoded = c.decode(encoded),
         a = JSON.stringify(original),
         b = JSON.stringify(decoded);
 
@@ -61,16 +61,16 @@ console.log(`Large    — Codec2: ${c2Large.length}  MsgPack: ${mpLarge.length}`
 
 // Warmup
 for (let i = 0; i < 5000; i++) {
-    codec.encode(simpleData);
-    codec.decode(c2Simple);
-    codec.encode(multiData);
-    codec.decode(c2Multi);
-    codec.encode(nestedData);
-    codec.decode(c2Nested);
-    codec.encode(arrayData);
-    codec.decode(c2Array);
-    codec.encode(largeData);
-    codec.decode(c2Large);
+    c.encode(simpleData);
+    c.decode(c2Simple);
+    c.encode(multiData);
+    c.decode(c2Multi);
+    c.encode(nestedData);
+    c.decode(c2Nested);
+    c.encode(arrayData);
+    c.decode(c2Array);
+    c.encode(largeData);
+    c.decode(c2Large);
     pack(simpleData);
     unpack(mpSimple);
     pack(multiData);
@@ -123,7 +123,7 @@ let totalC2Encode = 0,
     totalMpEncode = 0;
 
 for (let s of scenarios) {
-    let c2 = benchFn(`Codec2 ${s.name}`, () => { codec.encode(s.data); }),
+    let c2 = benchFn(`Codec2 ${s.name}`, () => { c.encode(s.data); }),
         mp = benchFn(`MsgPack ${s.name}`, () => { pack(s.data); }),
         ratio = (c2.opsPerSec / mp.opsPerSec).toFixed(2);
 
@@ -155,7 +155,7 @@ let freshScenarios: FreshFactory[] = [
 ];
 
 for (let s of freshScenarios) {
-    let c2 = benchFn(`Codec2 ${s.name}`, () => { codec.encode(s.factory()); }),
+    let c2 = benchFn(`Codec2 ${s.name}`, () => { c.encode(s.factory()); }),
         mp = benchFn(`MsgPack ${s.name}`, () => { pack(s.factory()); }),
         ratio = (c2.opsPerSec / mp.opsPerSec).toFixed(2);
 
@@ -176,7 +176,7 @@ let totalC2Decode = 0,
     totalMpDecode = 0;
 
 for (let s of scenarios) {
-    let c2 = benchFn(`Codec2 ${s.name}`, () => { codec.decode(s.c2Encoded); }),
+    let c2 = benchFn(`Codec2 ${s.name}`, () => { c.decode(s.c2Encoded); }),
         mp = benchFn(`MsgPack ${s.name}`, () => { unpack(s.mpEncoded); }),
         ratio = (c2.opsPerSec / mp.opsPerSec).toFixed(2);
 

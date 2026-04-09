@@ -1,124 +1,124 @@
 import { describe, expect, it } from 'vitest';
 import type { CodecOptions } from '../src/sbc';
-import { createCodec } from '../src/sbc';
+import { codec } from '../src/sbc';
 
 
 describe('Codec2', () => {
-    let codec = createCodec();
+    let c = codec();
 
 
     // === PRIMITIVES ===
 
     describe('primitives', () => {
         it('null', () => {
-            expect(codec.decode(codec.encode(null))).toBe(null);
+            expect(c.decode(c.encode(null))).toBe(null);
         });
 
         it('undefined', () => {
-            expect(codec.decode(codec.encode(undefined))).toBe(null);
+            expect(c.decode(c.encode(undefined))).toBe(null);
         });
 
         it('boolean true', () => {
-            expect(codec.decode(codec.encode(true))).toBe(true);
+            expect(c.decode(c.encode(true))).toBe(true);
         });
 
         it('boolean false', () => {
-            expect(codec.decode(codec.encode(false))).toBe(false);
+            expect(c.decode(c.encode(false))).toBe(false);
         });
 
         it('uint8 (0)', () => {
-            expect(codec.decode(codec.encode(0))).toBe(0);
+            expect(c.decode(c.encode(0))).toBe(0);
         });
 
         it('uint8 (255)', () => {
-            expect(codec.decode(codec.encode(255))).toBe(255);
+            expect(c.decode(c.encode(255))).toBe(255);
         });
 
         it('uint8 (1)', () => {
-            expect(codec.decode(codec.encode(1))).toBe(1);
+            expect(c.decode(c.encode(1))).toBe(1);
         });
 
         it('int32 (256)', () => {
-            expect(codec.decode(codec.encode(256))).toBe(256);
+            expect(c.decode(c.encode(256))).toBe(256);
         });
 
         it('int32 (-1)', () => {
-            expect(codec.decode(codec.encode(-1))).toBe(-1);
+            expect(c.decode(c.encode(-1))).toBe(-1);
         });
 
         it('int32 (2147483647)', () => {
-            expect(codec.decode(codec.encode(2147483647))).toBe(2147483647);
+            expect(c.decode(c.encode(2147483647))).toBe(2147483647);
         });
 
         it('int32 (-2147483648)', () => {
-            expect(codec.decode(codec.encode(-2147483648))).toBe(-2147483648);
+            expect(c.decode(c.encode(-2147483648))).toBe(-2147483648);
         });
 
         it('float64 (3.14)', () => {
-            expect(codec.decode(codec.encode(3.14))).toBe(3.14);
+            expect(c.decode(c.encode(3.14))).toBe(3.14);
         });
 
         it.fails('BUG: -0 classified as uint8 instead of float64', () => {
-            expect(Object.is(codec.decode(codec.encode(-0)) as number, -0)).toBe(true);
+            expect(Object.is(c.decode(c.encode(-0)) as number, -0)).toBe(true);
         });
 
         it('float64 (Infinity)', () => {
-            expect(codec.decode(codec.encode(Infinity))).toBe(Infinity);
+            expect(c.decode(c.encode(Infinity))).toBe(Infinity);
         });
 
         it('float64 (-Infinity)', () => {
-            expect(codec.decode(codec.encode(-Infinity))).toBe(-Infinity);
+            expect(c.decode(c.encode(-Infinity))).toBe(-Infinity);
         });
 
         it('float64 (NaN)', () => {
-            expect(Number.isNaN(codec.decode(codec.encode(NaN)))).toBe(true);
+            expect(Number.isNaN(c.decode(c.encode(NaN)))).toBe(true);
         });
 
         it('float64 (Number.MAX_SAFE_INTEGER)', () => {
-            expect(codec.decode(codec.encode(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER);
+            expect(c.decode(c.encode(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER);
         });
 
         it('float64 (Number.MIN_SAFE_INTEGER)', () => {
-            expect(codec.decode(codec.encode(Number.MIN_SAFE_INTEGER))).toBe(Number.MIN_SAFE_INTEGER);
+            expect(c.decode(c.encode(Number.MIN_SAFE_INTEGER))).toBe(Number.MIN_SAFE_INTEGER);
         });
 
         it('string (empty)', () => {
-            expect(codec.decode(codec.encode(''))).toBe('');
+            expect(c.decode(c.encode(''))).toBe('');
         });
 
         it('string (ascii)', () => {
-            expect(codec.decode(codec.encode('hello'))).toBe('hello');
+            expect(c.decode(c.encode('hello'))).toBe('hello');
         });
 
         it('string (unicode)', () => {
-            expect(codec.decode(codec.encode('こんにちは'))).toBe('こんにちは');
+            expect(c.decode(c.encode('こんにちは'))).toBe('こんにちは');
         });
 
         it('string (emoji)', () => {
-            expect(codec.decode(codec.encode('hello 🌍🔥'))).toBe('hello 🌍🔥');
+            expect(c.decode(c.encode('hello 🌍🔥'))).toBe('hello 🌍🔥');
         });
 
         it('string (long > 16 chars)', () => {
             let s = 'a'.repeat(1000);
 
-            expect(codec.decode(codec.encode(s))).toBe(s);
+            expect(c.decode(c.encode(s))).toBe(s);
         });
 
         it('bigint', () => {
-            expect(codec.decode(codec.encode(123456789012345678n))).toBe(123456789012345678n);
+            expect(c.decode(c.encode(123456789012345678n))).toBe(123456789012345678n);
         });
 
         it('bigint (negative)', () => {
-            expect(codec.decode(codec.encode(-99999999999n))).toBe(-99999999999n);
+            expect(c.decode(c.encode(-99999999999n))).toBe(-99999999999n);
         });
 
         it('bigint (0n)', () => {
-            expect(codec.decode(codec.encode(0n))).toBe(0n);
+            expect(c.decode(c.encode(0n))).toBe(0n);
         });
 
         it('Date', () => {
             let d = new Date('2025-01-15T10:30:00Z'),
-                decoded = codec.decode(codec.encode(d)) as Date;
+                decoded = c.decode(c.encode(d)) as Date;
 
             expect(decoded).toBeInstanceOf(Date);
             expect(decoded.getTime()).toBe(d.getTime());
@@ -126,14 +126,14 @@ describe('Codec2', () => {
 
         it('Date (epoch)', () => {
             let d = new Date(0),
-                decoded = codec.decode(codec.encode(d)) as Date;
+                decoded = c.decode(c.encode(d)) as Date;
 
             expect(decoded.getTime()).toBe(0);
         });
 
         it('Uint8Array', () => {
             let buf = new Uint8Array([1, 2, 3, 255, 0]),
-                decoded = codec.decode(codec.encode(buf)) as Uint8Array;
+                decoded = c.decode(c.encode(buf)) as Uint8Array;
 
             expect(decoded).toBeInstanceOf(Uint8Array);
             expect(Array.from(decoded)).toEqual([1, 2, 3, 255, 0]);
@@ -141,7 +141,7 @@ describe('Codec2', () => {
 
         it('Uint8Array (empty)', () => {
             let buf = new Uint8Array(0),
-                decoded = codec.decode(codec.encode(buf)) as Uint8Array;
+                decoded = c.decode(c.encode(buf)) as Uint8Array;
 
             expect(decoded).toBeInstanceOf(Uint8Array);
             expect(decoded.length).toBe(0);
@@ -153,40 +153,40 @@ describe('Codec2', () => {
 
     describe('arrays', () => {
         it('empty array', () => {
-            expect(codec.decode(codec.encode([]))).toEqual([]);
+            expect(c.decode(c.encode([]))).toEqual([]);
         });
 
         it('string array', () => {
-            expect(codec.decode(codec.encode(['a', 'b', 'c']))).toEqual(['a', 'b', 'c']);
+            expect(c.decode(c.encode(['a', 'b', 'c']))).toEqual(['a', 'b', 'c']);
         });
 
         it('mixed type array', () => {
             let data = [1, 'two', true, null, 3.14];
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('nested array', () => {
             let data = [[1, 2], [3, 4], [5]];
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('packed uint8 array', () => {
             let data = [0, 1, 127, 255];
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('packed int32 array', () => {
             let data = [256, 1000, -1, 2147483647, -2147483648];
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('packed float64 array', () => {
             let data = [1.1, 2.2, 3.3, NaN, Infinity];
-            let decoded = codec.decode(codec.encode(data)) as number[];
+            let decoded = c.decode(c.encode(data)) as number[];
 
             expect(decoded[0]).toBe(1.1);
             expect(decoded[1]).toBe(2.2);
@@ -198,19 +198,19 @@ describe('Codec2', () => {
         it('large uint8 array (100 elements)', () => {
             let data = Array.from({ length: 100 }, (_, i) => i % 256);
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('array of objects', () => {
             let data = [{ a: 1 }, { a: 2 }, { a: 3 }];
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('array with nested objects', () => {
             let data = [{ x: { y: 1 } }, { x: { y: 2 } }];
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
     });
 
@@ -219,25 +219,25 @@ describe('Codec2', () => {
 
     describe('objects', () => {
         it('simple object', () => {
-            expect(codec.decode(codec.encode({ name: 'Alice' }))).toEqual({ name: 'Alice' });
+            expect(c.decode(c.encode({ name: 'Alice' }))).toEqual({ name: 'Alice' });
         });
 
         it('multi-field object', () => {
             let data = { active: true, age: 30, name: 'Alice' };
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('nested object', () => {
             let data = { address: { city: 'NYC', zip: '10001' }, name: 'Alice' };
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('deeply nested object', () => {
             let data = { a: { b: { c: { d: { e: 42 } } } } };
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('object with all types', () => {
@@ -253,7 +253,7 @@ describe('Codec2', () => {
                 str: 'hello',
             };
 
-            let decoded = codec.decode(codec.encode(data)) as Record<string, unknown>;
+            let decoded = c.decode(c.encode(data)) as Record<string, unknown>;
 
             expect(decoded.arr).toEqual([1, 2, 3]);
             expect(decoded.big).toBe(123n);
@@ -269,13 +269,13 @@ describe('Codec2', () => {
         it('object with empty string key', () => {
             let data = { '': 'empty key' };
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('object with unicode keys', () => {
             let data = { '名前': 'Alice', '年齢': 30 };
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('object with many fields', () => {
@@ -285,13 +285,13 @@ describe('Codec2', () => {
                 data[`field${i}`] = i;
             }
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('object with array field containing objects', () => {
             let data = { items: [{ id: 1, name: 'a' }, { id: 2, name: 'b' }] };
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
     });
 
@@ -300,7 +300,7 @@ describe('Codec2', () => {
 
     describe('same keys, different value types', () => {
         it('string then number for same key', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = { value: 'hello' },
                 b = { value: 42 };
 
@@ -312,7 +312,7 @@ describe('Codec2', () => {
         });
 
         it('number then string for same key', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = { value: 42 },
                 b = { value: 'hello' };
 
@@ -324,7 +324,7 @@ describe('Codec2', () => {
         });
 
         it('boolean then string for same key', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = { flag: true },
                 b = { flag: 'yes' };
 
@@ -336,7 +336,7 @@ describe('Codec2', () => {
         });
 
         it('null then object for same key', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = { data: null },
                 b = { data: { x: 1 } };
 
@@ -348,7 +348,7 @@ describe('Codec2', () => {
         });
 
         it('int then float for same key', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = { n: 42 },
                 b = { n: 3.14 };
 
@@ -360,7 +360,7 @@ describe('Codec2', () => {
         });
 
         it('uint8 then int32 for same key', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = { n: 100 },
                 b = { n: 100000 };
 
@@ -372,7 +372,7 @@ describe('Codec2', () => {
         });
 
         it('string then array for same key', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = { payload: 'text' },
                 b = { payload: [1, 2, 3] };
 
@@ -384,7 +384,7 @@ describe('Codec2', () => {
         });
 
         it('interleaved types — round robin', () => {
-            let c = createCodec(),
+            let c = codec(),
                 variants = [
                     { x: 'string' },
                     { x: 42 },
@@ -404,7 +404,7 @@ describe('Codec2', () => {
         });
 
         it('multi-field object with type changes', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = { age: 30, name: 'Alice' },
                 b = { age: 'thirty', name: 42 };
 
@@ -416,7 +416,7 @@ describe('Codec2', () => {
         });
 
         it('same keys with object then null values', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = { meta: { created: 'today' }, name: 'Alice' },
                 b = { meta: null, name: 'Bob' };
 
@@ -433,7 +433,7 @@ describe('Codec2', () => {
 
     describe('ring buffer cache (4 slots)', () => {
         it('handles > 4 distinct schemas', () => {
-            let c = createCodec(),
+            let c = codec(),
                 schemas = [
                     { a: 1 },
                     { b: 2 },
@@ -454,7 +454,7 @@ describe('Codec2', () => {
         });
 
         it('same object identity uses WeakMap', () => {
-            let c = createCodec(),
+            let c = codec(),
                 obj = { x: 1, y: 2, z: 3 };
 
             // Encode same reference multiple times
@@ -464,7 +464,7 @@ describe('Codec2', () => {
         });
 
         it('fresh objects with same shape', () => {
-            let c = createCodec();
+            let c = codec();
 
             for (let i = 0; i < 20; i++) {
                 let obj = { id: i, name: `item-${i}` };
@@ -484,7 +484,7 @@ describe('Codec2', () => {
                 name: 'parent',
             };
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('multiple nesting levels with different shapes', () => {
@@ -499,7 +499,7 @@ describe('Codec2', () => {
                 root: true,
             };
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('sibling objects with different schemas', () => {
@@ -508,7 +508,7 @@ describe('Codec2', () => {
                 b: { y: 'two', z: true },
             };
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
     });
 
@@ -517,73 +517,73 @@ describe('Codec2', () => {
 
     describe('wire format', () => {
         it('object starts with tag 8', () => {
-            let encoded = codec.encode({ a: 1 });
+            let encoded = c.encode({ a: 1 });
 
             expect(encoded[0]).toBe(8);
         });
 
         it('null is tag 0', () => {
-            let encoded = codec.encode(null);
+            let encoded = c.encode(null);
 
             expect(encoded[0]).toBe(0);
         });
 
         it('false is tag 1', () => {
-            let encoded = codec.encode(false);
+            let encoded = c.encode(false);
 
             expect(encoded[0]).toBe(1);
         });
 
         it('true is tag 2', () => {
-            let encoded = codec.encode(true);
+            let encoded = c.encode(true);
 
             expect(encoded[0]).toBe(2);
         });
 
         it('uint8 is tag 3', () => {
-            let encoded = codec.encode(42);
+            let encoded = c.encode(42);
 
             expect(encoded[0]).toBe(3);
         });
 
         it('float64 is tag 4', () => {
-            let encoded = codec.encode(3.14);
+            let encoded = c.encode(3.14);
 
             expect(encoded[0]).toBe(4);
         });
 
         it('string is tag 5', () => {
-            let encoded = codec.encode('hello');
+            let encoded = c.encode('hello');
 
             expect(encoded[0]).toBe(5);
         });
 
         it('Uint8Array is tag 6', () => {
-            let encoded = codec.encode(new Uint8Array([1]));
+            let encoded = c.encode(new Uint8Array([1]));
 
             expect(encoded[0]).toBe(6);
         });
 
         it('generic array is tag 7', () => {
-            let encoded = codec.encode(['a', 'b']);
+            let encoded = c.encode(['a', 'b']);
 
             expect(encoded[0]).toBe(7);
         });
 
         it('bigint is tag 9', () => {
-            let encoded = codec.encode(42n);
+            let encoded = c.encode(42n);
 
             expect(encoded[0]).toBe(9);
         });
 
         it('Date is tag 10', () => {
-            let encoded = codec.encode(new Date());
+            let encoded = c.encode(new Date());
 
             expect(encoded[0]).toBe(10);
         });
 
         it('int32 is tag 11', () => {
-            let encoded = codec.encode(-1);
+            let encoded = c.encode(-1);
 
             expect(encoded[0]).toBe(11);
         });
@@ -595,25 +595,25 @@ describe('Codec2', () => {
     describe('encode view mode', () => {
         it('returns subarray (view) when view=true', () => {
             let data = { name: 'Alice' },
-                view = codec.encode(data, true),
-                copy = codec.encode(data, false);
+                view = c.encode(data, true),
+                copy = c.encode(data, false);
 
-            expect(codec.decode(view)).toEqual(data);
+            expect(c.decode(view)).toEqual(data);
             expect(view.length).toBe(copy.length);
         });
 
         it('view is invalidated by next encode', () => {
             let a = { name: 'Alice' },
-                viewA = codec.encode(a, true);
+                viewA = c.encode(a, true);
 
             // Capture bytes before overwrite
             let bytesA = new Uint8Array(viewA);
 
             // Encode something else — overwrites shared buffer
-            codec.encode({ name: 'Bob' }, true);
+            c.encode({ name: 'Bob' }, true);
 
             // viewA now points to corrupted data; bytesA is the safe snapshot
-            expect(codec.decode(bytesA)).toEqual(a);
+            expect(c.decode(bytesA)).toEqual(a);
         });
     });
 
@@ -628,7 +628,7 @@ describe('Codec2', () => {
             let s = 'x'.repeat(100000),
                 data = { big: s };
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it.fails('BUG: large Uint8Array exceeds initial 64KB buffer', () => {
@@ -638,7 +638,7 @@ describe('Codec2', () => {
                 buf[i] = i & 0xFF;
             }
 
-            let decoded = codec.decode(codec.encode(buf)) as Uint8Array;
+            let decoded = c.decode(c.encode(buf)) as Uint8Array;
 
             expect(decoded.length).toBe(buf.length);
             expect(decoded[0]).toBe(0);
@@ -649,7 +649,7 @@ describe('Codec2', () => {
         it('handles large array', () => {
             let data = Array.from({ length: 10000 }, (_, i) => i);
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
     });
 
@@ -658,19 +658,19 @@ describe('Codec2', () => {
 
     describe('edge cases', () => {
         it('empty object', () => {
-            expect(codec.decode(codec.encode({}))).toEqual({});
+            expect(c.decode(c.encode({}))).toEqual({});
         });
 
         it('object with undefined value', () => {
             let data = { a: undefined },
-                decoded = codec.decode(codec.encode(data)) as Record<string, unknown>;
+                decoded = c.decode(c.encode(data)) as Record<string, unknown>;
 
             // undefined maps to mixed → encodeSbc → tag 0 → decodes as null
             expect(decoded.a).toBe(null);
         });
 
         it('key ordering is deterministic (sorted)', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = { z: 1, a: 2, m: 3 },
                 b = { a: 2, m: 3, z: 1 };
 
@@ -682,7 +682,7 @@ describe('Codec2', () => {
         });
 
         it('number boundary: 255 is uint8, 256 is int32', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = { n: 255 },
                 b = { n: 256 };
 
@@ -694,23 +694,23 @@ describe('Codec2', () => {
         });
 
         it('array with single element', () => {
-            expect(codec.decode(codec.encode([42]))).toEqual([42]);
+            expect(c.decode(c.encode([42]))).toEqual([42]);
         });
 
         it('array with single string', () => {
-            expect(codec.decode(codec.encode(['hello']))).toEqual(['hello']);
+            expect(c.decode(c.encode(['hello']))).toEqual(['hello']);
         });
 
         it('decode with explicit length parameter', () => {
             let data = { name: 'test' },
-                encoded = codec.encode(data);
+                encoded = c.encode(data);
 
-            expect(codec.decode(encoded, encoded.length)).toEqual(data);
+            expect(c.decode(encoded, encoded.length)).toEqual(data);
         });
 
         it('multiple codec instances are independent', () => {
-            let c1 = createCodec(),
-                c2 = createCodec();
+            let c1 = codec(),
+                c2 = codec();
 
             let data = { x: 1 },
                 enc1 = c1.encode(data),
@@ -726,9 +726,9 @@ describe('Codec2', () => {
 
         it('re-encoding after decode produces same bytes', () => {
             let data = { active: true, items: [1, 2, 3], name: 'test', score: 99.5 },
-                enc1 = codec.encode(data),
-                decoded = codec.decode(enc1) as typeof data,
-                enc2 = codec.encode(decoded);
+                enc1 = c.encode(data),
+                decoded = c.decode(enc1) as typeof data,
+                enc2 = c.encode(decoded);
 
             expect(Array.from(enc1)).toEqual(Array.from(enc2));
         });
@@ -740,8 +740,8 @@ describe('Codec2', () => {
     describe('cross-instance compatibility', () => {
         // Shared SIEVE cache enables cross-instance decode
         it('cross-instance decode via shared schema cache', () => {
-            let c1 = createCodec(),
-                c2 = createCodec(),
+            let c1 = codec(),
+                c2 = codec(),
                 data = { active: true, age: 30, name: 'Alice' };
 
             let enc = c1.encode(data);
@@ -750,7 +750,7 @@ describe('Codec2', () => {
         });
 
         it('schema hash differs for different key sets', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = c.encode({ x: 1 }),
                 b = c.encode({ y: 1 });
 
@@ -761,7 +761,7 @@ describe('Codec2', () => {
         });
 
         it('schema hash differs for same keys with different types', () => {
-            let c = createCodec(),
+            let c = codec(),
                 a = c.encode({ value: 'string' }),
                 b = c.encode({ value: 42 });
 
@@ -777,7 +777,7 @@ describe('Codec2', () => {
 
     describe('F-000+F-006: matchSchema type check + Object.keys', () => {
         it('ring buffer distinguishes same keys with different value types', () => {
-            let c = createCodec();
+            let c = codec();
 
             // First encode caches schema for {x: string}
             c.encode({ x: 'hello' });
@@ -791,7 +791,7 @@ describe('Codec2', () => {
         });
 
         it('objects with inherited props encode only own properties', () => {
-            let c = createCodec(),
+            let c = codec(),
                 proto = { inherited: true },
                 obj = Object.create(proto);
 
@@ -808,7 +808,7 @@ describe('Codec2', () => {
     describe('F-007: hash collision detection', () => {
         it('inferAndRegister verifies fields after hash lookup', () => {
             // Two objects with same keys, different types → different hashes → no collision
-            let c = createCodec(),
+            let c = codec(),
                 a = { val: 'text' },
                 b = { val: 100 };
 
@@ -825,19 +825,19 @@ describe('Codec2', () => {
         it('array starting with number then string falls to generic', () => {
             let data = [1, 'two', 3];
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('array [number, boolean, null] round-trips', () => {
             let data = [42, true, null];
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('array [number, object] round-trips', () => {
             let data = [1, { x: 2 }];
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
     });
 
@@ -845,7 +845,7 @@ describe('Codec2', () => {
     describe('F-002+F-003: u32 count/length support', () => {
         it('string length uses u32 header (4 bytes after tag)', () => {
             let s = 'x'.repeat(1000),
-                encoded = codec.encode(s);
+                encoded = c.encode(s);
 
             // tag 5 + u32 LE length + data
             expect(encoded[0]).toBe(5);
@@ -854,12 +854,12 @@ describe('Codec2', () => {
 
             expect(len).toBe(1000);
             expect(encoded.length).toBe(5 + 1000);
-            expect(codec.decode(encoded)).toBe(s);
+            expect(c.decode(encoded)).toBe(s);
         });
 
         it('array count uses u32 header (4 bytes after flag)', () => {
             let data = ['a', 'b', 'c'],
-                encoded = codec.encode(data);
+                encoded = c.encode(data);
 
             // tag 7 + u32 LE count + elements
             expect(encoded[0]).toBe(7);
@@ -872,7 +872,7 @@ describe('Codec2', () => {
         it('UTF-8 string in schema-compiled object', () => {
             let data = { label: 'こんにちは' };
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
     });
 
@@ -885,7 +885,7 @@ describe('Codec2', () => {
                 data = [data];
             }
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
 
         it('deeply nested arrays throw depth error', () => {
@@ -908,7 +908,7 @@ describe('Codec2', () => {
             buf[p] = 3; // tag: uint8
             buf[p + 1] = 42; // value
 
-            expect(() => codec.decode(buf)).toThrow('max decode depth');
+            expect(() => c.decode(buf)).toThrow('max decode depth');
         });
     });
 
@@ -917,7 +917,7 @@ describe('Codec2', () => {
         it('decoding buffer with unknown tag throws', () => {
             let buf = new Uint8Array([99]); // tag 99 does not exist
 
-            expect(() => codec.decode(buf)).toThrow('unknown tag');
+            expect(() => c.decode(buf)).toThrow('unknown tag');
         });
     });
 
@@ -926,7 +926,7 @@ describe('Codec2', () => {
 
     describe('F-001 (run2): __proto__ prototype pollution', () => {
         it('object with __proto__ as own property round-trips safely', () => {
-            let c = createCodec(),
+            let c = codec(),
                 data = Object.create(null) as Record<string, unknown>;
 
             data['__proto__'] = 'safe';
@@ -947,7 +947,7 @@ describe('Codec2', () => {
 
         it('decoded objects exclude Object.prototype from chain', () => {
             let data = { x: 1 },
-                decoded = codec.decode(codec.encode(data)) as Record<string, unknown>;
+                decoded = c.decode(c.encode(data)) as Record<string, unknown>;
 
             expect(decoded.x).toBe(1);
 
@@ -966,19 +966,19 @@ describe('Codec2', () => {
             // tag 7 (generic array) + count = 0x7FFFFFFF (2 billion)
             let buf = new Uint8Array([7, 0xFF, 0xFF, 0xFF, 0x7F]);
 
-            expect(() => codec.decode(buf)).toThrow('array count');
+            expect(() => c.decode(buf)).toThrow('array count');
         });
 
         it('huge packed uint8 count throws', () => {
             let buf = new Uint8Array([12, 0xFF, 0xFF, 0xFF, 0x7F]);
 
-            expect(() => codec.decode(buf)).toThrow('array count');
+            expect(() => c.decode(buf)).toThrow('array count');
         });
 
         it('normal-sized arrays still work', () => {
             let data = Array.from({ length: 1000 }, (_, i) => i);
 
-            expect(codec.decode(codec.encode(data))).toEqual(data);
+            expect(c.decode(c.encode(data))).toEqual(data);
         });
     });
 
@@ -986,7 +986,7 @@ describe('Codec2', () => {
     describe('F-003 (run2): decode respects length parameter', () => {
         it('decode with length shorter than buffer ignores trailing bytes', () => {
             let data = { x: 42 },
-                encoded = codec.encode(data),
+                encoded = c.encode(data),
                 extended = new Uint8Array(encoded.length + 10);
 
             extended.set(encoded);
@@ -995,7 +995,7 @@ describe('Codec2', () => {
                 extended[i] = 0xFF;
             }
 
-            expect(codec.decode(extended, encoded.length)).toEqual(data);
+            expect(c.decode(extended, encoded.length)).toEqual(data);
         });
     });
 
@@ -1005,24 +1005,24 @@ describe('Codec2', () => {
             // tag 5 (string) + u32 length = 100, but only 5 bytes in buffer
             let buf = new Uint8Array([5, 100, 0, 0, 0]);
 
-            expect(() => codec.decode(buf)).toThrow('truncated string');
+            expect(() => c.decode(buf)).toThrow('truncated string');
         });
 
         it('truncated bytes throws', () => {
             // tag 6 (bytes) + u32 length = 50, but only 5 bytes in buffer
             let buf = new Uint8Array([6, 50, 0, 0, 0]);
 
-            expect(() => codec.decode(buf)).toThrow('truncated bytes');
+            expect(() => c.decode(buf)).toThrow('truncated bytes');
         });
 
         it('valid string still decodes', () => {
-            let encoded = codec.encode('hello world');
+            let encoded = c.encode('hello world');
 
-            expect(codec.decode(encoded)).toBe('hello world');
+            expect(c.decode(encoded)).toBe('hello world');
         });
 
         it('truncated string inside schema-compiled object throws', () => {
-            let c = createCodec();
+            let c = codec();
 
             // Encode a valid object first to register the schema
             c.encode({ name: 'Alice' });
@@ -1040,7 +1040,7 @@ describe('Codec2', () => {
 
     describe('Map', () => {
         it('empty Map', () => {
-            let result = codec.decode(codec.encode(new Map())) as Map<unknown, unknown>;
+            let result = c.decode(c.encode(new Map())) as Map<unknown, unknown>;
 
             expect(result).toBeInstanceOf(Map);
             expect(result.size).toBe(0);
@@ -1048,7 +1048,7 @@ describe('Codec2', () => {
 
         it('string keys', () => {
             let m = new Map([['a', 1], ['b', 2], ['c', 3]]);
-            let result = codec.decode(codec.encode(m)) as Map<unknown, unknown>;
+            let result = c.decode(c.encode(m)) as Map<unknown, unknown>;
 
             expect(result).toBeInstanceOf(Map);
             expect(result.size).toBe(3);
@@ -1059,7 +1059,7 @@ describe('Codec2', () => {
 
         it('numeric keys', () => {
             let m = new Map([[1, 'one'], [2, 'two']]);
-            let result = codec.decode(codec.encode(m)) as Map<unknown, unknown>;
+            let result = c.decode(c.encode(m)) as Map<unknown, unknown>;
 
             expect(result.get(1)).toBe('one');
             expect(result.get(2)).toBe('two');
@@ -1067,7 +1067,7 @@ describe('Codec2', () => {
 
         it('mixed value types', () => {
             let m = new Map<unknown, unknown>([['str', 'hello'], ['num', 42], ['bool', true], ['null', null]]);
-            let result = codec.decode(codec.encode(m)) as Map<unknown, unknown>;
+            let result = c.decode(c.encode(m)) as Map<unknown, unknown>;
 
             expect(result.get('str')).toBe('hello');
             expect(result.get('num')).toBe(42);
@@ -1078,7 +1078,7 @@ describe('Codec2', () => {
         it('nested Map', () => {
             let inner = new Map([['x', 1]]);
             let outer = new Map<string, unknown>([['inner', inner]]);
-            let result = codec.decode(codec.encode(outer)) as Map<string, unknown>;
+            let result = c.decode(c.encode(outer)) as Map<string, unknown>;
             let resultInner = result.get('inner') as Map<string, unknown>;
 
             expect(resultInner).toBeInstanceOf(Map);
@@ -1087,7 +1087,7 @@ describe('Codec2', () => {
 
         it('Map in object field', () => {
             let obj = { data: new Map([['key', 'val']]) };
-            let result = codec.decode(codec.encode(obj)) as Record<string, unknown>;
+            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
             let m = result.data as Map<string, string>;
 
             expect(m).toBeInstanceOf(Map);
@@ -1101,7 +1101,7 @@ describe('Codec2', () => {
                 m.set(i, i * 2);
             }
 
-            let result = codec.decode(codec.encode(m)) as Map<number, number>;
+            let result = c.decode(c.encode(m)) as Map<number, number>;
 
             expect(result.size).toBe(1000);
             expect(result.get(0)).toBe(0);
@@ -1114,7 +1114,7 @@ describe('Codec2', () => {
 
     describe('Set', () => {
         it('empty Set', () => {
-            let result = codec.decode(codec.encode(new Set())) as Set<unknown>;
+            let result = c.decode(c.encode(new Set())) as Set<unknown>;
 
             expect(result).toBeInstanceOf(Set);
             expect(result.size).toBe(0);
@@ -1122,7 +1122,7 @@ describe('Codec2', () => {
 
         it('string values', () => {
             let s = new Set(['a', 'b', 'c']);
-            let result = codec.decode(codec.encode(s)) as Set<string>;
+            let result = c.decode(c.encode(s)) as Set<string>;
 
             expect(result).toBeInstanceOf(Set);
             expect(result.size).toBe(3);
@@ -1133,7 +1133,7 @@ describe('Codec2', () => {
 
         it('numeric values', () => {
             let s = new Set([1, 2, 3, 42]);
-            let result = codec.decode(codec.encode(s)) as Set<number>;
+            let result = c.decode(c.encode(s)) as Set<number>;
 
             expect(result.size).toBe(4);
             expect(result.has(42)).toBe(true);
@@ -1141,7 +1141,7 @@ describe('Codec2', () => {
 
         it('mixed types', () => {
             let s = new Set<unknown>([1, 'hello', true, null]);
-            let result = codec.decode(codec.encode(s)) as Set<unknown>;
+            let result = c.decode(c.encode(s)) as Set<unknown>;
 
             expect(result.size).toBe(4);
             expect(result.has(1)).toBe(true);
@@ -1153,7 +1153,7 @@ describe('Codec2', () => {
         it('nested Set', () => {
             let inner = new Set([1, 2]);
             let outer = new Set<unknown>([inner]);
-            let result = codec.decode(codec.encode(outer)) as Set<unknown>;
+            let result = c.decode(c.encode(outer)) as Set<unknown>;
             let items = [...result];
 
             expect(items[0]).toBeInstanceOf(Set);
@@ -1162,7 +1162,7 @@ describe('Codec2', () => {
 
         it('Set in object field', () => {
             let obj = { tags: new Set(['a', 'b']) };
-            let result = codec.decode(codec.encode(obj)) as Record<string, unknown>;
+            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
             let s = result.tags as Set<string>;
 
             expect(s).toBeInstanceOf(Set);
@@ -1176,7 +1176,7 @@ describe('Codec2', () => {
     describe('Typed Arrays', () => {
         it('Float32Array round-trip', () => {
             let ta = new Float32Array([1.5, 2.5, 3.5]);
-            let result = codec.decode(codec.encode(ta)) as Float32Array;
+            let result = c.decode(c.encode(ta)) as Float32Array;
 
             expect(result).toBeInstanceOf(Float32Array);
             expect(result.length).toBe(3);
@@ -1187,7 +1187,7 @@ describe('Codec2', () => {
 
         it('Float64Array round-trip', () => {
             let ta = new Float64Array([Math.PI, Math.E]);
-            let result = codec.decode(codec.encode(ta)) as Float64Array;
+            let result = c.decode(c.encode(ta)) as Float64Array;
 
             expect(result).toBeInstanceOf(Float64Array);
             expect(result[0]).toBe(Math.PI);
@@ -1196,7 +1196,7 @@ describe('Codec2', () => {
 
         it('Int8Array round-trip', () => {
             let ta = new Int8Array([-128, 0, 127]);
-            let result = codec.decode(codec.encode(ta)) as Int8Array;
+            let result = c.decode(c.encode(ta)) as Int8Array;
 
             expect(result).toBeInstanceOf(Int8Array);
             expect([...result]).toEqual([-128, 0, 127]);
@@ -1204,7 +1204,7 @@ describe('Codec2', () => {
 
         it('Int16Array round-trip', () => {
             let ta = new Int16Array([-32768, 0, 32767]);
-            let result = codec.decode(codec.encode(ta)) as Int16Array;
+            let result = c.decode(c.encode(ta)) as Int16Array;
 
             expect(result).toBeInstanceOf(Int16Array);
             expect([...result]).toEqual([-32768, 0, 32767]);
@@ -1212,7 +1212,7 @@ describe('Codec2', () => {
 
         it('Int32Array round-trip', () => {
             let ta = new Int32Array([-2147483648, 0, 2147483647]);
-            let result = codec.decode(codec.encode(ta)) as Int32Array;
+            let result = c.decode(c.encode(ta)) as Int32Array;
 
             expect(result).toBeInstanceOf(Int32Array);
             expect([...result]).toEqual([-2147483648, 0, 2147483647]);
@@ -1220,7 +1220,7 @@ describe('Codec2', () => {
 
         it('Uint8ClampedArray round-trip', () => {
             let ta = new Uint8ClampedArray([0, 128, 255]);
-            let result = codec.decode(codec.encode(ta)) as Uint8ClampedArray;
+            let result = c.decode(c.encode(ta)) as Uint8ClampedArray;
 
             expect(result).toBeInstanceOf(Uint8ClampedArray);
             expect([...result]).toEqual([0, 128, 255]);
@@ -1228,7 +1228,7 @@ describe('Codec2', () => {
 
         it('Uint16Array round-trip', () => {
             let ta = new Uint16Array([0, 1000, 65535]);
-            let result = codec.decode(codec.encode(ta)) as Uint16Array;
+            let result = c.decode(c.encode(ta)) as Uint16Array;
 
             expect(result).toBeInstanceOf(Uint16Array);
             expect([...result]).toEqual([0, 1000, 65535]);
@@ -1236,7 +1236,7 @@ describe('Codec2', () => {
 
         it('Uint32Array round-trip', () => {
             let ta = new Uint32Array([0, 100000, 4294967295]);
-            let result = codec.decode(codec.encode(ta)) as Uint32Array;
+            let result = c.decode(c.encode(ta)) as Uint32Array;
 
             expect(result).toBeInstanceOf(Uint32Array);
             expect([...result]).toEqual([0, 100000, 4294967295]);
@@ -1244,7 +1244,7 @@ describe('Codec2', () => {
 
         it('BigInt64Array round-trip', () => {
             let ta = new BigInt64Array([BigInt('-9223372036854775808'), 0n, BigInt('9223372036854775807')]);
-            let result = codec.decode(codec.encode(ta)) as BigInt64Array;
+            let result = c.decode(c.encode(ta)) as BigInt64Array;
 
             expect(result).toBeInstanceOf(BigInt64Array);
             expect(result[0]).toBe(BigInt('-9223372036854775808'));
@@ -1253,7 +1253,7 @@ describe('Codec2', () => {
 
         it('BigUint64Array round-trip', () => {
             let ta = new BigUint64Array([0n, BigInt('18446744073709551615')]);
-            let result = codec.decode(codec.encode(ta)) as BigUint64Array;
+            let result = c.decode(c.encode(ta)) as BigUint64Array;
 
             expect(result).toBeInstanceOf(BigUint64Array);
             expect(result[0]).toBe(0n);
@@ -1262,7 +1262,7 @@ describe('Codec2', () => {
 
         it('empty typed array', () => {
             let ta = new Float32Array(0);
-            let result = codec.decode(codec.encode(ta)) as Float32Array;
+            let result = c.decode(c.encode(ta)) as Float32Array;
 
             expect(result).toBeInstanceOf(Float32Array);
             expect(result.length).toBe(0);
@@ -1275,7 +1275,7 @@ describe('Codec2', () => {
                 ta[i] = i;
             }
 
-            let result = codec.decode(codec.encode(ta)) as Int32Array;
+            let result = c.decode(c.encode(ta)) as Int32Array;
 
             expect(result.length).toBe(10000);
             expect(result[0]).toBe(0);
@@ -1284,11 +1284,11 @@ describe('Codec2', () => {
 
         it('plain Uint8Array still uses tag 6', () => {
             let ta = new Uint8Array([1, 2, 3]);
-            let encoded = codec.encode(ta);
+            let encoded = c.encode(ta);
 
             expect(encoded[0]).toBe(6);
 
-            let result = codec.decode(encoded) as Uint8Array;
+            let result = c.decode(encoded) as Uint8Array;
 
             expect(result).toBeInstanceOf(Uint8Array);
             expect([...result]).toEqual([1, 2, 3]);
@@ -1296,7 +1296,7 @@ describe('Codec2', () => {
 
         it('typed array in object field', () => {
             let obj = { data: new Float32Array([1.0, 2.0]) };
-            let result = codec.decode(codec.encode(obj)) as Record<string, unknown>;
+            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
             let ta = result.data as Float32Array;
 
             expect(ta).toBeInstanceOf(Float32Array);
@@ -1310,73 +1310,73 @@ describe('Codec2', () => {
     describe('decodeAt', () => {
         it('decode object at non-zero offset', () => {
             let obj = { name: 'Alice' },
-                encoded = codec.encode(obj),
+                encoded = c.encode(obj),
                 padded = new Uint8Array(10 + encoded.length);
 
             padded.set(encoded, 10);
 
-            expect(codec.decodeAt(padded, 10)).toEqual(obj);
+            expect(c.decodeAt(padded, 10)).toEqual(obj);
         });
 
         it('decode primitive at offset', () => {
-            let encoded = codec.encode(42),
+            let encoded = c.encode(42),
                 padded = new Uint8Array(5 + encoded.length);
 
             padded.set(encoded, 5);
 
-            expect(codec.decodeAt(padded, 5)).toBe(42);
+            expect(c.decodeAt(padded, 5)).toBe(42);
         });
 
         it('decode string at offset', () => {
-            let encoded = codec.encode('hello'),
+            let encoded = c.encode('hello'),
                 padded = new Uint8Array(3 + encoded.length);
 
             padded.set(encoded, 3);
 
-            expect(codec.decodeAt(padded, 3)).toBe('hello');
+            expect(c.decodeAt(padded, 3)).toBe('hello');
         });
 
         it('decode array at offset', () => {
             let arr = [1, 2, 3],
-                encoded = codec.encode(arr),
+                encoded = c.encode(arr),
                 padded = new Uint8Array(7 + encoded.length);
 
             padded.set(encoded, 7);
 
-            expect(codec.decodeAt(padded, 7)).toEqual(arr);
+            expect(c.decodeAt(padded, 7)).toEqual(arr);
         });
 
         it('decode null at offset', () => {
-            let encoded = codec.encode(null),
+            let encoded = c.encode(null),
                 padded = new Uint8Array(2 + encoded.length);
 
             padded.set(encoded, 2);
 
-            expect(codec.decodeAt(padded, 2)).toBe(null);
+            expect(c.decodeAt(padded, 2)).toBe(null);
         });
 
         it('decode boolean at offset', () => {
-            let encoded = codec.encode(true),
+            let encoded = c.encode(true),
                 padded = new Uint8Array(4 + encoded.length);
 
             padded.set(encoded, 4);
 
-            expect(codec.decodeAt(padded, 4)).toBe(true);
+            expect(c.decodeAt(padded, 4)).toBe(true);
         });
 
         it('decode multiple values concatenated', () => {
-            let a = codec.encode('hello'),
-                b = codec.encode(42),
-                c = codec.encode({ x: 1 }),
-                combined = new Uint8Array(a.length + b.length + c.length);
+            let a = c.encode('hello'),
+                b = c.encode(42),
+                x = c.encode({ x: 1 }),
+                combined = new Uint8Array(a.length + b.length + x.length);
 
             combined.set(a, 0);
             combined.set(b, a.length);
-            combined.set(c, a.length + b.length);
+            combined.set(x, a.length + b.length);
 
-            expect(codec.decodeAt(combined, 0)).toBe('hello');
-            expect(codec.decodeAt(combined, a.length)).toBe(42);
-            expect(codec.decodeAt(combined, a.length + b.length)).toEqual({ x: 1 });
+            expect(c.decodeAt(combined, 0)).toBe('hello');
+            expect(c.decodeAt(combined, a.length)).toBe(42);
+            expect(c.decodeAt(combined, a.length + b.length)).toEqual({ x: 1 });
         });
     });
 
@@ -1385,7 +1385,7 @@ describe('Codec2', () => {
 
     describe('defineSchema', () => {
         it('pre-registered schema encodes/decodes', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'name', type: 'string' },
@@ -1398,7 +1398,7 @@ describe('Codec2', () => {
         });
 
         it('returns consistent hash for same fields', () => {
-            let c = createCodec();
+            let c = codec();
             let h1 = c.defineSchema([
                 { name: 'x', type: 'int32' },
                 { name: 'y', type: 'int32' },
@@ -1412,7 +1412,7 @@ describe('Codec2', () => {
         });
 
         it('sorts fields alphabetically', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'z', type: 'string' },
@@ -1425,7 +1425,7 @@ describe('Codec2', () => {
         });
 
         it('matches auto-inferred schema hash', () => {
-            let c = createCodec();
+            let c = codec();
             let obj = { active: true, name: 'Bob' };
 
             c.encode(obj);
@@ -1440,7 +1440,7 @@ describe('Codec2', () => {
         });
 
         it('schema with all fixed types', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'a', type: 'uint8' },
@@ -1455,7 +1455,7 @@ describe('Codec2', () => {
         });
 
         it('schema with variable types', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'data', type: 'bytes' },
@@ -1470,7 +1470,7 @@ describe('Codec2', () => {
         });
 
         it('schema with mixed type', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'id', type: 'uint8' },
@@ -1482,7 +1482,7 @@ describe('Codec2', () => {
         });
 
         it('schema with map/set types', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'meta', type: 'map' },
@@ -1504,7 +1504,7 @@ describe('Codec2', () => {
 
     describe('nullable fields', () => {
         it('nullable string field — non-null', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'name', type: 'string' },
@@ -1517,7 +1517,7 @@ describe('Codec2', () => {
         });
 
         it('nullable string field — null', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'name', type: 'string' },
@@ -1530,7 +1530,7 @@ describe('Codec2', () => {
         });
 
         it('nullable uint8 field', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'age', type: 'uint8', nullable: true },
@@ -1542,7 +1542,7 @@ describe('Codec2', () => {
         });
 
         it('multiple nullable fields — mixed null/non-null', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'a', type: 'string', nullable: true },
@@ -1557,7 +1557,7 @@ describe('Codec2', () => {
         });
 
         it('all nullable fields null', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'a', type: 'string', nullable: true },
@@ -1571,7 +1571,7 @@ describe('Codec2', () => {
         });
 
         it('all nullable fields present', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'a', type: 'string', nullable: true },
@@ -1585,7 +1585,7 @@ describe('Codec2', () => {
         });
 
         it('max 16 nullable fields', () => {
-            let c = createCodec();
+            let c = codec();
             let fields: { name: string; type: 'uint8'; nullable: true }[] = [];
 
             for (let i = 0; i < 16; i++) {
@@ -1606,7 +1606,7 @@ describe('Codec2', () => {
         });
 
         it('throws if >16 nullable fields', () => {
-            let c = createCodec();
+            let c = codec();
             let fields: { name: string; type: 'uint8'; nullable: true }[] = [];
 
             for (let i = 0; i < 17; i++) {
@@ -1617,7 +1617,7 @@ describe('Codec2', () => {
         });
 
         it('nullable boolean field', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'active', type: 'boolean', nullable: true },
@@ -1630,7 +1630,7 @@ describe('Codec2', () => {
         });
 
         it('nullable nested object field', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'addr', type: 'object', nullable: true },
@@ -1649,7 +1649,7 @@ describe('Codec2', () => {
         });
 
         it('undefined treated as null for nullable fields', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'name', type: 'string' },
@@ -1669,7 +1669,7 @@ describe('Codec2', () => {
 
     describe('extractField', () => {
         it('extract fixed-size field (O(1))', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'active', type: 'boolean' },
@@ -1685,7 +1685,7 @@ describe('Codec2', () => {
         });
 
         it('extract string field', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'id', type: 'uint8' },
@@ -1699,7 +1699,7 @@ describe('Codec2', () => {
         });
 
         it('extract field after variable-size field', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'label', type: 'string' },
@@ -1712,7 +1712,7 @@ describe('Codec2', () => {
         });
 
         it('extract nullable field — non-null', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'name', type: 'string' },
@@ -1725,7 +1725,7 @@ describe('Codec2', () => {
         });
 
         it('extract nullable field — null', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'name', type: 'string' },
@@ -1738,14 +1738,14 @@ describe('Codec2', () => {
         });
 
         it('returns undefined for non-tag-8 buffer', () => {
-            let c = createCodec(),
+            let c = codec(),
                 encoded = c.encode('hello');
 
             expect(c.extractField(encoded, 'anything')).toBeUndefined();
         });
 
         it('returns undefined for unknown field', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([{ name: 'x', type: 'uint8' }]);
 
@@ -1755,7 +1755,7 @@ describe('Codec2', () => {
         });
 
         it('extract bytes field', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'data', type: 'bytes' },
@@ -1770,7 +1770,7 @@ describe('Codec2', () => {
         });
 
         it('extract from auto-inferred schema', () => {
-            let c = createCodec(),
+            let c = codec(),
                 encoded = c.encode({ age: 25, name: 'Bob' });
 
             expect(c.extractField(encoded, 'name')).toBe('Bob');
@@ -1778,7 +1778,7 @@ describe('Codec2', () => {
         });
 
         it('extract nested object field', () => {
-            let c = createCodec(),
+            let c = codec(),
                 encoded = c.encode({ addr: { city: 'NYC' }, name: 'Alice' });
             let addr = c.extractField(encoded, 'addr') as Record<string, string>;
 
@@ -1791,112 +1791,112 @@ describe('Codec2', () => {
 
     describe('computeSize', () => {
         it('null', () => {
-            expect(codec.computeSize(null)).toBe(1);
+            expect(c.computeSize(null)).toBe(1);
         });
 
         it('undefined', () => {
-            expect(codec.computeSize(undefined)).toBe(1);
+            expect(c.computeSize(undefined)).toBe(1);
         });
 
         it('boolean', () => {
-            expect(codec.computeSize(true)).toBe(1);
+            expect(c.computeSize(true)).toBe(1);
         });
 
         it('uint8 (0)', () => {
-            expect(codec.computeSize(0)).toBe(2);
+            expect(c.computeSize(0)).toBe(2);
         });
 
         it('uint8 (255)', () => {
-            expect(codec.computeSize(255)).toBe(2);
+            expect(c.computeSize(255)).toBe(2);
         });
 
         it('int32', () => {
-            expect(codec.computeSize(256)).toBe(5);
+            expect(c.computeSize(256)).toBe(5);
         });
 
         it('float64', () => {
-            expect(codec.computeSize(3.14)).toBe(9);
+            expect(c.computeSize(3.14)).toBe(9);
         });
 
         it('bigint', () => {
-            expect(codec.computeSize(123n)).toBe(9);
+            expect(c.computeSize(123n)).toBe(9);
         });
 
         it('string', () => {
-            expect(codec.computeSize('hello')).toBe(5 + 5);
+            expect(c.computeSize('hello')).toBe(5 + 5);
         });
 
         it('empty string', () => {
-            expect(codec.computeSize('')).toBe(5);
+            expect(c.computeSize('')).toBe(5);
         });
 
         it('date', () => {
-            expect(codec.computeSize(new Date())).toBe(9);
+            expect(c.computeSize(new Date())).toBe(9);
         });
 
         it('Uint8Array', () => {
-            expect(codec.computeSize(new Uint8Array(10))).toBe(15);
+            expect(c.computeSize(new Uint8Array(10))).toBe(15);
         });
 
         it('matches actual encoded size for primitives', () => {
             let values: unknown[] = [null, true, false, 0, 255, 256, -1, 3.14, 'hello', '', 123n, new Date(0), new Uint8Array([1, 2, 3])];
 
             for (let v of values) {
-                let size = codec.computeSize(v);
+                let size = c.computeSize(v);
 
                 if (size !== -1) {
-                    expect(size).toBe(codec.encode(v).length);
+                    expect(size).toBe(c.encode(v).length);
                 }
             }
         });
 
         it('plain object with fixed fields', () => {
             let obj = { active: true, age: 25, score: -500 },
-                size = codec.computeSize(obj);
+                size = c.computeSize(obj);
 
-            expect(size).toBe(codec.encode(obj).length);
+            expect(size).toBe(c.encode(obj).length);
         });
 
         it('plain object with string field', () => {
             let obj = { id: 1, name: 'Alice' },
-                size = codec.computeSize(obj);
+                size = c.computeSize(obj);
 
-            expect(size).toBe(codec.encode(obj).length);
+            expect(size).toBe(c.encode(obj).length);
         });
 
         it('returns -1 for Map', () => {
-            expect(codec.computeSize(new Map())).toBe(-1);
+            expect(c.computeSize(new Map())).toBe(-1);
         });
 
         it('returns -1 for Set', () => {
-            expect(codec.computeSize(new Set())).toBe(-1);
+            expect(c.computeSize(new Set())).toBe(-1);
         });
 
         it('returns -1 for typed array', () => {
-            expect(codec.computeSize(new Float32Array(3))).toBe(-1);
+            expect(c.computeSize(new Float32Array(3))).toBe(-1);
         });
 
         it('returns -1 for array', () => {
-            expect(codec.computeSize([1, 2, 3])).toBe(-1);
+            expect(c.computeSize([1, 2, 3])).toBe(-1);
         });
 
         it('returns -1 for object with mixed field', () => {
             // Null infers as 'mixed' type, which computeSize cannot predict
-            expect(codec.computeSize({ data: null, id: 1 })).toBe(-1);
+            expect(c.computeSize({ data: null, id: 1 })).toBe(-1);
         });
 
         it('object with only fixed and string fields', () => {
             let withNote = { name: 'Alice', note: 'hello' },
-                sizeWith = codec.computeSize(withNote);
+                sizeWith = c.computeSize(withNote);
 
-            expect(sizeWith).toBe(codec.encode(withNote).length);
+            expect(sizeWith).toBe(c.encode(withNote).length);
         });
 
         it('nested object', () => {
             let obj = { addr: { city: 'NYC' }, name: 'Alice' },
-                size = codec.computeSize(obj);
+                size = c.computeSize(obj);
 
-            expect(size).toBe(codec.encode(obj).length);
+            expect(size).toBe(c.encode(obj).length);
         });
     });
 
@@ -1905,8 +1905,8 @@ describe('Codec2', () => {
 
     describe('compression', () => {
         it('compressed and uncompressed produce equivalent results', () => {
-            let normal = createCodec(),
-                comp = createCodec({ compress: true }),
+            let normal = codec(),
+                comp = codec({ compress: true }),
                 obj = { age: 25, name: 'Alice', score: 3.14 };
 
             // Register schema on both instances first
@@ -1919,21 +1919,21 @@ describe('Codec2', () => {
         });
 
         it('compressed objects use tag 18', () => {
-            let c = createCodec({ compress: true }),
+            let c = codec({ compress: true }),
                 obj = { active: true, age: 25, name: 'Alice' };
 
             expect(c.encode(obj)[0]).toBe(18);
         });
 
         it('non-compressible schema uses tag 8', () => {
-            let c = createCodec({ compress: true }),
+            let c = codec({ compress: true }),
                 obj = { label: 'test', name: 'Alice' };
 
             expect(c.encode(obj)[0]).toBe(8);
         });
 
         it('varint edge cases', () => {
-            let c = createCodec({ compress: true });
+            let c = codec({ compress: true });
 
             c.defineSchema([
                 { name: 'a', type: 'uint16' },
@@ -1949,7 +1949,7 @@ describe('Codec2', () => {
         });
 
         it('zigzag negative values', () => {
-            let c = createCodec({ compress: true });
+            let c = codec({ compress: true });
 
             c.defineSchema([
                 { name: 'a', type: 'int32' },
@@ -1964,7 +1964,7 @@ describe('Codec2', () => {
         });
 
         it('adaptive float64 — integer values', () => {
-            let c = createCodec({ compress: true });
+            let c = codec({ compress: true });
 
             c.defineSchema([
                 { name: 'temperature', type: 'float64' },
@@ -1977,7 +1977,7 @@ describe('Codec2', () => {
         });
 
         it('adaptive float64 — non-integer', () => {
-            let c = createCodec({ compress: true });
+            let c = codec({ compress: true });
 
             c.defineSchema([
                 { name: 'e', type: 'float64' },
@@ -1990,14 +1990,14 @@ describe('Codec2', () => {
         });
 
         it('boolean fields via bitmap', () => {
-            let c = createCodec({ compress: true }),
+            let c = codec({ compress: true }),
                 obj = { a: true, b: false, c: true, d: false };
 
             expect(c.decode(c.encode(obj))).toEqual(obj);
         });
 
         it('mixed compressed and uncompressed in same stream', () => {
-            let c = createCodec({ compress: true }),
+            let c = codec({ compress: true }),
                 obj1 = { active: true, id: 1, name: 'Alice' },
                 obj2 = { label: 'test', notes: 'hello' };
 
@@ -2008,7 +2008,7 @@ describe('Codec2', () => {
         });
 
         it('compressed nullable fields', () => {
-            let c = createCodec({ compress: true });
+            let c = codec({ compress: true });
 
             c.defineSchema([
                 { name: 'name', type: 'string' },
@@ -2020,8 +2020,8 @@ describe('Codec2', () => {
         });
 
         it('cross-codec decode', () => {
-            let c1 = createCodec({ compress: true }),
-                c2 = createCodec();
+            let c1 = codec({ compress: true }),
+                c2 = codec();
 
             c1.defineSchema([{ name: 'id', type: 'uint8' }, { name: 'value', type: 'int32' }]);
             c2.defineSchema([{ name: 'id', type: 'uint8' }, { name: 'value', type: 'int32' }]);
@@ -2032,15 +2032,15 @@ describe('Codec2', () => {
         });
 
         it('compressed wire size smaller for integer-heavy', () => {
-            let normal = createCodec(),
-                comp = createCodec({ compress: true }),
+            let normal = codec(),
+                comp = codec({ compress: true }),
                 obj = { a: 1, b: 2, c: 3, d: 4, e: 5 };
 
             expect(comp.encode(obj).length).toBeLessThanOrEqual(normal.encode(obj).length);
         });
 
         it('all field types together', () => {
-            let c = createCodec({ compress: true });
+            let c = codec({ compress: true });
 
             c.defineSchema([
                 { name: 'active', type: 'boolean' },
@@ -2072,7 +2072,7 @@ describe('Codec2', () => {
 
     describe('registry serialization', () => {
         it('serialize and deserialize round-trip', () => {
-            let c1 = createCodec();
+            let c1 = codec();
 
             c1.defineSchema([
                 { name: 'age', type: 'uint8' },
@@ -2081,7 +2081,7 @@ describe('Codec2', () => {
 
             let blob = c1.serializeRegistry();
 
-            let c2 = createCodec();
+            let c2 = codec();
 
             c2.deserializeRegistry(blob);
 
@@ -2092,7 +2092,7 @@ describe('Codec2', () => {
         });
 
         it('cross-instance decode after import', () => {
-            let server = createCodec();
+            let server = codec();
 
             server.defineSchema([
                 { name: 'active', type: 'boolean' },
@@ -2103,7 +2103,7 @@ describe('Codec2', () => {
             let encoded = server.encode({ active: true, id: 42, name: 'Test' });
             let blob = server.serializeRegistry();
 
-            let client = createCodec();
+            let client = codec();
 
             client.deserializeRegistry(blob);
 
@@ -2111,7 +2111,7 @@ describe('Codec2', () => {
         });
 
         it('nullable fields preserved', () => {
-            let c1 = createCodec();
+            let c1 = codec();
 
             c1.defineSchema([
                 { name: 'name', type: 'string' },
@@ -2123,7 +2123,7 @@ describe('Codec2', () => {
             let encoded = c1.encode(withValue);
 
             let blob = c1.serializeRegistry();
-            let c2 = createCodec();
+            let c2 = codec();
 
             c2.deserializeRegistry(blob);
 
@@ -2138,7 +2138,7 @@ describe('Codec2', () => {
         });
 
         it('duplicate schemas skipped', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([{ name: 'x', type: 'uint8' }]);
 
@@ -2150,13 +2150,13 @@ describe('Codec2', () => {
         });
 
         it('multiple schemas', () => {
-            let c1 = createCodec();
+            let c1 = codec();
 
             c1.defineSchema([{ name: 'a', type: 'uint8' }]);
             c1.defineSchema([{ name: 'x', type: 'string' }, { name: 'y', type: 'int32' }]);
 
             let blob = c1.serializeRegistry();
-            let c2 = createCodec();
+            let c2 = codec();
 
             c2.deserializeRegistry(blob);
 
@@ -2165,23 +2165,23 @@ describe('Codec2', () => {
         });
 
         it('empty registry', () => {
-            let c = createCodec();
+            let c = codec();
             let blob = c.serializeRegistry();
 
             expect(blob.length).toBe(2); // just u16 count = 0
 
-            let c2 = createCodec();
+            let c2 = codec();
 
             c2.deserializeRegistry(blob); // should not throw
         });
 
         it('auto-inferred schemas included', () => {
-            let c1 = createCodec();
+            let c1 = codec();
 
             c1.encode({ name: 'Alice', score: 100 }); // auto-infer
 
             let blob = c1.serializeRegistry();
-            let c2 = createCodec();
+            let c2 = codec();
 
             c2.deserializeRegistry(blob);
 
@@ -2197,7 +2197,7 @@ describe('Codec2', () => {
     describe('structural field types', () => {
         describe('array<uint8>', () => {
             it('round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<uint8>' },
@@ -2209,7 +2209,7 @@ describe('Codec2', () => {
             });
 
             it('empty array round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<uint8>' },
@@ -2219,13 +2219,13 @@ describe('Codec2', () => {
             });
 
             it('wire size: no tag bytes', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<uint8>' },
                 ]);
 
-                let generic = createCodec();
+                let generic = codec();
 
                 generic.defineSchema([
                     { name: 'data', type: 'array' },
@@ -2240,7 +2240,7 @@ describe('Codec2', () => {
             });
 
             it('large array (10000 elements)', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<uint8>' },
@@ -2255,7 +2255,7 @@ describe('Codec2', () => {
 
         describe('array<int8>', () => {
             it('round-trips signed values', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<int8>' },
@@ -2269,7 +2269,7 @@ describe('Codec2', () => {
 
         describe('array<uint16>', () => {
             it('round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<uint16>' },
@@ -2283,7 +2283,7 @@ describe('Codec2', () => {
 
         describe('array<int16>', () => {
             it('round-trips signed values', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<int16>' },
@@ -2297,7 +2297,7 @@ describe('Codec2', () => {
 
         describe('array<uint32>', () => {
             it('round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<uint32>' },
@@ -2311,7 +2311,7 @@ describe('Codec2', () => {
 
         describe('array<int32>', () => {
             it('round-trips signed values', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<int32>' },
@@ -2325,7 +2325,7 @@ describe('Codec2', () => {
 
         describe('array<float64>', () => {
             it('round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<float64>' },
@@ -2343,7 +2343,7 @@ describe('Codec2', () => {
             });
 
             it('NaN round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<float64>' },
@@ -2357,7 +2357,7 @@ describe('Codec2', () => {
 
         describe('array<boolean>', () => {
             it('round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<boolean>' },
@@ -2371,7 +2371,7 @@ describe('Codec2', () => {
 
         describe('array<bigint>', () => {
             it('round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<bigint>' },
@@ -2385,7 +2385,7 @@ describe('Codec2', () => {
 
         describe('array<date>', () => {
             it('round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<date>' },
@@ -2405,7 +2405,7 @@ describe('Codec2', () => {
 
         describe('array<string>', () => {
             it('round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'tags', type: 'array<string>' },
@@ -2417,7 +2417,7 @@ describe('Codec2', () => {
             });
 
             it('empty strings', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'tags', type: 'array<string>' },
@@ -2427,7 +2427,7 @@ describe('Codec2', () => {
             });
 
             it('unicode strings', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'tags', type: 'array<string>' },
@@ -2439,13 +2439,13 @@ describe('Codec2', () => {
             });
 
             it('wire size: smaller than generic', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'tags', type: 'array<string>' },
                 ]);
 
-                let generic = createCodec();
+                let generic = codec();
 
                 generic.defineSchema([
                     { name: 'tags', type: 'array' },
@@ -2461,7 +2461,7 @@ describe('Codec2', () => {
 
         describe('array<bytes>', () => {
             it('round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'chunks', type: 'array<bytes>' },
@@ -2479,7 +2479,7 @@ describe('Codec2', () => {
 
         describe('object(hash)', () => {
             it('round-trips nested typed object', () => {
-                let c = createCodec();
+                let c = codec();
 
                 let addrHash = c.defineSchema([
                     { name: 'city', type: 'string' },
@@ -2500,7 +2500,7 @@ describe('Codec2', () => {
             });
 
             it('wire size: smaller than generic object', () => {
-                let c = createCodec();
+                let c = codec();
 
                 let addrHash = c.defineSchema([
                     { name: 'city', type: 'string' },
@@ -2512,7 +2512,7 @@ describe('Codec2', () => {
                     { name: 'name', type: 'string' },
                 ]);
 
-                let generic = createCodec();
+                let generic = codec();
 
                 generic.defineSchema([
                     { name: 'city', type: 'string' },
@@ -2538,7 +2538,7 @@ describe('Codec2', () => {
 
         describe('array<object(hash)>', () => {
             it('round-trips array of typed objects', () => {
-                let c = createCodec();
+                let c = codec();
 
                 let itemHash = c.defineSchema([
                     { name: 'id', type: 'uint32' },
@@ -2561,7 +2561,7 @@ describe('Codec2', () => {
             });
 
             it('empty array round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 let itemHash = c.defineSchema([
                     { name: 'id', type: 'uint32' },
@@ -2577,7 +2577,7 @@ describe('Codec2', () => {
 
         describe('nested structural types', () => {
             it('array<array<uint8>> round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'matrix', type: 'array<array<uint8>>' },
@@ -2591,7 +2591,7 @@ describe('Codec2', () => {
             });
 
             it('array<array<string>> round-trips', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'grid', type: 'array<array<string>>' },
@@ -2607,7 +2607,7 @@ describe('Codec2', () => {
 
         describe('mixed schema fields', () => {
             it('schema with both generic array and typed array', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'generic', type: 'array' },
@@ -2627,7 +2627,7 @@ describe('Codec2', () => {
 
         describe('compressed mode with typed fields', () => {
             it('array<uint8> round-trips in compressed mode', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 c.defineSchema([
                     { name: 'active', type: 'boolean' },
@@ -2640,7 +2640,7 @@ describe('Codec2', () => {
             });
 
             it('array<string> round-trips in compressed mode', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 c.defineSchema([
                     { name: 'count', type: 'int32' },
@@ -2653,7 +2653,7 @@ describe('Codec2', () => {
             });
 
             it('object(hash) round-trips in compressed mode', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 let addrHash = c.defineSchema([
                     { name: 'city', type: 'string' },
@@ -2676,7 +2676,7 @@ describe('Codec2', () => {
             });
 
             it('array<object(hash)> round-trips in compressed mode', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 let itemHash = c.defineSchema([
                     { name: 'id', type: 'uint32' },
@@ -2702,7 +2702,7 @@ describe('Codec2', () => {
 
         describe('registry serialization with structural types', () => {
             it('preserves structural type strings through serialize/deserialize', () => {
-                let c1 = createCodec();
+                let c1 = codec();
 
                 let addrHash = c1.defineSchema([
                     { name: 'city', type: 'string' },
@@ -2717,7 +2717,7 @@ describe('Codec2', () => {
                 ]);
 
                 let blob = c1.serializeRegistry(),
-                    c2 = createCodec();
+                    c2 = codec();
 
                 c2.deserializeRegistry(blob);
 
@@ -2736,7 +2736,7 @@ describe('Codec2', () => {
 
         describe('extractField with typed fields', () => {
             it('extracts field after typed array', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<uint8>' },
@@ -2749,7 +2749,7 @@ describe('Codec2', () => {
             });
 
             it('extracts typed array field', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<uint8>' },
@@ -2762,7 +2762,7 @@ describe('Codec2', () => {
             });
 
             it('extracts field after typed string array', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'name', type: 'string' },
@@ -2775,7 +2775,7 @@ describe('Codec2', () => {
             });
 
             it('extracts field after object(hash)', () => {
-                let c = createCodec();
+                let c = codec();
 
                 let addrHash = c.defineSchema([
                     { name: 'city', type: 'string' },
@@ -2798,7 +2798,7 @@ describe('Codec2', () => {
 
         describe('computeSize with typed fields', () => {
             it('computes size for typed uint8 array', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'data', type: 'array<uint8>' },
@@ -2812,7 +2812,7 @@ describe('Codec2', () => {
             });
 
             it('computes size for typed string array', () => {
-                let c = createCodec();
+                let c = codec();
 
                 c.defineSchema([
                     { name: 'tags', type: 'array<string>' },
@@ -2828,7 +2828,7 @@ describe('Codec2', () => {
 
         describe('parseFieldType validation', () => {
             it('rejects empty array element type', () => {
-                let c = createCodec();
+                let c = codec();
 
                 expect(() => c.defineSchema([
                     { name: 'x', type: 'array<>' },
@@ -2836,7 +2836,7 @@ describe('Codec2', () => {
             });
 
             it('rejects invalid object hash', () => {
-                let c = createCodec();
+                let c = codec();
 
                 expect(() => c.defineSchema([
                     { name: 'x', type: 'object(abc)' },
@@ -2844,7 +2844,7 @@ describe('Codec2', () => {
             });
 
             it('rejects empty object hash', () => {
-                let c = createCodec();
+                let c = codec();
 
                 expect(() => c.defineSchema([
                     { name: 'x', type: 'object()' },
@@ -2852,7 +2852,7 @@ describe('Codec2', () => {
             });
 
             it('rejects float object hash', () => {
-                let c = createCodec();
+                let c = codec();
 
                 expect(() => c.defineSchema([
                     { name: 'x', type: 'object(1.5)' },
@@ -2860,7 +2860,7 @@ describe('Codec2', () => {
             });
 
             it('rejects unknown base type', () => {
-                let c = createCodec();
+                let c = codec();
 
                 expect(() => c.defineSchema([
                     { name: 'x', type: 'foobar' },
@@ -2870,13 +2870,13 @@ describe('Codec2', () => {
 
         describe('different hashes for array vs array<T>', () => {
             it('array and array<uint8> produce different hashes', () => {
-                let c = createCodec();
+                let c = codec();
 
                 let h1 = c.defineSchema([
                     { name: 'data', type: 'array' },
                 ]);
 
-                let c2 = createCodec();
+                let c2 = codec();
 
                 let h2 = c2.defineSchema([
                     { name: 'data', type: 'array<uint8>' },
@@ -2893,7 +2893,7 @@ describe('Codec2', () => {
     describe('compressed mode (tag 18)', () => {
         describe('extractField on tag-18 buffer', () => {
             it('compressed buffer has tag 18 and round-trips via decode', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 c.defineSchema([
                     { name: 'active', type: 'boolean' },
@@ -2909,7 +2909,7 @@ describe('Codec2', () => {
             });
 
             it.fails('BUG: extractField returns wrong value for int32 on compressed buffer (varint layout mismatch)', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 c.defineSchema([
                     { name: 'active', type: 'boolean' },
@@ -2924,7 +2924,7 @@ describe('Codec2', () => {
             });
 
             it.fails('BUG: extractField returns wrong value for varint-encoded fields on tag-18', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 c.defineSchema([
                     { name: 'count', type: 'uint16' },
@@ -2939,7 +2939,7 @@ describe('Codec2', () => {
             });
 
             it.fails('BUG: extractField on compressed nullable buffer gives wrong results', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 c.defineSchema([
                     { name: 'id', type: 'uint8' },
@@ -2955,7 +2955,7 @@ describe('Codec2', () => {
 
         describe('decodeAt on tag-18 buffer', () => {
             it('decodeAt offset 0 on compressed buffer', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 c.defineSchema([
                     { name: 'id', type: 'uint8' },
@@ -2970,7 +2970,7 @@ describe('Codec2', () => {
             });
 
             it('decodeAt non-zero offset on compressed buffer', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 c.defineSchema([
                     { name: 'active', type: 'boolean' },
@@ -2987,7 +2987,7 @@ describe('Codec2', () => {
             });
 
             it('decodeAt concatenated compressed values', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 c.defineSchema([
                     { name: 'x', type: 'uint8' },
@@ -3008,7 +3008,7 @@ describe('Codec2', () => {
 
         describe('encode with compress + view + schema hint', () => {
             it('view=true with schema hint produces decodable tag-18 buffer', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 let hash = c.defineSchema([
                     { name: 'id', type: 'uint8' },
@@ -3027,7 +3027,7 @@ describe('Codec2', () => {
             });
 
             it('view=true + schema hint + multiple fields', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 let hash = c.defineSchema([
                     { name: 'active', type: 'boolean' },
@@ -3044,7 +3044,7 @@ describe('Codec2', () => {
             });
 
             it('view=true + schema as FieldSpec[] with compress', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 let fields: { name: string; type: string }[] = [
                     { name: 'a', type: 'uint8' },
@@ -3061,7 +3061,7 @@ describe('Codec2', () => {
             });
 
             it('view=true alias is overwritten by next encode (compressed)', () => {
-                let c = createCodec({ compress: true });
+                let c = codec({ compress: true });
 
                 c.defineSchema([
                     { name: 'id', type: 'uint8' },
@@ -3082,7 +3082,7 @@ describe('Codec2', () => {
 
     describe('view mode aliasing', () => {
         it('view=true returns a live alias that is overwritten by subsequent encode()', () => {
-            let c = createCodec();
+            let c = codec();
             let first = c.encode({ msg: 'aaaa' }, { view: true });
             let second = c.encode({ msg: 'zzzz' }, { view: true });
 
@@ -3095,7 +3095,7 @@ describe('Codec2', () => {
         });
 
         it('default (view=false) returns an independent copy not affected by subsequent encode()', () => {
-            let c = createCodec();
+            let c = codec();
             let first = c.encode({ msg: 'aaaa' });
             let snapshot = first.slice();
 
@@ -3106,7 +3106,7 @@ describe('Codec2', () => {
         });
 
         it('view=true alias is decodable before next encode()', () => {
-            let c = createCodec();
+            let c = codec();
             let view = c.encode({ x: 42 }, { view: true });
             let decoded = c.decode(view) as Record<string, unknown>;
 
@@ -3122,33 +3122,33 @@ describe('Codec2', () => {
             // tag 15 (Map) + u32 LE count = 1048577 (0x00100001)
             let buf = new Uint8Array([15, 0x01, 0x00, 0x10, 0x00]);
 
-            expect(() => codec.decode(buf)).toThrow('map count');
+            expect(() => c.decode(buf)).toThrow('map count');
         });
 
         it('decode: set count > MAX_ARRAY_COUNT throws', () => {
             // tag 16 (Set) + u32 LE count = 1048577 (0x00100001)
             let buf = new Uint8Array([16, 0x01, 0x00, 0x10, 0x00]);
 
-            expect(() => codec.decode(buf)).toThrow('set count');
+            expect(() => c.decode(buf)).toThrow('set count');
         });
 
         it('decode: map count exactly at MAX_ARRAY_COUNT + 1 throws', () => {
             // 1048577 = 0x100001 → LE bytes: [0x01, 0x00, 0x10, 0x00]
             let buf = new Uint8Array([15, 0x01, 0x00, 0x10, 0x00]);
 
-            expect(() => codec.decode(buf)).toThrow('map count');
+            expect(() => c.decode(buf)).toThrow('map count');
         });
 
         it('decode: set count at 2 billion throws', () => {
             // 0x7FFFFFFF = 2147483647 → LE: [0xFF, 0xFF, 0xFF, 0x7F]
             let buf = new Uint8Array([16, 0xFF, 0xFF, 0xFF, 0x7F]);
 
-            expect(() => codec.decode(buf)).toThrow('set count');
+            expect(() => c.decode(buf)).toThrow('set count');
         });
 
         it('small Map still round-trips', () => {
             let m = new Map<string, number>([['a', 1], ['b', 2]]);
-            let result = codec.decode(codec.encode(m)) as Map<string, number>;
+            let result = c.decode(c.encode(m)) as Map<string, number>;
 
             expect(result).toBeInstanceOf(Map);
             expect(result.size).toBe(2);
@@ -3157,7 +3157,7 @@ describe('Codec2', () => {
 
         it('small Set still round-trips', () => {
             let s = new Set([10, 20, 30]);
-            let result = codec.decode(codec.encode(s)) as Set<number>;
+            let result = c.decode(c.encode(s)) as Set<number>;
 
             expect(result).toBeInstanceOf(Set);
             expect(result.size).toBe(3);
@@ -3173,39 +3173,39 @@ describe('Codec2', () => {
             // tag 17 + typeId=99 + bLen=4 (u32 LE) + 4 dummy bytes
             let buf = new Uint8Array([17, 99, 4, 0, 0, 0, 0, 0, 0, 0]);
 
-            expect(() => codec.decode(buf)).toThrow('unknown typed array typeId 99');
+            expect(() => c.decode(buf)).toThrow('unknown typed array typeId 99');
         });
 
         it('unknown typeId 255 throws', () => {
             let buf = new Uint8Array([17, 255, 1, 0, 0, 0, 0]);
 
-            expect(() => codec.decode(buf)).toThrow('unknown typed array typeId 255');
+            expect(() => c.decode(buf)).toThrow('unknown typed array typeId 255');
         });
 
         it('byteLength not aligned throws for Float64Array (bpe=8)', () => {
             // tag 17 + typeId=1 (Float64Array, bpe=8) + bLen=3 (not aligned to 8)
             let buf = new Uint8Array([17, 1, 3, 0, 0, 0, 0, 0, 0]);
 
-            expect(() => codec.decode(buf)).toThrow('byteLength not aligned');
+            expect(() => c.decode(buf)).toThrow('byteLength not aligned');
         });
 
         it('byteLength not aligned throws for Int32Array (bpe=4)', () => {
             // tag 17 + typeId=4 (Int32Array, bpe=4) + bLen=5 (not aligned to 4)
             let buf = new Uint8Array([17, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0]);
 
-            expect(() => codec.decode(buf)).toThrow('byteLength not aligned');
+            expect(() => c.decode(buf)).toThrow('byteLength not aligned');
         });
 
         it('byteLength not aligned throws for Int16Array (bpe=2)', () => {
             // tag 17 + typeId=3 (Int16Array, bpe=2) + bLen=3 (not aligned to 2)
             let buf = new Uint8Array([17, 3, 3, 0, 0, 0, 0, 0, 0]);
 
-            expect(() => codec.decode(buf)).toThrow('byteLength not aligned');
+            expect(() => c.decode(buf)).toThrow('byteLength not aligned');
         });
 
         it('valid typed array still decodes', () => {
             let ta = new Float32Array([1.5, 2.5]);
-            let result = codec.decode(codec.encode(ta)) as Float32Array;
+            let result = c.decode(c.encode(ta)) as Float32Array;
 
             expect(result).toBeInstanceOf(Float32Array);
             expect(result.length).toBe(2);
@@ -3217,7 +3217,7 @@ describe('Codec2', () => {
 
     describe('deserializeRegistry corruption (F-017)', () => {
         it('truncated after schema count reads undefined bytes silently', () => {
-            let c = createCodec();
+            let c = codec();
 
             // Declares 1 schema (u16 LE = 1) but no data follows for hash/fields.
             // JS bitwise ops on undefined yield 0, so it silently creates a schema
@@ -3230,14 +3230,14 @@ describe('Codec2', () => {
         });
 
         it('schema count 0 is valid (empty registry)', () => {
-            let c = createCodec();
+            let c = codec();
 
             // u16 LE count = 0
             c.deserializeRegistry(new Uint8Array([0, 0])); // should not throw
         });
 
         it('truncated field data throws on invalid type', () => {
-            let c = createCodec();
+            let c = codec();
 
             // Declares 1 schema: hash=0x00000000, fieldCount=1, but truncated before field data.
             // JS reads undefined bytes as 0, producing nameLen=0 and typeLen=0.
@@ -3253,7 +3253,7 @@ describe('Codec2', () => {
         });
 
         it('valid serialized registry round-trips correctly', () => {
-            let c1 = createCodec();
+            let c1 = codec();
 
             c1.defineSchema([
                 { name: 'id', type: 'uint8' },
@@ -3261,7 +3261,7 @@ describe('Codec2', () => {
             ]);
 
             let blob = c1.serializeRegistry(),
-                c2 = createCodec();
+                c2 = codec();
 
             c2.deserializeRegistry(blob);
 
@@ -3271,7 +3271,7 @@ describe('Codec2', () => {
         });
 
         it('completely empty buffer throws', () => {
-            let c = createCodec();
+            let c = codec();
 
             // Empty Uint8Array — reading data[0] and data[1] yields undefined
             // This may or may not throw depending on schemaCount resolution
@@ -3288,7 +3288,7 @@ describe('Codec2', () => {
 
     describe('computeSize bytes field (F-018)', () => {
         it('bytes field computes correct size', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([{ name: 'data', type: 'bytes' }]);
 
@@ -3301,7 +3301,7 @@ describe('Codec2', () => {
         });
 
         it('empty bytes field computes correct size', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([{ name: 'data', type: 'bytes' }]);
 
@@ -3314,7 +3314,7 @@ describe('Codec2', () => {
         });
 
         it('bytes field alongside fixed fields', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([
                 { name: 'data', type: 'bytes' },
@@ -3330,7 +3330,7 @@ describe('Codec2', () => {
         });
 
         it('large bytes field computes correct size', () => {
-            let c = createCodec();
+            let c = codec();
 
             c.defineSchema([{ name: 'payload', type: 'bytes' }]);
 

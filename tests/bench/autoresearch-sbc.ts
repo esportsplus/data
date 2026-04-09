@@ -4,24 +4,24 @@
 
 import { performance } from 'perf_hooks';
 import { pack, unpack } from 'msgpackr';
-import { createCodec } from '../../src/sbc';
+import { codec } from '../../src/sbc';
 
 
-let codec = createCodec(),
+let c = codec(),
     largeData = { active: true, age: 30, email: 'alice@test.com', name: 'Alice', role: 'admin', score: 99.5 },
     multiData = { active: true, age: 30, name: 'Alice' },
     simpleData = { name: 'Alice' };
 
 // Pre-encode
-let c2Large = codec.encode(largeData),
-    c2Multi = codec.encode(multiData),
-    c2Simple = codec.encode(simpleData),
+let c2Large = c.encode(largeData),
+    c2Multi = c.encode(multiData),
+    c2Simple = c.encode(simpleData),
     mpLarge = pack(largeData),
     mpMulti = pack(multiData),
     mpSimple = pack(simpleData);
 
 // Correctness check
-let decoded = codec.decode(c2Large) as Record<string, unknown>;
+let decoded = c.decode(c2Large) as Record<string, unknown>;
 
 if (decoded.name !== 'Alice' || decoded.age !== 30 || decoded.score !== 99.5) {
     console.error('CORRECTNESS FAILURE');
@@ -30,9 +30,9 @@ if (decoded.name !== 'Alice' || decoded.age !== 30 || decoded.score !== 99.5) {
 
 // Warmup — 5000 iterations all scenarios
 for (let i = 0; i < 5000; i++) {
-    codec.encode(largeData); codec.decode(c2Large);
-    codec.encode(multiData); codec.decode(c2Multi);
-    codec.encode(simpleData); codec.decode(c2Simple);
+    c.encode(largeData); c.decode(c2Large);
+    c.encode(multiData); c.decode(c2Multi);
+    c.encode(simpleData); c.decode(c2Simple);
     pack(largeData); unpack(mpLarge);
     pack(multiData); unpack(mpMulti);
     pack(simpleData); unpack(mpSimple);
@@ -56,17 +56,17 @@ function bench(fn: () => void, iterations: number = 500000): number {
 
 
 // Encode benchmarks
-let c2EncLarge = bench(() => { codec.encode(largeData); }),
-    c2EncMulti = bench(() => { codec.encode(multiData); }),
-    c2EncSimple = bench(() => { codec.encode(simpleData); }),
+let c2EncLarge = bench(() => { c.encode(largeData); }),
+    c2EncMulti = bench(() => { c.encode(multiData); }),
+    c2EncSimple = bench(() => { c.encode(simpleData); }),
     mpEncLarge = bench(() => { pack(largeData); }),
     mpEncMulti = bench(() => { pack(multiData); }),
     mpEncSimple = bench(() => { pack(simpleData); });
 
 // Decode benchmarks
-let c2DecLarge = bench(() => { codec.decode(c2Large); }),
-    c2DecMulti = bench(() => { codec.decode(c2Multi); }),
-    c2DecSimple = bench(() => { codec.decode(c2Simple); }),
+let c2DecLarge = bench(() => { c.decode(c2Large); }),
+    c2DecMulti = bench(() => { c.decode(c2Multi); }),
+    c2DecSimple = bench(() => { c.decode(c2Simple); }),
     mpDecLarge = bench(() => { unpack(mpLarge); }),
     mpDecMulti = bench(() => { unpack(mpMulti); }),
     mpDecSimple = bench(() => { unpack(mpSimple); });

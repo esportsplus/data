@@ -3,7 +3,7 @@
 
 import { performance } from 'perf_hooks';
 import { pack, unpack } from 'msgpackr';
-import { createCodec as createCodec2 } from '../../src/sbc';
+import { codec as codec2Factory } from '../../src/sbc';
 
 
 // Test data
@@ -17,7 +17,7 @@ let arrayData = { items: Array.from({ length: 100 }, (_, i) => i) },
 
 // Codec setup
 
-let codec2 = createCodec2();
+let codec2 = codec2Factory();
 
 
 // Pre-encode
