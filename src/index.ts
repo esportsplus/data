@@ -18,7 +18,6 @@ const validator: Validator = {
 };
 
 
-export { codec, type Codec } from './codec';
 export { createCodec } from './sbc';
 export {
     decodeTypedArray,

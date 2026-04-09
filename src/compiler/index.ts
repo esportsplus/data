@@ -4,14 +4,10 @@ import { imports } from '@esportsplus/typescript/compiler';
 import { PACKAGE_NAME } from '../constants';
 import { analyzeType } from './type-analyzer';
 import { default as validators, type BrandedValidator } from './validators';
-import { transformCodec } from './proto';
 import { generateValidator } from './validator';
 
 
-type CallType = 'codec' | 'validator.build';
-
 type DetectedCall = {
-    callType: CallType;
     configArg?: ts.Expression;
     errorMessagesType?: ts.TypeNode;
     importSource?: string;
@@ -62,63 +58,39 @@ const trace = (node: ts.Identifier, checker: ts.TypeChecker): string | null => {
 };
 
 function transform(call: DetectedCall, ctx: TransformContext, validators: Map<string, BrandedValidator>): string {
-    switch (call.callType) {
-        case 'codec':
-            return transformCodec(call.typeArg, call.configArg, ctx.checker);
+    let source = call.configArg?.getText(ctx.sourceFile),
+        messages = new Map<string, string>();
 
-        case 'validator.build': {
-            let source = call.configArg?.getText(ctx.sourceFile),
-                messages = new Map<string, string>();
-
-            if (call.errorMessagesType) {
-                extractMessages(ctx.checker.getTypeAtLocation(call.errorMessagesType), [], messages, ctx.checker);
-            }
-
-            return generateValidator(
-                analyzeType(call.typeArg, ctx.checker),
-                {
-                    brandValidators: validators,
-                    customMessages: messages,
-                    hasAsync: source ? ASYNC_PATTERN.test(source) : false
-                },
-                source
-            );
-        }
-
-        default:
-            return call.node.getText(ctx.sourceFile);
+    if (call.errorMessagesType) {
+        extractMessages(ctx.checker.getTypeAtLocation(call.errorMessagesType), [], messages, ctx.checker);
     }
+
+    return generateValidator(
+        analyzeType(call.typeArg, ctx.checker),
+        {
+            brandValidators: validators,
+            customMessages: messages,
+            hasAsync: source ? ASYNC_PATTERN.test(source) : false
+        },
+        source
+    );
 }
 
 function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChecker, node: ts.Node): void {
     if (ts.isCallExpression(node) && node.typeArguments && node.typeArguments.length > 0) {
         let expr = node.expression,
-            callType: CallType | null = null,
+            matched = false,
             traceNode: ts.Node | undefined;
 
-        // Direct call: codec<T>() or aliasedCodec<T>()
-        if (ts.isIdentifier(expr)) {
-            if (imports.includes(checker, expr, PACKAGE_NAME, 'codec')) {
-                callType = 'codec';
-                traceNode = expr;
-            }
-        }
-        // Property access: validator.build<T>() or ns.codec<T>() or ns.validator.build<T>()
-        else if (ts.isPropertyAccessExpression(expr)) {
+        // Property access: validator.build<T>() or ns.validator.build<T>()
+        if (ts.isPropertyAccessExpression(expr)) {
             let methodName = expr.name.text;
 
             // validator.build<T>() or aliasedValidator.build<T>()
             if (methodName === 'build' && ts.isIdentifier(expr.expression)) {
                 if (imports.includes(checker, expr.expression, PACKAGE_NAME, 'validator')) {
-                    callType = 'validator.build';
+                    matched = true;
                     traceNode = expr.expression;
-                }
-            }
-            // ns.codec<T>() - namespace import
-            else if (methodName === 'codec' && ts.isIdentifier(expr.expression)) {
-                if (imports.includes(checker, expr.name, PACKAGE_NAME, 'codec')) {
-                    callType = 'codec';
-                    traceNode = expr.name;
                 }
             }
             // ns.validator.build<T>() - namespace import with validator
@@ -127,32 +99,26 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
 
                 if (inner.name.text === 'validator' && ts.isIdentifier(inner.expression)) {
                     if (imports.includes(checker, inner.name, PACKAGE_NAME, 'validator')) {
-                        callType = 'validator.build';
+                        matched = true;
                         traceNode = inner.name;
                     }
                 }
             }
         }
 
-        if (callType && traceNode) {
+        if (matched && traceNode) {
             let detected: DetectedCall = {
-                    callType,
                     importSource: trace(traceNode as ts.Identifier, checker) ?? undefined,
                     node,
                     typeArg: node.typeArguments[0]
                 };
 
-            if (callType === 'codec' && node.arguments.length > 0) {
-                detected.configArg = node.arguments[0];
+            if (node.typeArguments.length > 1) {
+                detected.errorMessagesType = node.typeArguments[1];
             }
-            else if (callType === 'validator.build') {
-                if (node.typeArguments.length > 1) {
-                    detected.errorMessagesType = node.typeArguments[1];
-                }
 
-                if (node.arguments.length > 0) {
-                    detected.configArg = node.arguments[0];
-                }
+            if (node.arguments.length > 0) {
+                detected.configArg = node.arguments[0];
             }
 
             calls.set(node, detected);
@@ -164,7 +130,7 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
 
 
 export default {
-    patterns: ['codec<', 'codec(', 'validator.build', 'validator', '.codec', '.build'],
+    patterns: ['validator.build', 'validator', '.build'],
     transform: (ctx: TransformContext) => {
         let found = imports.all(ctx.sourceFile, PACKAGE_NAME);
 
@@ -192,10 +158,7 @@ export default {
                 node: call.node
             });
 
-            if (call.callType === 'codec' && remove.indexOf('codec') === -1) {
-                remove.push('codec');
-            }
-            else if (call.callType === 'validator.build' && remove.indexOf('validator') === -1) {
+            if (remove.indexOf('validator') === -1) {
                 remove.push('validator');
             }
         }
