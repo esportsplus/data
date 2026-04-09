@@ -78,13 +78,27 @@ let mpSimple = pack(simpleData),
 // Wire size comparison
 
 console.log('\n=== Wire Size Comparison (bytes) ===');
-console.log('Scenario                       | Codec2 | SBC    | Proto  | MsgPack');
-console.log('-------------------------------|--------|--------|--------|--------');
-console.log(`${'simple { name }'.padEnd(30)} | ${String(c2Simple.length).padStart(6)} | ${String(sbcSimple.length).padStart(6)} | ${String(protoSimpleEnc.length).padStart(6)} | ${String(mpSimple.length).padStart(6)}`);
-console.log(`${'multi { active, age, name }'.padEnd(30)} | ${String(c2Multi.length).padStart(6)} | ${String(sbcMulti.length).padStart(6)} | ${String(protoMultiEnc.length).padStart(6)} | ${String(mpMulti.length).padStart(6)}`);
-console.log(`${'nested { address, name }'.padEnd(30)} | ${String(c2Nested.length).padStart(6)} | ${String(sbcNested.length).padStart(6)} | ${String(protoNestedEnc.length).padStart(6)} | ${String(mpNested.length).padStart(6)}`);
-console.log(`${'array { items[100] }'.padEnd(30)} | ${String(c2Array.length).padStart(6)} | ${String(sbcArray.length).padStart(6)} | ${String(protoArrayEnc.length).padStart(6)} | ${String(mpArray.length).padStart(6)}`);
-console.log(`${'large { 6 fields }'.padEnd(30)} | ${String(c2Large.length).padStart(6)} | ${String(sbcLarge.length).padStart(6)} | ${String(protoLargeEnc.length).padStart(6)} | ${String(mpLarge.length).padStart(6)}`);
+console.log('Scenario                       | Codec2 | SBC    | Proto  | MsgPack | Winner');
+console.log('-------------------------------|--------|--------|--------|---------|--------');
+
+let wireScenarios = [
+    { c2: c2Simple, mp: mpSimple, name: 'simple { name }', proto: protoSimpleEnc, sbc: sbcSimple },
+    { c2: c2Multi, mp: mpMulti, name: 'multi { active, age, name }', proto: protoMultiEnc, sbc: sbcMulti },
+    { c2: c2Nested, mp: mpNested, name: 'nested { address, name }', proto: protoNestedEnc, sbc: sbcNested },
+    { c2: c2Array, mp: mpArray, name: 'array { items[100] }', proto: protoArrayEnc, sbc: sbcArray },
+    { c2: c2Large, mp: mpLarge, name: 'large { 6 fields }', proto: protoLargeEnc, sbc: sbcLarge },
+];
+
+for (let w of wireScenarios) {
+    let win = winner([
+        { label: 'Codec2', value: w.c2.length },
+        { label: 'SBC', value: w.sbc.length },
+        { label: 'Proto', value: w.proto.length },
+        { label: 'MsgPack', value: w.mp.length },
+    ], 'min');
+
+    console.log(`${w.name.padEnd(30)} | ${fmtBytes(w.c2.length)} | ${fmtBytes(w.sbc.length)} | ${fmtBytes(w.proto.length)} | ${fmtBytes(w.mp.length)}  | ${win}`);
+}
 
 
 // Warmup all codecs
@@ -130,12 +144,28 @@ function benchFn(name: string, fn: () => void, iterations: number = 500000): { n
 }
 
 
+function fmtBytes(n: number): string {
+    return String(n).padStart(6);
+}
+
 function fmtOps(n: number): string {
     return n.toLocaleString().padStart(13);
 }
 
 function fmtRatio(a: number, b: number): string {
     return (a / b).toFixed(2) + 'x';
+}
+
+function winner(values: { label: string; value: number }[], mode: 'min' | 'max' = 'max'): string {
+    let best = values[0];
+
+    for (let i = 1, n = values.length; i < n; i++) {
+        if (mode === 'max' ? values[i].value > best.value : values[i].value < best.value) {
+            best = values[i];
+        }
+    }
+
+    return best.label;
 }
 
 
@@ -161,7 +191,7 @@ let scenarios: Scenario[] = [
 // === ENCODE ===
 
 console.log('\n=== ENCODE BENCHMARK (ops/sec) ===');
-console.log('Scenario                       |        Codec2 |          SBC |        Proto |      MsgPack | C2 vs MP');
+console.log('Scenario                       |        Codec2 |          SBC |        Proto |      MsgPack | Winner');
 console.log('-------------------------------|---------------|--------------|--------------|--------------|--------');
 
 let totals = { c2Encode: 0, mpEncode: 0, protoEncode: 0, sbcEncode: 0 };
@@ -177,16 +207,28 @@ for (let s of scenarios) {
     totals.protoEncode += pr.opsPerSec;
     totals.mpEncode += mp.opsPerSec;
 
-    console.log(`${s.name.padEnd(30)} | ${fmtOps(c2.opsPerSec)} | ${fmtOps(sb.opsPerSec)} | ${fmtOps(pr.opsPerSec)} | ${fmtOps(mp.opsPerSec)} | ${fmtRatio(c2.opsPerSec, mp.opsPerSec).padStart(6)}`);
+    let win = winner([
+        { label: 'Codec2', value: c2.opsPerSec },
+        { label: 'SBC', value: sb.opsPerSec },
+        { label: 'Proto', value: pr.opsPerSec },
+        { label: 'MsgPack', value: mp.opsPerSec },
+    ]);
+
+    console.log(`${s.name.padEnd(30)} | ${fmtOps(c2.opsPerSec)} | ${fmtOps(sb.opsPerSec)} | ${fmtOps(pr.opsPerSec)} | ${fmtOps(mp.opsPerSec)} | ${win}`);
 }
 
-console.log(`${'TOTAL'.padEnd(30)} | ${fmtOps(totals.c2Encode)} | ${fmtOps(totals.sbcEncode)} | ${fmtOps(totals.protoEncode)} | ${fmtOps(totals.mpEncode)} | ${fmtRatio(totals.c2Encode, totals.mpEncode).padStart(6)}`);
+console.log(`${'TOTAL'.padEnd(30)} | ${fmtOps(totals.c2Encode)} | ${fmtOps(totals.sbcEncode)} | ${fmtOps(totals.protoEncode)} | ${fmtOps(totals.mpEncode)} | ${winner([
+    { label: 'Codec2', value: totals.c2Encode },
+    { label: 'SBC', value: totals.sbcEncode },
+    { label: 'Proto', value: totals.protoEncode },
+    { label: 'MsgPack', value: totals.mpEncode },
+])}`);
 
 
 // === DECODE ===
 
 console.log('\n=== DECODE BENCHMARK (ops/sec) ===');
-console.log('Scenario                       |        Codec2 |          SBC |        Proto |      MsgPack | C2 vs MP');
+console.log('Scenario                       |        Codec2 |          SBC |        Proto |      MsgPack | Winner');
 console.log('-------------------------------|---------------|--------------|--------------|--------------|--------');
 
 let decodeTotals = { c2: 0, mp: 0, proto: 0, sbc: 0 };
@@ -202,10 +244,22 @@ for (let s of scenarios) {
     decodeTotals.proto += pr.opsPerSec;
     decodeTotals.mp += mp.opsPerSec;
 
-    console.log(`${s.name.padEnd(30)} | ${fmtOps(c2.opsPerSec)} | ${fmtOps(sb.opsPerSec)} | ${fmtOps(pr.opsPerSec)} | ${fmtOps(mp.opsPerSec)} | ${fmtRatio(c2.opsPerSec, mp.opsPerSec).padStart(6)}`);
+    let win = winner([
+        { label: 'Codec2', value: c2.opsPerSec },
+        { label: 'SBC', value: sb.opsPerSec },
+        { label: 'Proto', value: pr.opsPerSec },
+        { label: 'MsgPack', value: mp.opsPerSec },
+    ]);
+
+    console.log(`${s.name.padEnd(30)} | ${fmtOps(c2.opsPerSec)} | ${fmtOps(sb.opsPerSec)} | ${fmtOps(pr.opsPerSec)} | ${fmtOps(mp.opsPerSec)} | ${win}`);
 }
 
-console.log(`${'TOTAL'.padEnd(30)} | ${fmtOps(decodeTotals.c2)} | ${fmtOps(decodeTotals.sbc)} | ${fmtOps(decodeTotals.proto)} | ${fmtOps(decodeTotals.mp)} | ${fmtRatio(decodeTotals.c2, decodeTotals.mp).padStart(6)}`);
+console.log(`${'TOTAL'.padEnd(30)} | ${fmtOps(decodeTotals.c2)} | ${fmtOps(decodeTotals.sbc)} | ${fmtOps(decodeTotals.proto)} | ${fmtOps(decodeTotals.mp)} | ${winner([
+    { label: 'Codec2', value: decodeTotals.c2 },
+    { label: 'SBC', value: decodeTotals.sbc },
+    { label: 'Proto', value: decodeTotals.proto },
+    { label: 'MsgPack', value: decodeTotals.mp },
+])}`);
 
 
 // Summary ratios vs MsgPack
