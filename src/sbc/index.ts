@@ -1200,7 +1200,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             for (let j = 0; j < n; j++) {
                 let f = fields[j]!;
 
-                if (!(f.name in obj) || inferType(obj[f.name]) !== f.type) {
+                if (!(f.name in obj) || f.elementType || f.refHash !== undefined || inferType(obj[f.name]) !== f.type) {
                     match = false;
                     break;
                 }
@@ -1252,6 +1252,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
                 if (bufHash === hintSchema.hash) {
                     lastDecodeHash = bufHash;
+                    lastDecodeFn = null;
                     lastDecodeSchema = hintSchema;
 
                     if (tag === 18 && hintSchema.compressedDecodeFn) {
@@ -1296,6 +1297,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
             if (schema) {
                 lastDecodeHash = hash;
+                lastDecodeFn = null;
                 lastDecodeSchema = schema;
 
                 if (schema.compressedDecodeFn) {
@@ -1585,7 +1587,15 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         }
 
         if (hasStructural) {
-            typedSchemas.set(computeNameHash(keys), schema);
+            let nameHash = computeNameHash(keys),
+                existing = typedSchemas.get(nameHash);
+
+            if (existing && existing.hash !== schema.hash) {
+                typedSchemas.delete(nameHash);
+            }
+            else {
+                typedSchemas.set(nameHash, schema);
+            }
         }
 
         return hash;
@@ -1630,6 +1640,13 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
         if (!schema) {
             return undefined;
+        }
+
+        // Compressed format — offset math assumes uncompressed layout; fall back to full decode
+        if (buffer[0] === 18) {
+            let decoded = decode(buffer) as Record<string, unknown> | null;
+
+            return decoded ? decoded[fieldName] : undefined;
         }
 
         let fields = schema.fields,
@@ -2087,11 +2104,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                     throw new Error('Codec2: registry data truncated at field name');
                 }
 
-                let name = '';
-
-                for (let k = 0; k < nameLen; k++) {
-                    name += String.fromCharCode(data[pos + k]!);
-                }
+                let name = readStr(data, pos, nameLen);
 
                 pos += nameLen;
 
@@ -2110,11 +2123,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                     throw new Error('Codec2: registry data truncated at field type');
                 }
 
-                let type = '';
-
-                for (let k = 0; k < typeLen; k++) {
-                    type += String.fromCharCode(data[pos + k]!);
-                }
+                let type = readStr(data, pos, typeLen);
 
                 pos += typeLen;
 
@@ -2149,7 +2158,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
     function serializeRegistry(): Uint8Array {
         let schemas = [...registry.schemas.values()];
 
-        // Calculate total size
+        // Calculate total size using UTF-8 byte lengths
         let size = 2; // u16 schemaCount
 
         for (let i = 0, n = schemas.length; i < n; i++) {
@@ -2160,11 +2169,11 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             for (let j = 0, m = s.fields.length; j < m; j++) {
                 let f = s.fields[j]!;
 
-                size += 2 + f.name.length + 2 + f.rawType.length + 1;
+                size += 2 + byteLen(f.name) + 2 + byteLen(f.rawType) + 1;
             }
         }
 
-        let buf = new Uint8Array(size),
+        let buf = allocBuf(size),
             pos = 0;
 
         // Write schema count
@@ -2192,27 +2201,23 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             for (let j = 0; j < fc; j++) {
                 let f = s.fields[j]!;
 
-                // Write name
-                buf[pos] = f.name.length & 0xFF;
-                buf[pos + 1] = (f.name.length >>> 8) & 0xFF;
+                // Write name (UTF-8)
+                let bl = byteLen(f.name);
+
+                buf[pos] = bl & 0xFF;
+                buf[pos + 1] = (bl >>> 8) & 0xFF;
                 pos += 2;
+                writeUtf8.call(buf, f.name, pos, bl);
+                pos += bl;
 
-                for (let k = 0, kn = f.name.length; k < kn; k++) {
-                    buf[pos + k] = f.name.charCodeAt(k);
-                }
+                // Write type (UTF-8, full structural type string)
+                let tl = byteLen(f.rawType);
 
-                pos += f.name.length;
-
-                // Write type (full structural type string)
-                buf[pos] = f.rawType.length & 0xFF;
-                buf[pos + 1] = (f.rawType.length >>> 8) & 0xFF;
+                buf[pos] = tl & 0xFF;
+                buf[pos + 1] = (tl >>> 8) & 0xFF;
                 pos += 2;
-
-                for (let k = 0, kn = f.rawType.length; k < kn; k++) {
-                    buf[pos + k] = f.rawType.charCodeAt(k);
-                }
-
-                pos += f.rawType.length;
+                writeUtf8.call(buf, f.rawType, pos, tl);
+                pos += tl;
 
                 // Write flags
                 buf[pos] = f.nullable ? 1 : 0;
