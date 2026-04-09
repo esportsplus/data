@@ -3,7 +3,7 @@
 
 import { afterAll, bench, describe } from 'vitest';
 import { pack, unpack } from 'msgpackr';
-import { createCodec } from '../../src/codec2';
+import { createCodec } from '../../src/sbc';
 
 
 let codec = createCodec();

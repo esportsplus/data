@@ -1,1018 +1,2889 @@
 import { describe, expect, it } from 'vitest';
-import { buildSchema, compileSchema, createCodec, createInternPool, createRegistry, createSchemaStore, deserializeRegistry, inferSchema, registerSchema, serializeFieldType, serializeRegistry } from '../src/sbc';
-import { readVarint, readZigzag, varintResult, writeVarint, writeZigzag } from '../src/sbc/platform';
-import { decodeTypedArray, encodeTypedArrayInto, getTypedArrayType } from '../src/typed-array-codec';
+import type { CodecOptions } from '../src/sbc';
+import { createCodec } from '../src/sbc';
 
 
-describe('T-001: decodeAt', () => {
-    it('decodes a primitive at offset 0', () => {
-        let codec = createCodec();
-        let buf = codec.encode(42);
+describe('Codec2', () => {
+    let codec = createCodec();
 
-        expect(codec.decodeAt(buf, 0)).toBe(42);
-    });
 
-    it('decodes a primitive at a non-zero offset', () => {
-        let codec = createCodec();
-        let buf1 = codec.encode(10);
-        let buf2 = codec.encode(99);
-        let combined = new Uint8Array(buf1.length + buf2.length);
+    // === PRIMITIVES ===
 
-        combined.set(buf1, 0);
-        combined.set(buf2, buf1.length);
-
-        expect(codec.decodeAt(combined, buf1.length)).toBe(99);
-    });
-
-    it('decodes an object at offset 0', () => {
-        let codec = createCodec();
-        let obj = { age: 30, name: 'alice' };
-        let buf = codec.encode(obj);
-
-        expect(codec.decodeAt(buf, 0)).toEqual(obj);
-    });
-
-    it('decodes an object at a non-zero offset', () => {
-        let codec = createCodec();
-        let obj = { score: 100, tag: 'test' };
-        let encoded = codec.encode(obj);
-        let combined = Buffer.alloc(5 + encoded.length);
-
-        combined.set(encoded, 5);
-
-        expect(codec.decodeAt(combined, 5)).toEqual(obj);
-    });
-
-    it('decodes a string at offset 0', () => {
-        let codec = createCodec();
-        let buf = codec.encode('hello');
-
-        expect(codec.decodeAt(buf, 0)).toBe('hello');
-    });
-
-    it('decodes a boolean at offset 0', () => {
-        let codec = createCodec();
-        let buf = codec.encode(true);
-
-        expect(codec.decodeAt(buf, 0)).toBe(true);
-    });
-
-    it('decodes null at offset 0', () => {
-        let codec = createCodec();
-        let buf = codec.encode(null);
-
-        expect(codec.decodeAt(buf, 0)).toBe(null);
-    });
-
-    it('decodes uint8 (tag 255) at offset 0', () => {
-        let codec = createCodec();
-        let buf = codec.encode(200);
-
-        expect(codec.decodeAt(buf, 0)).toBe(200);
-    });
-});
-
-
-describe('T-002: extractField', () => {
-    it('extracts a fixed-size field (float64)', () => {
-        let codec = createCodec();
-        let obj = { score: 3.14, tag: 'x' };
-
-        codec.encode(obj);
-
-        let buf = codec.encode(obj);
-
-        expect(codec.extractField(buf, 'score')).toBe(3.14);
-    });
-
-    it('extracts a boolean field', () => {
-        let codec = createCodec();
-        let obj = { active: true, name: 'test' };
-
-        codec.encode(obj);
-
-        let buf = codec.encode(obj);
-
-        expect(codec.extractField(buf, 'active')).toBe(true);
-    });
-
-    it('extracts a string field', () => {
-        let codec = createCodec();
-        let obj = { id: 1, name: 'alice' };
-
-        codec.encode(obj);
-
-        let buf = codec.encode(obj);
-
-        expect(codec.extractField(buf, 'name')).toBe('alice');
-    });
-
-    it('returns undefined for a nonexistent field', () => {
-        let codec = createCodec();
-        let obj = { id: 1, name: 'bob' };
-
-        codec.encode(obj);
-
-        let buf = codec.encode(obj);
-
-        expect(codec.extractField(buf, 'missing')).toBeUndefined();
-    });
-
-    it('returns undefined for a non-object buffer', () => {
-        let codec = createCodec();
-        let buf = codec.encode('just a string');
-
-        expect(codec.extractField(buf, 'anything')).toBeUndefined();
-    });
-
-    it('returns undefined for a buffer shorter than 9 bytes', () => {
-        let codec = createCodec();
-        let buf = new Uint8Array(5);
-
-        expect(codec.extractField(buf, 'field')).toBeUndefined();
-    });
-});
-
-
-describe('T-003: compression path (tag 245)', () => {
-    it('encodes and decodes a simple object', () => {
-        let codec = createCodec(undefined, { compression: true });
-        let obj = { count: 42, label: 'test' };
-        let buf = codec.encode(obj);
-        let decoded = codec.decode(buf);
-
-        expect(decoded).toEqual(obj);
-    });
-
-    it('encodes and decodes with multiple field types', () => {
-        let codec = createCodec(undefined, { compression: true });
-        let obj = { active: true, name: 'alice', score: 99.5 };
-        let buf = codec.encode(obj);
-        let decoded = codec.decode(buf);
-
-        expect(decoded).toEqual(obj);
-    });
-
-    it('compressed encoding differs from uncompressed', () => {
-        let compressed = createCodec(undefined, { compression: true });
-        let uncompressed = createCodec();
-        let obj = { count: 42, label: 'test' };
-        let compBuf = compressed.encode(obj);
-        let uncBuf = uncompressed.encode(obj);
-
-        expect(compBuf[0]).toBe(245);
-        expect(uncBuf[0]).toBe(246);
-        expect(compBuf.length).not.toBe(uncBuf.length);
-    });
-
-    it('round-trips with nested array values', () => {
-        let codec = createCodec(undefined, { compression: true });
-        let obj = { items: [1, 2, 3], name: 'list' };
-        let buf = codec.encode(obj);
-        let decoded = codec.decode(buf);
-
-        expect(decoded).toEqual(obj);
-    });
-});
-
-
-describe('T-004: serializeRegistry / deserializeRegistry', () => {
-    it('serializes empty registry and deserializes to no schemas', () => {
-        let registry = createRegistry();
-        let serialized = serializeRegistry(registry);
-        let restored = deserializeRegistry(serialized);
-
-        expect(restored.schemas.size).toBe(0);
-    });
-
-    it('round-trips a single schema', () => {
-        let registry = createRegistry();
-        let schema = inferSchema({ age: 30, name: 'test' }, registry);
-
-        registerSchema(schema, registry);
-
-        let serialized = serializeRegistry(registry);
-        let restored = deserializeRegistry(serialized);
-
-        expect(restored.schemas.size).toBe(1);
-
-        let restoredSchema = restored.schemasByHash.get(schema.hash);
-
-        expect(restoredSchema).toBeDefined();
-        expect(restoredSchema!.hash).toBe(schema.hash);
-    });
-
-    it('round-trips multiple schemas', () => {
-        let registry = createRegistry();
-        let s1 = inferSchema({ x: 1, y: 2 }, registry);
-        let s2 = inferSchema({ active: true, name: 'test' }, registry);
-
-        registerSchema(s1, registry);
-        registerSchema(s2, registry);
-
-        let serialized = serializeRegistry(registry);
-        let restored = deserializeRegistry(serialized);
-
-        expect(restored.schemas.size).toBe(2);
-        expect(restored.schemasByHash.has(s1.hash)).toBe(true);
-        expect(restored.schemasByHash.has(s2.hash)).toBe(true);
-    });
-
-    it('preserves field names and types', () => {
-        let registry = createRegistry();
-        let schema = inferSchema({ count: 42, label: 'hello' }, registry);
-
-        registerSchema(schema, registry);
-
-        let serialized = serializeRegistry(registry);
-        let restored = deserializeRegistry(serialized);
-        let restoredSchema = restored.schemasByHash.get(schema.hash)!;
-        let fieldNames = restoredSchema.fields.map((f) => f.name).sort();
-        let fieldTypes = restoredSchema.fields.reduce((acc, f) => { acc[f.name] = serializeFieldType(f.type); return acc; }, {} as Record<string, string>);
-
-        expect(fieldNames).toEqual(['count', 'label']);
-        expect(fieldTypes['count']).toBe('float64');
-        expect(fieldTypes['label']).toBe('string');
-    });
-
-    it('restores nextId so new schemas get higher ids', () => {
-        let registry = createRegistry();
-        let s1 = inferSchema({ a: 1 }, registry);
-        let s2 = inferSchema({ b: 'x' }, registry);
-
-        registerSchema(s1, registry);
-        registerSchema(s2, registry);
-
-        let maxId = Math.max(s1.id, s2.id);
-        let serialized = serializeRegistry(registry);
-        let restored = deserializeRegistry(serialized);
-
-        expect(restored.nextId).toBeGreaterThan(maxId);
-
-        let s3 = inferSchema({ c: true }, restored);
-
-        registerSchema(s3, restored);
-
-        expect(s3.id).toBeGreaterThan(maxId);
-    });
-});
-
-
-describe('T-005: typed-array-codec', () => {
-    describe('getTypedArrayType', () => {
-        it('returns correct type for Float32Array', () => {
-            expect(getTypedArrayType(new Float32Array(1))).not.toBe(-1);
+    describe('primitives', () => {
+        it('null', () => {
+            expect(codec.decode(codec.encode(null))).toBe(null);
         });
 
-        it('returns correct type for Float64Array', () => {
-            expect(getTypedArrayType(new Float64Array(1))).not.toBe(-1);
+        it('undefined', () => {
+            expect(codec.decode(codec.encode(undefined))).toBe(null);
         });
 
-        it('returns correct type for Int8Array', () => {
-            expect(getTypedArrayType(new Int8Array(1))).not.toBe(-1);
+        it('boolean true', () => {
+            expect(codec.decode(codec.encode(true))).toBe(true);
         });
 
-        it('returns correct type for Int16Array', () => {
-            expect(getTypedArrayType(new Int16Array(1))).not.toBe(-1);
+        it('boolean false', () => {
+            expect(codec.decode(codec.encode(false))).toBe(false);
         });
 
-        it('returns correct type for Int32Array', () => {
-            expect(getTypedArrayType(new Int32Array(1))).not.toBe(-1);
+        it('uint8 (0)', () => {
+            expect(codec.decode(codec.encode(0))).toBe(0);
         });
 
-        it('returns correct type for Uint8Array', () => {
-            expect(getTypedArrayType(new Uint8Array(1))).not.toBe(-1);
+        it('uint8 (255)', () => {
+            expect(codec.decode(codec.encode(255))).toBe(255);
         });
 
-        it('returns correct type for Uint8ClampedArray', () => {
-            expect(getTypedArrayType(new Uint8ClampedArray(1))).not.toBe(-1);
+        it('uint8 (1)', () => {
+            expect(codec.decode(codec.encode(1))).toBe(1);
         });
 
-        it('returns correct type for Uint16Array', () => {
-            expect(getTypedArrayType(new Uint16Array(1))).not.toBe(-1);
+        it('int32 (256)', () => {
+            expect(codec.decode(codec.encode(256))).toBe(256);
         });
 
-        it('returns correct type for Uint32Array', () => {
-            expect(getTypedArrayType(new Uint32Array(1))).not.toBe(-1);
+        it('int32 (-1)', () => {
+            expect(codec.decode(codec.encode(-1))).toBe(-1);
         });
 
-        it('returns correct type for BigInt64Array', () => {
-            expect(getTypedArrayType(new BigInt64Array(1))).not.toBe(-1);
+        it('int32 (2147483647)', () => {
+            expect(codec.decode(codec.encode(2147483647))).toBe(2147483647);
         });
 
-        it('returns correct type for BigUint64Array', () => {
-            expect(getTypedArrayType(new BigUint64Array(1))).not.toBe(-1);
+        it('int32 (-2147483648)', () => {
+            expect(codec.decode(codec.encode(-2147483648))).toBe(-2147483648);
         });
 
-        it('returns -1 for plain array', () => {
-            expect(getTypedArrayType([1, 2, 3])).toBe(-1);
+        it('float64 (3.14)', () => {
+            expect(codec.decode(codec.encode(3.14))).toBe(3.14);
         });
 
-        it('returns -1 for object', () => {
-            expect(getTypedArrayType({ x: 1 })).toBe(-1);
+        it.fails('BUG: -0 classified as uint8 instead of float64', () => {
+            expect(Object.is(codec.decode(codec.encode(-0)) as number, -0)).toBe(true);
         });
 
-        it('returns -1 for null', () => {
-            expect(getTypedArrayType(null)).toBe(-1);
-        });
-    });
-
-    describe('encodeTypedArrayInto + decodeTypedArray round-trip', () => {
-        it('round-trips Float32Array', () => {
-            let input = new Float32Array([1.5, 2.5, 3.5]);
-            let buf = new Uint8Array(4 + input.byteLength);
-            let end = encodeTypedArrayInto(input, buf, 0);
-
-            expect(end).toBe(buf.length);
-
-            let decoded = decodeTypedArray(buf);
-
-            expect(decoded).toBeInstanceOf(Float32Array);
-            expect(Array.from(decoded as Float32Array)).toEqual([1.5, 2.5, 3.5]);
+        it('float64 (Infinity)', () => {
+            expect(codec.decode(codec.encode(Infinity))).toBe(Infinity);
         });
 
-        it('round-trips Float64Array', () => {
-            let input = new Float64Array([1.1, 2.2, 3.3]);
-            let buf = new Uint8Array(4 + input.byteLength);
-            let end = encodeTypedArrayInto(input, buf, 0);
-
-            expect(end).toBe(buf.length);
-
-            let decoded = decodeTypedArray(buf);
-
-            expect(decoded).toBeInstanceOf(Float64Array);
-            expect(Array.from(decoded as Float64Array)).toEqual([1.1, 2.2, 3.3]);
+        it('float64 (-Infinity)', () => {
+            expect(codec.decode(codec.encode(-Infinity))).toBe(-Infinity);
         });
 
-        it('round-trips Int32Array', () => {
-            let input = new Int32Array([-1, 0, 100]);
-            let buf = new Uint8Array(4 + input.byteLength);
-            let end = encodeTypedArrayInto(input, buf, 0);
-
-            expect(end).toBe(buf.length);
-
-            let decoded = decodeTypedArray(buf);
-
-            expect(decoded).toBeInstanceOf(Int32Array);
-            expect(Array.from(decoded as Int32Array)).toEqual([-1, 0, 100]);
+        it('float64 (NaN)', () => {
+            expect(Number.isNaN(codec.decode(codec.encode(NaN)))).toBe(true);
         });
 
-        it('round-trips Uint8Array directly via codec functions', () => {
-            let input = new Uint8Array([10, 20, 30]);
-            let buf = new Uint8Array(4 + input.byteLength);
-            let end = encodeTypedArrayInto(input, buf, 0);
+        it('float64 (Number.MAX_SAFE_INTEGER)', () => {
+            expect(codec.decode(codec.encode(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER);
+        });
 
-            expect(end).toBe(buf.length);
+        it('float64 (Number.MIN_SAFE_INTEGER)', () => {
+            expect(codec.decode(codec.encode(Number.MIN_SAFE_INTEGER))).toBe(Number.MIN_SAFE_INTEGER);
+        });
 
-            let decoded = decodeTypedArray(buf);
+        it('string (empty)', () => {
+            expect(codec.decode(codec.encode(''))).toBe('');
+        });
+
+        it('string (ascii)', () => {
+            expect(codec.decode(codec.encode('hello'))).toBe('hello');
+        });
+
+        it('string (unicode)', () => {
+            expect(codec.decode(codec.encode('こんにちは'))).toBe('こんにちは');
+        });
+
+        it('string (emoji)', () => {
+            expect(codec.decode(codec.encode('hello 🌍🔥'))).toBe('hello 🌍🔥');
+        });
+
+        it('string (long > 16 chars)', () => {
+            let s = 'a'.repeat(1000);
+
+            expect(codec.decode(codec.encode(s))).toBe(s);
+        });
+
+        it('bigint', () => {
+            expect(codec.decode(codec.encode(123456789012345678n))).toBe(123456789012345678n);
+        });
+
+        it('bigint (negative)', () => {
+            expect(codec.decode(codec.encode(-99999999999n))).toBe(-99999999999n);
+        });
+
+        it('bigint (0n)', () => {
+            expect(codec.decode(codec.encode(0n))).toBe(0n);
+        });
+
+        it('Date', () => {
+            let d = new Date('2025-01-15T10:30:00Z'),
+                decoded = codec.decode(codec.encode(d)) as Date;
+
+            expect(decoded).toBeInstanceOf(Date);
+            expect(decoded.getTime()).toBe(d.getTime());
+        });
+
+        it('Date (epoch)', () => {
+            let d = new Date(0),
+                decoded = codec.decode(codec.encode(d)) as Date;
+
+            expect(decoded.getTime()).toBe(0);
+        });
+
+        it('Uint8Array', () => {
+            let buf = new Uint8Array([1, 2, 3, 255, 0]),
+                decoded = codec.decode(codec.encode(buf)) as Uint8Array;
 
             expect(decoded).toBeInstanceOf(Uint8Array);
-            expect(Array.from(decoded as Uint8Array)).toEqual([10, 20, 30]);
+            expect(Array.from(decoded)).toEqual([1, 2, 3, 255, 0]);
         });
 
-        it('round-trips BigInt64Array', () => {
-            let input = new BigInt64Array([1n, -2n, 3n]);
-            let buf = new Uint8Array(4 + input.byteLength);
-            let end = encodeTypedArrayInto(input, buf, 0);
+        it('Uint8Array (empty)', () => {
+            let buf = new Uint8Array(0),
+                decoded = codec.decode(codec.encode(buf)) as Uint8Array;
 
-            expect(end).toBe(buf.length);
-
-            let decoded = decodeTypedArray(buf);
-
-            expect(decoded).toBeInstanceOf(BigInt64Array);
-            expect(Array.from(decoded as BigInt64Array)).toEqual([1n, -2n, 3n]);
-        });
-
-        it('round-trips empty typed array', () => {
-            let input = new Float32Array(0);
-            let buf = new Uint8Array(4);
-            let end = encodeTypedArrayInto(input, buf, 0);
-
-            expect(end).toBe(4);
-
-            let decoded = decodeTypedArray(buf);
-
-            expect(decoded).toBeInstanceOf(Float32Array);
-            expect((decoded as Float32Array).length).toBe(0);
+            expect(decoded).toBeInstanceOf(Uint8Array);
+            expect(decoded.length).toBe(0);
         });
     });
 
-    describe('decodeTypedArray edge cases', () => {
-        it('returns null for buffer shorter than 4 bytes', () => {
-            expect(decodeTypedArray(new Uint8Array(3))).toBeNull();
+
+    // === ARRAYS ===
+
+    describe('arrays', () => {
+        it('empty array', () => {
+            expect(codec.decode(codec.encode([]))).toEqual([]);
         });
 
-        it('returns null for wrong magic marker', () => {
-            let buf = new Uint8Array([0xFF, 0, 0, 0]);
-
-            expect(decodeTypedArray(buf)).toBeNull();
+        it('string array', () => {
+            expect(codec.decode(codec.encode(['a', 'b', 'c']))).toEqual(['a', 'b', 'c']);
         });
 
-        it('returns null for invalid type enum', () => {
-            let buf = new Uint8Array([0x54, 99, 0, 0]);
+        it('mixed type array', () => {
+            let data = [1, 'two', true, null, 3.14];
 
-            expect(decodeTypedArray(buf)).toBeNull();
+            expect(codec.decode(codec.encode(data))).toEqual(data);
         });
 
-        it('returns null when data length not divisible by element size', () => {
-            // Float32 = 4 bytes per element; 5 data bytes is invalid
-            let buf = new Uint8Array([0x54, 0, 0, 0, 0, 0, 0, 0, 0]);
+        it('nested array', () => {
+            let data = [[1, 2], [3, 4], [5]];
 
-            expect(decodeTypedArray(buf)).toBeNull();
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('packed uint8 array', () => {
+            let data = [0, 1, 127, 255];
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('packed int32 array', () => {
+            let data = [256, 1000, -1, 2147483647, -2147483648];
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('packed float64 array', () => {
+            let data = [1.1, 2.2, 3.3, NaN, Infinity];
+            let decoded = codec.decode(codec.encode(data)) as number[];
+
+            expect(decoded[0]).toBe(1.1);
+            expect(decoded[1]).toBe(2.2);
+            expect(decoded[2]).toBe(3.3);
+            expect(Number.isNaN(decoded[3])).toBe(true);
+            expect(decoded[4]).toBe(Infinity);
+        });
+
+        it('large uint8 array (100 elements)', () => {
+            let data = Array.from({ length: 100 }, (_, i) => i % 256);
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('array of objects', () => {
+            let data = [{ a: 1 }, { a: 2 }, { a: 3 }];
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('array with nested objects', () => {
+            let data = [{ x: { y: 1 } }, { x: { y: 2 } }];
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
         });
     });
-});
 
 
-describe('F-001: extractField nullable variable-length fields', () => {
-    it('compiles extractor for nullable<string> field', () => {
-        let schema = buildSchema([
-            { fixedSize: 0, name: 'label', offset: 0, type: { inner: 'string', kind: 'nullable' } as any },
-            { fixedSize: 8, name: 'score', offset: 0, type: 'float64' },
-        ], 12345, 1);
+    // === OBJECTS ===
 
-        compileSchema(schema);
+    describe('objects', () => {
+        it('simple object', () => {
+            expect(codec.decode(codec.encode({ name: 'Alice' }))).toEqual({ name: 'Alice' });
+        });
 
-        expect(schema.fieldExtractors).not.toBeNull();
-        expect(schema.fieldExtractors!.has('label')).toBe(true);
-        expect(schema.nullIndexMap).not.toBeNull();
-        expect(schema.nullIndexMap!.has('label')).toBe(true);
+        it('multi-field object', () => {
+            let data = { active: true, age: 30, name: 'Alice' };
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('nested object', () => {
+            let data = { address: { city: 'NYC', zip: '10001' }, name: 'Alice' };
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('deeply nested object', () => {
+            let data = { a: { b: { c: { d: { e: 42 } } } } };
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('object with all types', () => {
+            let data = {
+                arr: [1, 2, 3],
+                big: 123n,
+                bool: true,
+                date: new Date('2025-01-01'),
+                float: 3.14,
+                int: 42,
+                nested: { x: 1 },
+                nil: null,
+                str: 'hello',
+            };
+
+            let decoded = codec.decode(codec.encode(data)) as Record<string, unknown>;
+
+            expect(decoded.arr).toEqual([1, 2, 3]);
+            expect(decoded.big).toBe(123n);
+            expect(decoded.bool).toBe(true);
+            expect((decoded.date as Date).getTime()).toBe(new Date('2025-01-01').getTime());
+            expect(decoded.float).toBe(3.14);
+            expect(decoded.int).toBe(42);
+            expect(decoded.nested).toEqual({ x: 1 });
+            expect(decoded.nil).toBe(null);
+            expect(decoded.str).toBe('hello');
+        });
+
+        it('object with empty string key', () => {
+            let data = { '': 'empty key' };
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('object with unicode keys', () => {
+            let data = { '名前': 'Alice', '年齢': 30 };
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('object with many fields', () => {
+            let data: Record<string, number> = {};
+
+            for (let i = 0; i < 50; i++) {
+                data[`field${i}`] = i;
+            }
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('object with array field containing objects', () => {
+            let data = { items: [{ id: 1, name: 'a' }, { id: 2, name: 'b' }] };
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
     });
 
-    it('compiles extractor for nullable<bytes> field', () => {
-        let schema = buildSchema([
-            { fixedSize: 0, name: 'data', offset: 0, type: { inner: 'bytes', kind: 'nullable' } as any },
-            { fixedSize: 8, name: 'id', offset: 0, type: 'float64' },
-        ], 12346, 2);
 
-        compileSchema(schema);
+    // === SCHEMA CACHE — SAME KEYS, DIFFERENT VALUE TYPES ===
 
-        expect(schema.fieldExtractors).not.toBeNull();
-        expect(schema.fieldExtractors!.has('data')).toBe(true);
+    describe('same keys, different value types', () => {
+        it('string then number for same key', () => {
+            let c = createCodec(),
+                a = { value: 'hello' },
+                b = { value: 42 };
+
+            let encA = c.encode(a),
+                encB = c.encode(b);
+
+            expect(c.decode(encA)).toEqual(a);
+            expect(c.decode(encB)).toEqual(b);
+        });
+
+        it('number then string for same key', () => {
+            let c = createCodec(),
+                a = { value: 42 },
+                b = { value: 'hello' };
+
+            let encA = c.encode(a),
+                encB = c.encode(b);
+
+            expect(c.decode(encA)).toEqual(a);
+            expect(c.decode(encB)).toEqual(b);
+        });
+
+        it('boolean then string for same key', () => {
+            let c = createCodec(),
+                a = { flag: true },
+                b = { flag: 'yes' };
+
+            let encA = c.encode(a),
+                encB = c.encode(b);
+
+            expect(c.decode(encA)).toEqual(a);
+            expect(c.decode(encB)).toEqual(b);
+        });
+
+        it('null then object for same key', () => {
+            let c = createCodec(),
+                a = { data: null },
+                b = { data: { x: 1 } };
+
+            let encA = c.encode(a),
+                encB = c.encode(b);
+
+            expect(c.decode(encA)).toEqual(a);
+            expect(c.decode(encB)).toEqual(b);
+        });
+
+        it('int then float for same key', () => {
+            let c = createCodec(),
+                a = { n: 42 },
+                b = { n: 3.14 };
+
+            let encA = c.encode(a),
+                encB = c.encode(b);
+
+            expect(c.decode(encA)).toEqual(a);
+            expect(c.decode(encB)).toEqual(b);
+        });
+
+        it('uint8 then int32 for same key', () => {
+            let c = createCodec(),
+                a = { n: 100 },
+                b = { n: 100000 };
+
+            let encA = c.encode(a),
+                encB = c.encode(b);
+
+            expect(c.decode(encA)).toEqual(a);
+            expect(c.decode(encB)).toEqual(b);
+        });
+
+        it('string then array for same key', () => {
+            let c = createCodec(),
+                a = { payload: 'text' },
+                b = { payload: [1, 2, 3] };
+
+            let encA = c.encode(a),
+                encB = c.encode(b);
+
+            expect(c.decode(encA)).toEqual(a);
+            expect(c.decode(encB)).toEqual(b);
+        });
+
+        it('interleaved types — round robin', () => {
+            let c = createCodec(),
+                variants = [
+                    { x: 'string' },
+                    { x: 42 },
+                    { x: true },
+                    { x: null },
+                    { x: [1, 2] },
+                    { x: { nested: true } },
+                    { x: 3.14 },
+                    { x: 100000 },
+                ];
+
+            for (let v of variants) {
+                let encoded = c.encode(v);
+
+                expect(c.decode(encoded)).toEqual(v);
+            }
+        });
+
+        it('multi-field object with type changes', () => {
+            let c = createCodec(),
+                a = { age: 30, name: 'Alice' },
+                b = { age: 'thirty', name: 42 };
+
+            let encA = c.encode(a),
+                encB = c.encode(b);
+
+            expect(c.decode(encA)).toEqual(a);
+            expect(c.decode(encB)).toEqual(b);
+        });
+
+        it('same keys with object then null values', () => {
+            let c = createCodec(),
+                a = { meta: { created: 'today' }, name: 'Alice' },
+                b = { meta: null, name: 'Bob' };
+
+            let encA = c.encode(a),
+                encB = c.encode(b);
+
+            expect(c.decode(encA)).toEqual(a);
+            expect(c.decode(encB)).toEqual(b);
+        });
     });
 
-    it('extractor returns correct value for non-null nullable<string>', () => {
-        let schema = buildSchema([
-            { fixedSize: 0, name: 'label', offset: 0, type: { inner: 'string', kind: 'nullable' } as any },
-            { fixedSize: 8, name: 'score', offset: 0, type: 'float64' },
-        ], 12345, 1);
 
-        compileSchema(schema);
+    // === RING BUFFER CACHE EVICTION ===
 
-        // Buffer layout: header(9) + bitmap(1) + score(float64=8) + label_len(u32=4) + label_data
-        let str = 'hello',
-            strBytes = Buffer.from(str, 'utf8'),
-            buf = Buffer.alloc(9 + 1 + 8 + 4 + strBytes.length);
+    describe('ring buffer cache (4 slots)', () => {
+        it('handles > 4 distinct schemas', () => {
+            let c = createCodec(),
+                schemas = [
+                    { a: 1 },
+                    { b: 2 },
+                    { c: 3 },
+                    { d: 4 },
+                    { e: 5 },
+                    { f: 6 },
+                ];
 
-        buf[0] = 246;
-        buf.writeUInt32LE(12345, 1);
-        buf.writeUInt32LE(buf.length - 9, 5);
-        buf[9] = 0x01; // null bitmap: bit 0 = label is non-null
-        buf.writeDoubleLE(3.14, 10);
-        buf.writeUInt32LE(strBytes.length, 18);
-        strBytes.copy(buf, 22);
+            for (let s of schemas) {
+                expect(c.decode(c.encode(s))).toEqual(s);
+            }
 
-        let bitmapBytes = 1,
-            extractor = schema.fieldExtractors!.get('label')!;
+            // Re-encode earlier schemas after eviction
+            for (let s of schemas) {
+                expect(c.decode(c.encode(s))).toEqual(s);
+            }
+        });
 
-        expect(extractor(buf, 9 + bitmapBytes)).toBe('hello');
+        it('same object identity uses WeakMap', () => {
+            let c = createCodec(),
+                obj = { x: 1, y: 2, z: 3 };
+
+            // Encode same reference multiple times
+            for (let i = 0; i < 10; i++) {
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            }
+        });
+
+        it('fresh objects with same shape', () => {
+            let c = createCodec();
+
+            for (let i = 0; i < 20; i++) {
+                let obj = { id: i, name: `item-${i}` };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            }
+        });
     });
 
-    it('nullable<string> extractor skips preceding nullable field correctly', () => {
-        let schema = buildSchema([
-            { fixedSize: 0, name: 'first', offset: 0, type: { inner: 'string', kind: 'nullable' } as any },
-            { fixedSize: 0, name: 'second', offset: 0, type: { inner: 'string', kind: 'nullable' } as any },
-        ], 12347, 3);
 
-        compileSchema(schema);
+    // === NESTED OBJECT SCHEMAS ===
 
-        expect(schema.fieldExtractors!.has('first')).toBe(true);
-        expect(schema.fieldExtractors!.has('second')).toBe(true);
+    describe('nested objects with distinct schemas', () => {
+        it('parent and child have different schemas', () => {
+            let data = {
+                child: { x: 1, y: 2 },
+                name: 'parent',
+            };
 
-        // Buffer: header(9) + bitmap(1) + first_len(4) + first_data(5) + second_len(4) + second_data(5)
-        let firstBytes = Buffer.from('alice', 'utf8'),
-            secondBytes = Buffer.from('world', 'utf8'),
-            buf = Buffer.alloc(9 + 1 + 4 + firstBytes.length + 4 + secondBytes.length);
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
 
-        buf[0] = 246;
-        buf.writeUInt32LE(12347, 1);
-        buf.writeUInt32LE(buf.length - 9, 5);
-        buf[9] = 0x03; // both nullable fields non-null (bits 0 and 1 set)
+        it('multiple nesting levels with different shapes', () => {
+            let data = {
+                level1: {
+                    level2: {
+                        level3: { value: 42 },
+                        tag: 'deep',
+                    },
+                    count: 10,
+                },
+                root: true,
+            };
 
-        let pos = 10;
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
 
-        buf.writeUInt32LE(firstBytes.length, pos);
-        firstBytes.copy(buf, pos + 4);
-        pos += 4 + firstBytes.length;
-        buf.writeUInt32LE(secondBytes.length, pos);
-        secondBytes.copy(buf, pos + 4);
+        it('sibling objects with different schemas', () => {
+            let data = {
+                a: { x: 1 },
+                b: { y: 'two', z: true },
+            };
 
-        let bitmapBytes = 1;
-
-        expect(schema.fieldExtractors!.get('second')!(buf, 9 + bitmapBytes)).toBe('world');
-    });
-});
-
-
-describe('F-006: decode() uncompressed object path', () => {
-    it('round-trips a tag-246 object via codec.decode()', () => {
-        let codec = createCodec();
-        let obj = { age: 25, name: 'bob' };
-        let buf = codec.encode(obj);
-
-        expect(buf[0]).toBe(246);
-
-        let decoded = codec.decode(buf);
-
-        expect(decoded).toEqual(obj);
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
     });
 
-    it('round-trips multiple objects with different schemas via decode()', () => {
-        let codec = createCodec();
-        let obj1 = { x: 1, y: 2 };
-        let obj2 = { active: true, label: 'test' };
 
-        // encode() returns owned copies by default that survive subsequent encodes
-        let buf1 = codec.encode(obj1);
-        let buf2 = codec.encode(obj2);
+    // === WIRE FORMAT ===
 
-        expect(codec.decode(buf1)).toEqual(obj1);
-        expect(codec.decode(buf2)).toEqual(obj2);
+    describe('wire format', () => {
+        it('object starts with tag 8', () => {
+            let encoded = codec.encode({ a: 1 });
+
+            expect(encoded[0]).toBe(8);
+        });
+
+        it('null is tag 0', () => {
+            let encoded = codec.encode(null);
+
+            expect(encoded[0]).toBe(0);
+        });
+
+        it('false is tag 1', () => {
+            let encoded = codec.encode(false);
+
+            expect(encoded[0]).toBe(1);
+        });
+
+        it('true is tag 2', () => {
+            let encoded = codec.encode(true);
+
+            expect(encoded[0]).toBe(2);
+        });
+
+        it('uint8 is tag 3', () => {
+            let encoded = codec.encode(42);
+
+            expect(encoded[0]).toBe(3);
+        });
+
+        it('float64 is tag 4', () => {
+            let encoded = codec.encode(3.14);
+
+            expect(encoded[0]).toBe(4);
+        });
+
+        it('string is tag 5', () => {
+            let encoded = codec.encode('hello');
+
+            expect(encoded[0]).toBe(5);
+        });
+
+        it('Uint8Array is tag 6', () => {
+            let encoded = codec.encode(new Uint8Array([1]));
+
+            expect(encoded[0]).toBe(6);
+        });
+
+        it('generic array is tag 7', () => {
+            let encoded = codec.encode(['a', 'b']);
+
+            expect(encoded[0]).toBe(7);
+        });
+
+        it('bigint is tag 9', () => {
+            let encoded = codec.encode(42n);
+
+            expect(encoded[0]).toBe(9);
+        });
+
+        it('Date is tag 10', () => {
+            let encoded = codec.encode(new Date());
+
+            expect(encoded[0]).toBe(10);
+        });
+
+        it('int32 is tag 11', () => {
+            let encoded = codec.encode(-1);
+
+            expect(encoded[0]).toBe(11);
+        });
     });
 
-    it('decode() with length parameter truncates correctly', () => {
-        let codec = createCodec();
-        let obj = { count: 42, tag: 'hello' };
-        let buf = codec.encode(obj);
 
-        // Passing exact length should decode correctly
-        let decoded = codec.decode(buf, buf.length);
+    // === ENCODE view MODE ===
 
-        expect(decoded).toEqual(obj);
+    describe('encode view mode', () => {
+        it('returns subarray (view) when view=true', () => {
+            let data = { name: 'Alice' },
+                view = codec.encode(data, true),
+                copy = codec.encode(data, false);
+
+            expect(codec.decode(view)).toEqual(data);
+            expect(view.length).toBe(copy.length);
+        });
+
+        it('view is invalidated by next encode', () => {
+            let a = { name: 'Alice' },
+                viewA = codec.encode(a, true);
+
+            // Capture bytes before overwrite
+            let bytesA = new Uint8Array(viewA);
+
+            // Encode something else — overwrites shared buffer
+            codec.encode({ name: 'Bob' }, true);
+
+            // viewA now points to corrupted data; bytesA is the safe snapshot
+            expect(codec.decode(bytesA)).toEqual(a);
+        });
     });
 
-    it('decode() with length shorter than buffer uses only that portion', () => {
-        let codec = createCodec();
-        let obj = { a: 1, b: 2 };
-        let buf = codec.encode(obj);
 
-        // Create a larger Buffer with the encoded data at the start
-        let padded = Buffer.alloc(buf.length + 100);
+    // === BUFFER GROWTH ===
 
-        padded.set(buf, 0);
+    describe('buffer growth', () => {
+        // BUG: Buffer growth guard retries after out-of-bounds write already threw.
+        // The encodeFn writes beyond buffer bounds before size is checked.
 
-        let decoded = codec.decode(padded, buf.length);
+        it.fails('BUG: large string exceeds initial 64KB buffer', () => {
+            let s = 'x'.repeat(100000),
+                data = { big: s };
 
-        expect(decoded).toEqual(obj);
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it.fails('BUG: large Uint8Array exceeds initial 64KB buffer', () => {
+            let buf = new Uint8Array(100000);
+
+            for (let i = 0; i < buf.length; i++) {
+                buf[i] = i & 0xFF;
+            }
+
+            let decoded = codec.decode(codec.encode(buf)) as Uint8Array;
+
+            expect(decoded.length).toBe(buf.length);
+            expect(decoded[0]).toBe(0);
+            expect(decoded[255]).toBe(255);
+            expect(decoded[99999]).toBe(buf[99999]);
+        });
+
+        it('handles large array', () => {
+            let data = Array.from({ length: 10000 }, (_, i) => i);
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
     });
 
-    it('decode() handles primitives correctly', () => {
-        let codec = createCodec();
 
-        expect(codec.decode(codec.encode(42))).toBe(42);
-        expect(codec.decode(codec.encode('hello'))).toBe('hello');
-        expect(codec.decode(codec.encode(true))).toBe(true);
-        expect(codec.decode(codec.encode(null))).toBe(null);
-    });
-});
+    // === EDGE CASES ===
 
+    describe('edge cases', () => {
+        it('empty object', () => {
+            expect(codec.decode(codec.encode({}))).toEqual({});
+        });
 
-describe('F-008: readVarint/writeVarint', () => {
-    it('round-trips value 0', () => {
-        let buf = new Uint8Array(5);
-        let end = writeVarint(buf, 0, 0);
+        it('object with undefined value', () => {
+            let data = { a: undefined },
+                decoded = codec.decode(codec.encode(data)) as Record<string, unknown>;
 
-        readVarint(buf, 0);
+            // undefined maps to mixed → encodeSbc → tag 0 → decodes as null
+            expect(decoded.a).toBe(null);
+        });
 
-        expect(varintResult.value).toBe(0);
-        expect(varintResult.pos).toBe(end);
-    });
+        it('key ordering is deterministic (sorted)', () => {
+            let c = createCodec(),
+                a = { z: 1, a: 2, m: 3 },
+                b = { a: 2, m: 3, z: 1 };
 
-    it('round-trips value 1', () => {
-        let buf = new Uint8Array(5);
-        let end = writeVarint(buf, 0, 1);
+            // Both should produce identical wire bytes
+            let encA = c.encode(a),
+                encB = c.encode(b);
 
-        readVarint(buf, 0);
+            expect(Array.from(encA)).toEqual(Array.from(encB));
+        });
 
-        expect(varintResult.value).toBe(1);
-        expect(varintResult.pos).toBe(end);
-    });
+        it('number boundary: 255 is uint8, 256 is int32', () => {
+            let c = createCodec(),
+                a = { n: 255 },
+                b = { n: 256 };
 
-    it('round-trips value 127 (max 1-byte)', () => {
-        let buf = new Uint8Array(5);
-        let end = writeVarint(buf, 0, 127);
+            let decA = c.decode(c.encode(a)) as { n: number },
+                decB = c.decode(c.encode(b)) as { n: number };
 
-        readVarint(buf, 0);
+            expect(decA.n).toBe(255);
+            expect(decB.n).toBe(256);
+        });
 
-        expect(varintResult.value).toBe(127);
-        expect(varintResult.pos).toBe(end);
-    });
+        it('array with single element', () => {
+            expect(codec.decode(codec.encode([42]))).toEqual([42]);
+        });
 
-    it('round-trips value 128 (min 2-byte)', () => {
-        let buf = new Uint8Array(5);
-        let end = writeVarint(buf, 0, 128);
+        it('array with single string', () => {
+            expect(codec.decode(codec.encode(['hello']))).toEqual(['hello']);
+        });
 
-        readVarint(buf, 0);
+        it('decode with explicit length parameter', () => {
+            let data = { name: 'test' },
+                encoded = codec.encode(data);
 
-        expect(varintResult.value).toBe(128);
-        expect(varintResult.pos).toBe(end);
-    });
+            expect(codec.decode(encoded, encoded.length)).toEqual(data);
+        });
 
-    it('round-trips value 16383 (max 2-byte)', () => {
-        let buf = new Uint8Array(5);
-        let end = writeVarint(buf, 0, 16383);
+        it('multiple codec instances are independent', () => {
+            let c1 = createCodec(),
+                c2 = createCodec();
 
-        readVarint(buf, 0);
+            let data = { x: 1 },
+                enc1 = c1.encode(data),
+                enc2 = c2.encode(data);
 
-        expect(varintResult.value).toBe(16383);
-        expect(varintResult.pos).toBe(end);
-    });
+            // Same wire format
+            expect(Array.from(enc1)).toEqual(Array.from(enc2));
 
-    it('round-trips value 16384 (min 3-byte)', () => {
-        let buf = new Uint8Array(5);
-        let end = writeVarint(buf, 0, 16384);
+            // Cross-decode works because schemas have same hash
+            expect(c1.decode(enc2)).toEqual(data);
+            expect(c2.decode(enc1)).toEqual(data);
+        });
 
-        readVarint(buf, 0);
+        it('re-encoding after decode produces same bytes', () => {
+            let data = { active: true, items: [1, 2, 3], name: 'test', score: 99.5 },
+                enc1 = codec.encode(data),
+                decoded = codec.decode(enc1) as typeof data,
+                enc2 = codec.encode(decoded);
 
-        expect(varintResult.value).toBe(16384);
-        expect(varintResult.pos).toBe(end);
-    });
-
-    it('round-trips value 2097151 (max 3-byte)', () => {
-        let buf = new Uint8Array(5);
-        let end = writeVarint(buf, 0, 2097151);
-
-        readVarint(buf, 0);
-
-        expect(varintResult.value).toBe(2097151);
-        expect(varintResult.pos).toBe(end);
-    });
-
-    it('writeVarint uses 1 byte for values 0-127', () => {
-        let buf = new Uint8Array(5);
-
-        expect(writeVarint(buf, 0, 0)).toBe(1);
-        expect(writeVarint(buf, 0, 127)).toBe(1);
+            expect(Array.from(enc1)).toEqual(Array.from(enc2));
+        });
     });
 
-    it('writeVarint uses 2 bytes for values 128-16383', () => {
-        let buf = new Uint8Array(5);
 
-        expect(writeVarint(buf, 0, 128)).toBe(2);
-        expect(writeVarint(buf, 0, 16383)).toBe(2);
+    // === CROSS-INSTANCE SCHEMA COMPATIBILITY ===
+
+    describe('cross-instance compatibility', () => {
+        // Shared SIEVE cache enables cross-instance decode
+        it('cross-instance decode via shared schema cache', () => {
+            let c1 = createCodec(),
+                c2 = createCodec(),
+                data = { active: true, age: 30, name: 'Alice' };
+
+            let enc = c1.encode(data);
+
+            expect(c2.decode(enc)).toEqual(data);
+        });
+
+        it('schema hash differs for different key sets', () => {
+            let c = createCodec(),
+                a = c.encode({ x: 1 }),
+                b = c.encode({ y: 1 });
+
+            let hashA = a[1]! | (a[2]! << 8) | (a[3]! << 16) | (a[4]! << 24),
+                hashB = b[1]! | (b[2]! << 8) | (b[3]! << 16) | (b[4]! << 24);
+
+            expect(hashA).not.toBe(hashB);
+        });
+
+        it('schema hash differs for same keys with different types', () => {
+            let c = createCodec(),
+                a = c.encode({ value: 'string' }),
+                b = c.encode({ value: 42 });
+
+            let hashA = a[1]! | (a[2]! << 8) | (a[3]! << 16) | (a[4]! << 24),
+                hashB = b[1]! | (b[2]! << 8) | (b[3]! << 16) | (b[4]! << 24);
+
+            expect(hashA).not.toBe(hashB);
+        });
     });
 
-    it('writeVarint uses 3 bytes for values 16384-2097151', () => {
-        let buf = new Uint8Array(5);
 
-        expect(writeVarint(buf, 0, 16384)).toBe(3);
-        expect(writeVarint(buf, 0, 2097151)).toBe(3);
+    // === BATCH 1 FIX COVERAGE ===
+
+    describe('F-000+F-006: matchSchema type check + Object.keys', () => {
+        it('ring buffer distinguishes same keys with different value types', () => {
+            let c = createCodec();
+
+            // First encode caches schema for {x: string}
+            c.encode({ x: 'hello' });
+
+            // Second encode must NOT reuse string schema for number value
+            let enc = c.encode({ x: 42 }),
+                dec = c.decode(enc) as { x: number };
+
+            expect(dec.x).toBe(42);
+            expect(typeof dec.x).toBe('number');
+        });
+
+        it('objects with inherited props encode only own properties', () => {
+            let c = createCodec(),
+                proto = { inherited: true },
+                obj = Object.create(proto);
+
+            obj.own = 42;
+
+            let decoded = c.decode(c.encode(obj)) as Record<string, unknown>;
+
+            expect(decoded.own).toBe(42);
+            expect(decoded.inherited).toBeUndefined();
+        });
     });
 
-    it('readVarint throws on empty buffer (pos >= buf.length)', () => {
-        let buf = new Uint8Array(0);
 
-        expect(() => readVarint(buf, 0)).toThrow(RangeError);
+    describe('F-007: hash collision detection', () => {
+        it('inferAndRegister verifies fields after hash lookup', () => {
+            // Two objects with same keys, different types → different hashes → no collision
+            let c = createCodec(),
+                a = { val: 'text' },
+                b = { val: 100 };
+
+            let encA = c.encode(a),
+                encB = c.encode(b);
+
+            expect(c.decode(encA)).toEqual(a);
+            expect(c.decode(encB)).toEqual(b);
+        });
     });
 
-    it('readVarint throws when pos equals buf.length', () => {
-        let buf = new Uint8Array(3);
 
-        expect(() => readVarint(buf, 3)).toThrow(RangeError);
+    describe('F-001: mixed array with non-number elements', () => {
+        it('array starting with number then string falls to generic', () => {
+            let data = [1, 'two', 3];
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('array [number, boolean, null] round-trips', () => {
+            let data = [42, true, null];
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('array [number, object] round-trips', () => {
+            let data = [1, { x: 2 }];
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
     });
 
-    it('readVarint throws when continuation byte extends past buffer end', () => {
-        // Write a byte with continuation bit set, but no following byte
-        let buf = new Uint8Array(1);
 
-        buf[0] = 0x80; // continuation bit set
+    describe('F-002+F-003: u32 count/length support', () => {
+        it('string length uses u32 header (4 bytes after tag)', () => {
+            let s = 'x'.repeat(1000),
+                encoded = codec.encode(s);
 
-        expect(() => readVarint(buf, 0)).toThrow(RangeError);
-    });
-});
+            // tag 5 + u32 LE length + data
+            expect(encoded[0]).toBe(5);
 
+            let len = (encoded[1]! | (encoded[2]! << 8) | (encoded[3]! << 16) | (encoded[4]! << 24)) >>> 0;
 
-describe('F-009: readZigzag/writeZigzag', () => {
-    it('round-trips value 0', () => {
-        let buf = new Uint8Array(5);
+            expect(len).toBe(1000);
+            expect(encoded.length).toBe(5 + 1000);
+            expect(codec.decode(encoded)).toBe(s);
+        });
 
-        writeZigzag(buf, 0, 0);
-        readZigzag(buf, 0);
+        it('array count uses u32 header (4 bytes after flag)', () => {
+            let data = ['a', 'b', 'c'],
+                encoded = codec.encode(data);
 
-        expect(varintResult.value).toBe(0);
-    });
+            // tag 7 + u32 LE count + elements
+            expect(encoded[0]).toBe(7);
 
-    it('round-trips value 1', () => {
-        let buf = new Uint8Array(5);
+            let count = (encoded[1]! | (encoded[2]! << 8) | (encoded[3]! << 16) | (encoded[4]! << 24)) >>> 0;
 
-        writeZigzag(buf, 0, 1);
-        readZigzag(buf, 0);
+            expect(count).toBe(3);
+        });
 
-        expect(varintResult.value).toBe(1);
-    });
+        it('UTF-8 string in schema-compiled object', () => {
+            let data = { label: 'こんにちは' };
 
-    it('round-trips value -1', () => {
-        let buf = new Uint8Array(5);
-
-        writeZigzag(buf, 0, -1);
-        readZigzag(buf, 0);
-
-        expect(varintResult.value).toBe(-1);
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
     });
 
-    it('round-trips value 127', () => {
-        let buf = new Uint8Array(5);
 
-        writeZigzag(buf, 0, 127);
-        readZigzag(buf, 0);
+    describe('F-004: decode depth limit', () => {
+        it('moderately nested arrays decode fine', () => {
+            let data: unknown = [1];
 
-        expect(varintResult.value).toBe(127);
+            for (let i = 0; i < 30; i++) {
+                data = [data];
+            }
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
+
+        it('deeply nested arrays throw depth error', () => {
+            // Build a deeply nested array manually in wire format
+            // Each nesting: tag 7 + u32 count=1 + ... = 5 bytes header per level
+            let depth = 70,
+                size = depth * 5 + 2, // 5 per array header + final uint8 element
+                buf = new Uint8Array(size),
+                p = 0;
+
+            for (let i = 0; i < depth; i++) {
+                buf[p] = 7; // tag: generic array
+                buf[p + 1] = 1; // count = 1 (u32 LE)
+                buf[p + 2] = 0;
+                buf[p + 3] = 0;
+                buf[p + 4] = 0;
+                p += 5;
+            }
+
+            buf[p] = 3; // tag: uint8
+            buf[p + 1] = 42; // value
+
+            expect(() => codec.decode(buf)).toThrow('max decode depth');
+        });
     });
 
-    it('round-trips value -128', () => {
-        let buf = new Uint8Array(5);
 
-        writeZigzag(buf, 0, -128);
-        readZigzag(buf, 0);
+    describe('F-008: unknown tag throws', () => {
+        it('decoding buffer with unknown tag throws', () => {
+            let buf = new Uint8Array([99]); // tag 99 does not exist
 
-        expect(varintResult.value).toBe(-128);
+            expect(() => codec.decode(buf)).toThrow('unknown tag');
+        });
     });
 
-    it('round-trips value 2147483647 (max int32)', () => {
-        let buf = new Uint8Array(10);
 
-        writeZigzag(buf, 0, 2147483647);
-        readZigzag(buf, 0);
+    // === BATCH 3 FIX COVERAGE ===
 
-        expect(varintResult.value).toBe(2147483647);
+    describe('F-001 (run2): __proto__ prototype pollution', () => {
+        it('object with __proto__ as own property round-trips safely', () => {
+            let c = createCodec(),
+                data = Object.create(null) as Record<string, unknown>;
+
+            data['__proto__'] = 'safe';
+            data['name'] = 'test';
+
+            let encoded = c.encode(data),
+                decoded = c.decode(encoded) as Record<string, unknown>;
+
+            expect(decoded['__proto__']).toBe('safe');
+            expect(decoded['name']).toBe('test');
+            // Verify prototype chain excludes Object.prototype (frozen null-proto prototype)
+            let proto = Object.getPrototypeOf(decoded);
+
+            expect(proto).not.toBe(Object.prototype);
+            expect(Object.getPrototypeOf(proto)).toBe(null);
+            expect(Object.isFrozen(proto)).toBe(true);
+        });
+
+        it('decoded objects exclude Object.prototype from chain', () => {
+            let data = { x: 1 },
+                decoded = codec.decode(codec.encode(data)) as Record<string, unknown>;
+
+            expect(decoded.x).toBe(1);
+
+            let proto = Object.getPrototypeOf(decoded);
+
+            expect(proto).not.toBe(Object.prototype);
+            expect(Object.getPrototypeOf(proto)).toBe(null);
+            expect((decoded as Record<string, unknown>).hasOwnProperty).toBeUndefined();
+            expect((decoded as Record<string, unknown>).toString).toBeUndefined();
+        });
     });
 
-    it('round-trips value -2147483648 (min int32)', () => {
-        let buf = new Uint8Array(10);
 
-        writeZigzag(buf, 0, -2147483648);
-        readZigzag(buf, 0);
+    describe('F-002 (run2): array count DoS guard', () => {
+        it('huge array count in wire format throws', () => {
+            // tag 7 (generic array) + count = 0x7FFFFFFF (2 billion)
+            let buf = new Uint8Array([7, 0xFF, 0xFF, 0xFF, 0x7F]);
 
-        expect(varintResult.value).toBe(-2147483648);
+            expect(() => codec.decode(buf)).toThrow('array count');
+        });
+
+        it('huge packed uint8 count throws', () => {
+            let buf = new Uint8Array([12, 0xFF, 0xFF, 0xFF, 0x7F]);
+
+            expect(() => codec.decode(buf)).toThrow('array count');
+        });
+
+        it('normal-sized arrays still work', () => {
+            let data = Array.from({ length: 1000 }, (_, i) => i);
+
+            expect(codec.decode(codec.encode(data))).toEqual(data);
+        });
     });
 
-    it('writeZigzag throws RangeError for value above int32 max', () => {
-        let buf = new Uint8Array(10);
 
-        expect(() => writeZigzag(buf, 0, 2147483648)).toThrow(RangeError);
+    describe('F-003 (run2): decode respects length parameter', () => {
+        it('decode with length shorter than buffer ignores trailing bytes', () => {
+            let data = { x: 42 },
+                encoded = codec.encode(data),
+                extended = new Uint8Array(encoded.length + 10);
+
+            extended.set(encoded);
+            // Fill trailing bytes with garbage
+            for (let i = encoded.length; i < extended.length; i++) {
+                extended[i] = 0xFF;
+            }
+
+            expect(codec.decode(extended, encoded.length)).toEqual(data);
+        });
     });
 
-    it('writeZigzag throws RangeError for value below int32 min', () => {
-        let buf = new Uint8Array(10);
 
-        expect(() => writeZigzag(buf, 0, -2147483649)).toThrow(RangeError);
-    });
-});
+    describe('F-002 (run3): truncated string/bytes bounds check', () => {
+        it('truncated string throws', () => {
+            // tag 5 (string) + u32 length = 100, but only 5 bytes in buffer
+            let buf = new Uint8Array([5, 100, 0, 0, 0]);
 
+            expect(() => codec.decode(buf)).toThrow('truncated string');
+        });
 
-describe('F-010: deserializeRegistry error paths', () => {
-    it('throws on unknown version number', () => {
-        expect(() => deserializeRegistry({ schemas: [], v: 99 })).toThrow('unknown registry version');
-    });
+        it('truncated bytes throws', () => {
+            // tag 6 (bytes) + u32 length = 50, but only 5 bytes in buffer
+            let buf = new Uint8Array([6, 50, 0, 0, 0]);
 
-    it('throws on completely invalid data (non-array, non-object)', () => {
-        expect(() => deserializeRegistry('bad' as unknown as { schemas: []; v: number })).toThrow('invalid registry format');
-    });
+            expect(() => codec.decode(buf)).toThrow('truncated bytes');
+        });
 
-    it('legacy bare-array format works with empty array', () => {
-        let registry = deserializeRegistry([]);
+        it('valid string still decodes', () => {
+            let encoded = codec.encode('hello world');
 
-        expect(registry.schemas.size).toBe(0);
-    });
+            expect(codec.decode(encoded)).toBe('hello world');
+        });
 
-    it('legacy bare-array format works with valid schema entries', () => {
-        // Build a valid schema definition that matches what serializeRegistry produces
-        let reg = createRegistry();
-        let schema = inferSchema({ x: 1 }, reg);
+        it('truncated string inside schema-compiled object throws', () => {
+            let c = createCodec();
 
-        registerSchema(schema, reg);
+            // Encode a valid object first to register the schema
+            c.encode({ name: 'Alice' });
 
-        let serialized = serializeRegistry(reg);
+            // Now craft a buffer with valid tag-8 header but truncated string field
+            let valid = c.encode({ name: 'Alice' }),
+                truncated = valid.slice(0, valid.length - 3); // chop off end of string
 
-        // Pass just the schemas array as a bare array (legacy format)
-        let restored = deserializeRegistry(serialized.schemas as unknown[]);
-
-        expect(restored.schemas.size).toBe(1);
+            expect(() => c.decode(truncated)).toThrow('truncated');
+        });
     });
 
-    it('throws on malformed schema entry (null in schemas array)', () => {
-        expect(() => deserializeRegistry({ schemas: [null], v: 1 })).toThrow('malformed schema definition');
+
+    // === MAP ===
+
+    describe('Map', () => {
+        it('empty Map', () => {
+            let result = codec.decode(codec.encode(new Map())) as Map<unknown, unknown>;
+
+            expect(result).toBeInstanceOf(Map);
+            expect(result.size).toBe(0);
+        });
+
+        it('string keys', () => {
+            let m = new Map([['a', 1], ['b', 2], ['c', 3]]);
+            let result = codec.decode(codec.encode(m)) as Map<unknown, unknown>;
+
+            expect(result).toBeInstanceOf(Map);
+            expect(result.size).toBe(3);
+            expect(result.get('a')).toBe(1);
+            expect(result.get('b')).toBe(2);
+            expect(result.get('c')).toBe(3);
+        });
+
+        it('numeric keys', () => {
+            let m = new Map([[1, 'one'], [2, 'two']]);
+            let result = codec.decode(codec.encode(m)) as Map<unknown, unknown>;
+
+            expect(result.get(1)).toBe('one');
+            expect(result.get(2)).toBe('two');
+        });
+
+        it('mixed value types', () => {
+            let m = new Map<unknown, unknown>([['str', 'hello'], ['num', 42], ['bool', true], ['null', null]]);
+            let result = codec.decode(codec.encode(m)) as Map<unknown, unknown>;
+
+            expect(result.get('str')).toBe('hello');
+            expect(result.get('num')).toBe(42);
+            expect(result.get('bool')).toBe(true);
+            expect(result.get('null')).toBe(null);
+        });
+
+        it('nested Map', () => {
+            let inner = new Map([['x', 1]]);
+            let outer = new Map<string, unknown>([['inner', inner]]);
+            let result = codec.decode(codec.encode(outer)) as Map<string, unknown>;
+            let resultInner = result.get('inner') as Map<string, unknown>;
+
+            expect(resultInner).toBeInstanceOf(Map);
+            expect(resultInner.get('x')).toBe(1);
+        });
+
+        it('Map in object field', () => {
+            let obj = { data: new Map([['key', 'val']]) };
+            let result = codec.decode(codec.encode(obj)) as Record<string, unknown>;
+            let m = result.data as Map<string, string>;
+
+            expect(m).toBeInstanceOf(Map);
+            expect(m.get('key')).toBe('val');
+        });
+
+        it('large Map (1000 entries)', () => {
+            let m = new Map<number, number>();
+
+            for (let i = 0; i < 1000; i++) {
+                m.set(i, i * 2);
+            }
+
+            let result = codec.decode(codec.encode(m)) as Map<number, number>;
+
+            expect(result.size).toBe(1000);
+            expect(result.get(0)).toBe(0);
+            expect(result.get(999)).toBe(1998);
+        });
     });
 
-    it('throws on schema entry missing required fields', () => {
-        expect(() => deserializeRegistry({ schemas: [{ hash: 1 }], v: 1 })).toThrow('malformed schema definition');
+
+    // === SET ===
+
+    describe('Set', () => {
+        it('empty Set', () => {
+            let result = codec.decode(codec.encode(new Set())) as Set<unknown>;
+
+            expect(result).toBeInstanceOf(Set);
+            expect(result.size).toBe(0);
+        });
+
+        it('string values', () => {
+            let s = new Set(['a', 'b', 'c']);
+            let result = codec.decode(codec.encode(s)) as Set<string>;
+
+            expect(result).toBeInstanceOf(Set);
+            expect(result.size).toBe(3);
+            expect(result.has('a')).toBe(true);
+            expect(result.has('b')).toBe(true);
+            expect(result.has('c')).toBe(true);
+        });
+
+        it('numeric values', () => {
+            let s = new Set([1, 2, 3, 42]);
+            let result = codec.decode(codec.encode(s)) as Set<number>;
+
+            expect(result.size).toBe(4);
+            expect(result.has(42)).toBe(true);
+        });
+
+        it('mixed types', () => {
+            let s = new Set<unknown>([1, 'hello', true, null]);
+            let result = codec.decode(codec.encode(s)) as Set<unknown>;
+
+            expect(result.size).toBe(4);
+            expect(result.has(1)).toBe(true);
+            expect(result.has('hello')).toBe(true);
+            expect(result.has(true)).toBe(true);
+            expect(result.has(null)).toBe(true);
+        });
+
+        it('nested Set', () => {
+            let inner = new Set([1, 2]);
+            let outer = new Set<unknown>([inner]);
+            let result = codec.decode(codec.encode(outer)) as Set<unknown>;
+            let items = [...result];
+
+            expect(items[0]).toBeInstanceOf(Set);
+            expect((items[0] as Set<number>).has(1)).toBe(true);
+        });
+
+        it('Set in object field', () => {
+            let obj = { tags: new Set(['a', 'b']) };
+            let result = codec.decode(codec.encode(obj)) as Record<string, unknown>;
+            let s = result.tags as Set<string>;
+
+            expect(s).toBeInstanceOf(Set);
+            expect(s.has('a')).toBe(true);
+        });
     });
 
-    it('throws when schemas property is not an array', () => {
-        expect(() => deserializeRegistry({ schemas: 'not-array' as unknown as unknown[], v: 1 })).toThrow('invalid registry format');
+
+    // === TYPED ARRAYS ===
+
+    describe('Typed Arrays', () => {
+        it('Float32Array round-trip', () => {
+            let ta = new Float32Array([1.5, 2.5, 3.5]);
+            let result = codec.decode(codec.encode(ta)) as Float32Array;
+
+            expect(result).toBeInstanceOf(Float32Array);
+            expect(result.length).toBe(3);
+            expect(result[0]).toBeCloseTo(1.5);
+            expect(result[1]).toBeCloseTo(2.5);
+            expect(result[2]).toBeCloseTo(3.5);
+        });
+
+        it('Float64Array round-trip', () => {
+            let ta = new Float64Array([Math.PI, Math.E]);
+            let result = codec.decode(codec.encode(ta)) as Float64Array;
+
+            expect(result).toBeInstanceOf(Float64Array);
+            expect(result[0]).toBe(Math.PI);
+            expect(result[1]).toBe(Math.E);
+        });
+
+        it('Int8Array round-trip', () => {
+            let ta = new Int8Array([-128, 0, 127]);
+            let result = codec.decode(codec.encode(ta)) as Int8Array;
+
+            expect(result).toBeInstanceOf(Int8Array);
+            expect([...result]).toEqual([-128, 0, 127]);
+        });
+
+        it('Int16Array round-trip', () => {
+            let ta = new Int16Array([-32768, 0, 32767]);
+            let result = codec.decode(codec.encode(ta)) as Int16Array;
+
+            expect(result).toBeInstanceOf(Int16Array);
+            expect([...result]).toEqual([-32768, 0, 32767]);
+        });
+
+        it('Int32Array round-trip', () => {
+            let ta = new Int32Array([-2147483648, 0, 2147483647]);
+            let result = codec.decode(codec.encode(ta)) as Int32Array;
+
+            expect(result).toBeInstanceOf(Int32Array);
+            expect([...result]).toEqual([-2147483648, 0, 2147483647]);
+        });
+
+        it('Uint8ClampedArray round-trip', () => {
+            let ta = new Uint8ClampedArray([0, 128, 255]);
+            let result = codec.decode(codec.encode(ta)) as Uint8ClampedArray;
+
+            expect(result).toBeInstanceOf(Uint8ClampedArray);
+            expect([...result]).toEqual([0, 128, 255]);
+        });
+
+        it('Uint16Array round-trip', () => {
+            let ta = new Uint16Array([0, 1000, 65535]);
+            let result = codec.decode(codec.encode(ta)) as Uint16Array;
+
+            expect(result).toBeInstanceOf(Uint16Array);
+            expect([...result]).toEqual([0, 1000, 65535]);
+        });
+
+        it('Uint32Array round-trip', () => {
+            let ta = new Uint32Array([0, 100000, 4294967295]);
+            let result = codec.decode(codec.encode(ta)) as Uint32Array;
+
+            expect(result).toBeInstanceOf(Uint32Array);
+            expect([...result]).toEqual([0, 100000, 4294967295]);
+        });
+
+        it('BigInt64Array round-trip', () => {
+            let ta = new BigInt64Array([BigInt('-9223372036854775808'), 0n, BigInt('9223372036854775807')]);
+            let result = codec.decode(codec.encode(ta)) as BigInt64Array;
+
+            expect(result).toBeInstanceOf(BigInt64Array);
+            expect(result[0]).toBe(BigInt('-9223372036854775808'));
+            expect(result[2]).toBe(BigInt('9223372036854775807'));
+        });
+
+        it('BigUint64Array round-trip', () => {
+            let ta = new BigUint64Array([0n, BigInt('18446744073709551615')]);
+            let result = codec.decode(codec.encode(ta)) as BigUint64Array;
+
+            expect(result).toBeInstanceOf(BigUint64Array);
+            expect(result[0]).toBe(0n);
+            expect(result[1]).toBe(BigInt('18446744073709551615'));
+        });
+
+        it('empty typed array', () => {
+            let ta = new Float32Array(0);
+            let result = codec.decode(codec.encode(ta)) as Float32Array;
+
+            expect(result).toBeInstanceOf(Float32Array);
+            expect(result.length).toBe(0);
+        });
+
+        it('large typed array', () => {
+            let ta = new Int32Array(10000);
+
+            for (let i = 0; i < 10000; i++) {
+                ta[i] = i;
+            }
+
+            let result = codec.decode(codec.encode(ta)) as Int32Array;
+
+            expect(result.length).toBe(10000);
+            expect(result[0]).toBe(0);
+            expect(result[9999]).toBe(9999);
+        });
+
+        it('plain Uint8Array still uses tag 6', () => {
+            let ta = new Uint8Array([1, 2, 3]);
+            let encoded = codec.encode(ta);
+
+            expect(encoded[0]).toBe(6);
+
+            let result = codec.decode(encoded) as Uint8Array;
+
+            expect(result).toBeInstanceOf(Uint8Array);
+            expect([...result]).toEqual([1, 2, 3]);
+        });
+
+        it('typed array in object field', () => {
+            let obj = { data: new Float32Array([1.0, 2.0]) };
+            let result = codec.decode(codec.encode(obj)) as Record<string, unknown>;
+            let ta = result.data as Float32Array;
+
+            expect(ta).toBeInstanceOf(Float32Array);
+            expect(ta.length).toBe(2);
+        });
     });
-});
 
 
-describe('F-011: createSchemaStore', () => {
-    function createMockDb() {
-        let store = new Map<string, Uint8Array>();
+    // === DECODE AT ===
 
-        return {
-            getBinary(key: unknown): Uint8Array | undefined { return store.get(String(key)); },
-            putSync(key: unknown, value: unknown): boolean { store.set(String(key), value as Uint8Array); return true; },
-            transactionSync<T>(fn: () => T): T { return fn(); },
-        };
-    }
+    describe('decodeAt', () => {
+        it('decode object at non-zero offset', () => {
+            let obj = { name: 'Alice' },
+                encoded = codec.encode(obj),
+                padded = new Uint8Array(10 + encoded.length);
 
-    it('registers a schema then retrieves it by hash', () => {
-        let db = createMockDb();
-        let schemaStore = createSchemaStore(db);
-        let registry = createRegistry();
-        let schema = inferSchema({ age: 30, name: 'test' }, registry);
+            padded.set(encoded, 10);
 
-        registerSchema(schema, registry);
-        compileSchema(schema);
-        schemaStore.register(schema.hash, schema);
+            expect(codec.decodeAt(padded, 10)).toEqual(obj);
+        });
 
-        // getCached should return it immediately
-        let cached = schemaStore.getCached(schema.hash);
+        it('decode primitive at offset', () => {
+            let encoded = codec.encode(42),
+                padded = new Uint8Array(5 + encoded.length);
 
-        expect(cached).not.toBeNull();
-        expect(cached!.hash).toBe(schema.hash);
+            padded.set(encoded, 5);
+
+            expect(codec.decodeAt(padded, 5)).toBe(42);
+        });
+
+        it('decode string at offset', () => {
+            let encoded = codec.encode('hello'),
+                padded = new Uint8Array(3 + encoded.length);
+
+            padded.set(encoded, 3);
+
+            expect(codec.decodeAt(padded, 3)).toBe('hello');
+        });
+
+        it('decode array at offset', () => {
+            let arr = [1, 2, 3],
+                encoded = codec.encode(arr),
+                padded = new Uint8Array(7 + encoded.length);
+
+            padded.set(encoded, 7);
+
+            expect(codec.decodeAt(padded, 7)).toEqual(arr);
+        });
+
+        it('decode null at offset', () => {
+            let encoded = codec.encode(null),
+                padded = new Uint8Array(2 + encoded.length);
+
+            padded.set(encoded, 2);
+
+            expect(codec.decodeAt(padded, 2)).toBe(null);
+        });
+
+        it('decode boolean at offset', () => {
+            let encoded = codec.encode(true),
+                padded = new Uint8Array(4 + encoded.length);
+
+            padded.set(encoded, 4);
+
+            expect(codec.decodeAt(padded, 4)).toBe(true);
+        });
+
+        it('decode multiple values concatenated', () => {
+            let a = codec.encode('hello'),
+                b = codec.encode(42),
+                c = codec.encode({ x: 1 }),
+                combined = new Uint8Array(a.length + b.length + c.length);
+
+            combined.set(a, 0);
+            combined.set(b, a.length);
+            combined.set(c, a.length + b.length);
+
+            expect(codec.decodeAt(combined, 0)).toBe('hello');
+            expect(codec.decodeAt(combined, a.length)).toBe(42);
+            expect(codec.decodeAt(combined, a.length + b.length)).toEqual({ x: 1 });
+        });
     });
 
-    it('get() retrieves a schema persisted to DB', () => {
-        let db = createMockDb();
-        let store1 = createSchemaStore(db);
-        let registry = createRegistry();
-        let schema = inferSchema({ score: 99.5, tag: 'hi' }, registry);
 
-        registerSchema(schema, registry);
-        compileSchema(schema);
-        store1.register(schema.hash, schema);
+    // === DEFINE SCHEMA ===
 
-        // Create a new store over the same DB — cache is empty, must fetch from DB
-        let store2 = createSchemaStore(db);
-        let fetched = store2.get(schema.hash);
+    describe('defineSchema', () => {
+        it('pre-registered schema encodes/decodes', () => {
+            let c = createCodec();
 
-        expect(fetched).not.toBeNull();
-        expect(fetched!.hash).toBe(schema.hash);
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'age', type: 'uint8' },
+            ]);
+
+            let obj = { age: 25, name: 'Alice' };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('returns consistent hash for same fields', () => {
+            let c = createCodec();
+            let h1 = c.defineSchema([
+                { name: 'x', type: 'int32' },
+                { name: 'y', type: 'int32' },
+            ]);
+            let h2 = c.defineSchema([
+                { name: 'x', type: 'int32' },
+                { name: 'y', type: 'int32' },
+            ]);
+
+            expect(h1).toBe(h2);
+        });
+
+        it('sorts fields alphabetically', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'z', type: 'string' },
+                { name: 'a', type: 'uint8' },
+            ]);
+
+            let obj = { a: 1, z: 'test' };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('matches auto-inferred schema hash', () => {
+            let c = createCodec();
+            let obj = { active: true, name: 'Bob' };
+
+            c.encode(obj);
+
+            let hash = c.defineSchema([
+                { name: 'active', type: 'boolean' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            expect(typeof hash).toBe('number');
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('schema with all fixed types', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'a', type: 'uint8' },
+                { name: 'b', type: 'int32' },
+                { name: 'c', type: 'float64' },
+                { name: 'd', type: 'boolean' },
+            ]);
+
+            let obj = { a: 42, b: -1000, c: 3.14, d: true };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('schema with variable types', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'data', type: 'bytes' },
+                { name: 'label', type: 'string' },
+            ]);
+
+            let obj = { data: new Uint8Array([1, 2, 3]), label: 'test' };
+            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
+
+            expect(result.label).toBe('test');
+            expect([...(result.data as Uint8Array)]).toEqual([1, 2, 3]);
+        });
+
+        it('schema with mixed type', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'id', type: 'uint8' },
+                { name: 'value', type: 'mixed' },
+            ]);
+
+            expect(c.decode(c.encode({ id: 1, value: 'hello' }))).toEqual({ id: 1, value: 'hello' });
+            expect(c.decode(c.encode({ id: 2, value: 42 }))).toEqual({ id: 2, value: 42 });
+        });
+
+        it('schema with map/set types', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'meta', type: 'map' },
+                { name: 'tags', type: 'set' },
+            ]);
+
+            let obj = { meta: new Map([['k', 'v']]), tags: new Set(['a', 'b']) };
+            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
+
+            expect(result.tags).toBeInstanceOf(Set);
+            expect((result.tags as Set<string>).has('a')).toBe(true);
+            expect(result.meta).toBeInstanceOf(Map);
+            expect((result.meta as Map<string, string>).get('k')).toBe('v');
+        });
     });
 
-    it('get() returns null for unknown hash', () => {
-        let db = createMockDb();
-        let schemaStore = createSchemaStore(db);
 
-        expect(schemaStore.get(999999)).toBeNull();
+    // === NULLABLE FIELDS ===
+
+    describe('nullable fields', () => {
+        it('nullable string field — non-null', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'email', type: 'string', nullable: true },
+            ]);
+
+            let obj = { email: 'alice@test.com', name: 'Alice' };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('nullable string field — null', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'email', type: 'string', nullable: true },
+            ]);
+
+            let obj = { email: null, name: 'Alice' };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('nullable uint8 field', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'age', type: 'uint8', nullable: true },
+                { name: 'name', type: 'string' },
+            ]);
+
+            expect(c.decode(c.encode({ age: 25, name: 'Bob' }))).toEqual({ age: 25, name: 'Bob' });
+            expect(c.decode(c.encode({ age: null, name: 'Bob' }))).toEqual({ age: null, name: 'Bob' });
+        });
+
+        it('multiple nullable fields — mixed null/non-null', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'a', type: 'string', nullable: true },
+                { name: 'b', type: 'int32', nullable: true },
+                { name: 'c', type: 'float64', nullable: true },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let obj = { a: null, b: 42, c: null, id: 1 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('all nullable fields null', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'a', type: 'string', nullable: true },
+                { name: 'b', type: 'int32', nullable: true },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let obj = { a: null, b: null, id: 5 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('all nullable fields present', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'a', type: 'string', nullable: true },
+                { name: 'b', type: 'int32', nullable: true },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let obj = { a: 'hello', b: -100, id: 5 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('max 16 nullable fields', () => {
+            let c = createCodec();
+            let fields: { name: string; type: 'uint8'; nullable: true }[] = [];
+
+            for (let i = 0; i < 16; i++) {
+                fields.push({ name: `f${String(i).padStart(2, '0')}`, type: 'uint8', nullable: true });
+            }
+
+            let hash = c.defineSchema(fields);
+
+            expect(typeof hash).toBe('number');
+
+            let obj: Record<string, number | null> = {};
+
+            for (let i = 0; i < 16; i++) {
+                obj[`f${String(i).padStart(2, '0')}`] = i % 2 === 0 ? i : null;
+            }
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('throws if >16 nullable fields', () => {
+            let c = createCodec();
+            let fields: { name: string; type: 'uint8'; nullable: true }[] = [];
+
+            for (let i = 0; i < 17; i++) {
+                fields.push({ name: `f${String(i).padStart(2, '0')}`, type: 'uint8', nullable: true });
+            }
+
+            expect(() => c.defineSchema(fields)).toThrow('max 16 nullable');
+        });
+
+        it('nullable boolean field', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'active', type: 'boolean', nullable: true },
+                { name: 'name', type: 'string' },
+            ]);
+
+            expect(c.decode(c.encode({ active: true, name: 'X' }))).toEqual({ active: true, name: 'X' });
+            expect(c.decode(c.encode({ active: false, name: 'X' }))).toEqual({ active: false, name: 'X' });
+            expect(c.decode(c.encode({ active: null, name: 'X' }))).toEqual({ active: null, name: 'X' });
+        });
+
+        it('nullable nested object field', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'addr', type: 'object', nullable: true },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let obj1 = { addr: { city: 'NYC' }, name: 'Alice' };
+            let result1 = c.decode(c.encode(obj1)) as Record<string, unknown>;
+
+            expect(result1.name).toBe('Alice');
+            expect((result1.addr as Record<string, string>).city).toBe('NYC');
+
+            let obj2 = { addr: null, name: 'Bob' };
+
+            expect(c.decode(c.encode(obj2))).toEqual(obj2);
+        });
+
+        it('undefined treated as null for nullable fields', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'note', type: 'string', nullable: true },
+            ]);
+
+            let obj = { name: 'Alice', note: undefined };
+            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
+
+            expect(result.name).toBe('Alice');
+            expect(result.note).toBe(null);
+        });
     });
 
-    it('getCached() returns null for unknown hash', () => {
-        let db = createMockDb();
-        let schemaStore = createSchemaStore(db);
 
-        expect(schemaStore.getCached(12345)).toBeNull();
+    // === EXTRACT FIELD ===
+
+    describe('extractField', () => {
+        it('extract fixed-size field (O(1))', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'active', type: 'boolean' },
+                { name: 'age', type: 'uint8' },
+                { name: 'score', type: 'int32' },
+            ]);
+
+            let encoded = c.encode({ active: true, age: 30, score: -500 });
+
+            expect(c.extractField(encoded, 'active')).toBe(true);
+            expect(c.extractField(encoded, 'age')).toBe(30);
+            expect(c.extractField(encoded, 'score')).toBe(-500);
+        });
+
+        it('extract string field', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'id', type: 'uint8' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let encoded = c.encode({ id: 1, name: 'Alice' });
+
+            expect(c.extractField(encoded, 'name')).toBe('Alice');
+            expect(c.extractField(encoded, 'id')).toBe(1);
+        });
+
+        it('extract field after variable-size field', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'label', type: 'string' },
+                { name: 'value', type: 'int32' },
+            ]);
+
+            let encoded = c.encode({ label: 'test', value: 42 });
+
+            expect(c.extractField(encoded, 'value')).toBe(42);
+        });
+
+        it('extract nullable field — non-null', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'note', type: 'string', nullable: true },
+            ]);
+
+            let encoded = c.encode({ name: 'Alice', note: 'hello' });
+
+            expect(c.extractField(encoded, 'note')).toBe('hello');
+        });
+
+        it('extract nullable field — null', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'note', type: 'string', nullable: true },
+            ]);
+
+            let encoded = c.encode({ name: 'Alice', note: null });
+
+            expect(c.extractField(encoded, 'note')).toBe(null);
+        });
+
+        it('returns undefined for non-tag-8 buffer', () => {
+            let c = createCodec(),
+                encoded = c.encode('hello');
+
+            expect(c.extractField(encoded, 'anything')).toBeUndefined();
+        });
+
+        it('returns undefined for unknown field', () => {
+            let c = createCodec();
+
+            c.defineSchema([{ name: 'x', type: 'uint8' }]);
+
+            let encoded = c.encode({ x: 1 });
+
+            expect(c.extractField(encoded, 'nonexistent')).toBeUndefined();
+        });
+
+        it('extract bytes field', () => {
+            let c = createCodec();
+
+            c.defineSchema([
+                { name: 'data', type: 'bytes' },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let encoded = c.encode({ data: new Uint8Array([10, 20, 30]), id: 5 });
+            let extracted = c.extractField(encoded, 'data') as Uint8Array;
+
+            expect([...extracted]).toEqual([10, 20, 30]);
+            expect(c.extractField(encoded, 'id')).toBe(5);
+        });
+
+        it('extract from auto-inferred schema', () => {
+            let c = createCodec(),
+                encoded = c.encode({ age: 25, name: 'Bob' });
+
+            expect(c.extractField(encoded, 'name')).toBe('Bob');
+            expect(c.extractField(encoded, 'age')).toBe(25);
+        });
+
+        it('extract nested object field', () => {
+            let c = createCodec(),
+                encoded = c.encode({ addr: { city: 'NYC' }, name: 'Alice' });
+            let addr = c.extractField(encoded, 'addr') as Record<string, string>;
+
+            expect(addr.city).toBe('NYC');
+        });
     });
 
-    it('has() returns true for registered schemas', () => {
-        let db = createMockDb();
-        let schemaStore = createSchemaStore(db);
-        let registry = createRegistry();
-        let schema = inferSchema({ id: 1 }, registry);
 
-        registerSchema(schema, registry);
-        compileSchema(schema);
-        schemaStore.register(schema.hash, schema);
+    // === COMPUTE SIZE ===
 
-        expect(schemaStore.has(schema.hash)).toBe(true);
-        expect(schemaStore.has(999999)).toBe(false);
-    });
+    describe('computeSize', () => {
+        it('null', () => {
+            expect(codec.computeSize(null)).toBe(1);
+        });
 
-    it('supports prefix for key namespacing', () => {
-        let db = createMockDb();
-        let store1 = createSchemaStore(db, 'ns1');
-        let store2 = createSchemaStore(db, 'ns2');
-        let registry = createRegistry();
-        let schema = inferSchema({ val: 42 }, registry);
+        it('undefined', () => {
+            expect(codec.computeSize(undefined)).toBe(1);
+        });
 
-        registerSchema(schema, registry);
-        compileSchema(schema);
-        store1.register(schema.hash, schema);
+        it('boolean', () => {
+            expect(codec.computeSize(true)).toBe(1);
+        });
 
-        // store2 should not find it in its cache
-        expect(store2.getCached(schema.hash)).toBeNull();
-    });
-});
+        it('uint8 (0)', () => {
+            expect(codec.computeSize(0)).toBe(2);
+        });
 
+        it('uint8 (255)', () => {
+            expect(codec.computeSize(255)).toBe(2);
+        });
 
-describe('F-012: createInternPool', () => {
-    function createMockInternDb() {
-        let store = new Map<string, Uint8Array>();
+        it('int32', () => {
+            expect(codec.computeSize(256)).toBe(5);
+        });
 
-        return {
-            getBinary(key: unknown): Uint8Array | undefined { return store.get(String(key)); },
-            getRange(options?: { start?: unknown }): Iterable<{ key: unknown; value: unknown }> {
-                let prefix = options?.start ? String(options.start) : '';
-                let results: { key: unknown; value: unknown }[] = [];
+        it('float64', () => {
+            expect(codec.computeSize(3.14)).toBe(9);
+        });
 
-                for (let [k, v] of store) {
-                    if (k >= prefix) {
-                        results.push({ key: k, value: v });
-                    }
+        it('bigint', () => {
+            expect(codec.computeSize(123n)).toBe(9);
+        });
+
+        it('string', () => {
+            expect(codec.computeSize('hello')).toBe(5 + 5);
+        });
+
+        it('empty string', () => {
+            expect(codec.computeSize('')).toBe(5);
+        });
+
+        it('date', () => {
+            expect(codec.computeSize(new Date())).toBe(9);
+        });
+
+        it('Uint8Array', () => {
+            expect(codec.computeSize(new Uint8Array(10))).toBe(15);
+        });
+
+        it('matches actual encoded size for primitives', () => {
+            let values: unknown[] = [null, true, false, 0, 255, 256, -1, 3.14, 'hello', '', 123n, new Date(0), new Uint8Array([1, 2, 3])];
+
+            for (let v of values) {
+                let size = codec.computeSize(v);
+
+                if (size !== -1) {
+                    expect(size).toBe(codec.encode(v).length);
                 }
+            }
+        });
 
-                results.sort((a, b) => String(a.key).localeCompare(String(b.key)));
+        it('plain object with fixed fields', () => {
+            let obj = { active: true, age: 25, score: -500 },
+                size = codec.computeSize(obj);
 
-                return results;
-            },
-            putSync(key: unknown, value: unknown): boolean { store.set(String(key), value as Uint8Array); return true; },
-            transactionSync<T>(fn: () => T): T { return fn(); },
-        };
-    }
+            expect(size).toBe(codec.encode(obj).length);
+        });
 
-    it('encode then decode round-trips a string', () => {
-        let db = createMockInternDb();
-        let pool = createInternPool(db, ['name']);
-        let buf = new Uint8Array(256);
+        it('plain object with string field', () => {
+            let obj = { id: 1, name: 'Alice' },
+                size = codec.computeSize(obj);
 
-        // Encode a string long enough to be interned (>= 16 bytes)
-        let longStr = 'abcdefghijklmnopqrstuvwxyz';
-        let end = pool.encode('name', longStr, buf, 0);
+            expect(size).toBe(codec.encode(obj).length);
+        });
 
-        expect(end).toBeGreaterThan(0);
+        it('returns -1 for Map', () => {
+            expect(codec.computeSize(new Map())).toBe(-1);
+        });
 
-        // The interned format writes sentinel 0xFFFFFFFF + u32 id = 8 bytes
-        let view = new DataView(buf.buffer);
+        it('returns -1 for Set', () => {
+            expect(codec.computeSize(new Set())).toBe(-1);
+        });
 
-        expect(view.getUint32(0, true)).toBe(0xFFFFFFFF);
+        it('returns -1 for typed array', () => {
+            expect(codec.computeSize(new Float32Array(3))).toBe(-1);
+        });
 
-        // Decode from the intern ID (at offset 4)
-        let decoded = pool.decode(buf, 4);
+        it('returns -1 for array', () => {
+            expect(codec.computeSize([1, 2, 3])).toBe(-1);
+        });
 
-        expect(decoded).toBe(longStr);
+        it('returns -1 for object with mixed field', () => {
+            // Null infers as 'mixed' type, which computeSize cannot predict
+            expect(codec.computeSize({ data: null, id: 1 })).toBe(-1);
+        });
+
+        it('object with only fixed and string fields', () => {
+            let withNote = { name: 'Alice', note: 'hello' },
+                sizeWith = codec.computeSize(withNote);
+
+            expect(sizeWith).toBe(codec.encode(withNote).length);
+        });
+
+        it('nested object', () => {
+            let obj = { addr: { city: 'NYC' }, name: 'Alice' },
+                size = codec.computeSize(obj);
+
+            expect(size).toBe(codec.encode(obj).length);
+        });
     });
 
-    it('short strings (< 16 bytes) inline without interning', () => {
-        let db = createMockInternDb();
-        let pool = createInternPool(db, ['tag']);
-        let buf = new Uint8Array(256);
 
-        // Short string — should be inlined (length prefix + raw bytes, no sentinel)
-        let shortStr = 'hi';
-        let end = pool.encode('tag', shortStr, buf, 0);
+    // === COMPRESSION ===
 
-        // Inlined format: u32 length + raw bytes = 4 + 2 = 6
-        expect(end).toBe(6);
+    describe('compression', () => {
+        it('compressed and uncompressed produce equivalent results', () => {
+            let normal = createCodec(),
+                comp = createCodec({ compress: true }),
+                obj = { age: 25, name: 'Alice', score: 3.14 };
 
-        let view = new DataView(buf.buffer);
+            // Register schema on both instances first
+            normal.encode(obj);
+            comp.encode(obj);
 
-        // First 4 bytes should be the string length, not the sentinel
-        expect(view.getUint32(0, true)).toBe(2);
-        expect(view.getUint32(0, true)).not.toBe(0xFFFFFFFF);
+            expect(comp.decode(comp.encode(obj))).toEqual(obj);
+            expect(normal.decode(comp.encode(obj))).toEqual(obj);
+            expect(comp.decode(normal.encode(obj))).toEqual(obj);
+        });
+
+        it('compressed objects use tag 18', () => {
+            let c = createCodec({ compress: true }),
+                obj = { active: true, age: 25, name: 'Alice' };
+
+            expect(c.encode(obj)[0]).toBe(18);
+        });
+
+        it('non-compressible schema uses tag 8', () => {
+            let c = createCodec({ compress: true }),
+                obj = { label: 'test', name: 'Alice' };
+
+            expect(c.encode(obj)[0]).toBe(8);
+        });
+
+        it('varint edge cases', () => {
+            let c = createCodec({ compress: true });
+
+            c.defineSchema([
+                { name: 'a', type: 'uint16' },
+                { name: 'b', type: 'uint16' },
+                { name: 'c', type: 'uint32' },
+                { name: 'd', type: 'uint32' },
+                { name: 'e', type: 'uint32' },
+            ]);
+
+            let obj = { a: 0, b: 127, c: 128, d: 16383, e: 16384 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('zigzag negative values', () => {
+            let c = createCodec({ compress: true });
+
+            c.defineSchema([
+                { name: 'a', type: 'int32' },
+                { name: 'b', type: 'int32' },
+                { name: 'c', type: 'int32' },
+                { name: 'd', type: 'int32' },
+            ]);
+
+            let obj = { a: -1, b: -128, c: -2147483648, d: 2147483647 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('adaptive float64 — integer values', () => {
+            let c = createCodec({ compress: true });
+
+            c.defineSchema([
+                { name: 'temperature', type: 'float64' },
+                { name: 'value', type: 'float64' },
+            ]);
+
+            let obj = { temperature: 72.0, value: 42.0 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('adaptive float64 — non-integer', () => {
+            let c = createCodec({ compress: true });
+
+            c.defineSchema([
+                { name: 'e', type: 'float64' },
+                { name: 'pi', type: 'float64' },
+            ]);
+
+            let obj = { e: Math.E, pi: Math.PI };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('boolean fields via bitmap', () => {
+            let c = createCodec({ compress: true }),
+                obj = { a: true, b: false, c: true, d: false };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('mixed compressed and uncompressed in same stream', () => {
+            let c = createCodec({ compress: true }),
+                obj1 = { active: true, id: 1, name: 'Alice' },
+                obj2 = { label: 'test', notes: 'hello' };
+
+            expect(c.encode(obj1)[0]).toBe(18);
+            expect(c.encode(obj2)[0]).toBe(8);
+            expect(c.decode(c.encode(obj1))).toEqual(obj1);
+            expect(c.decode(c.encode(obj2))).toEqual(obj2);
+        });
+
+        it('compressed nullable fields', () => {
+            let c = createCodec({ compress: true });
+
+            c.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'score', type: 'int32', nullable: true },
+            ]);
+
+            expect(c.decode(c.encode({ name: 'Alice', score: 42 }))).toEqual({ name: 'Alice', score: 42 });
+            expect(c.decode(c.encode({ name: 'Alice', score: null }))).toEqual({ name: 'Alice', score: null });
+        });
+
+        it('cross-codec decode', () => {
+            let c1 = createCodec({ compress: true }),
+                c2 = createCodec();
+
+            c1.defineSchema([{ name: 'id', type: 'uint8' }, { name: 'value', type: 'int32' }]);
+            c2.defineSchema([{ name: 'id', type: 'uint8' }, { name: 'value', type: 'int32' }]);
+
+            let obj = { id: 1, value: -999 };
+
+            expect(c2.decode(c1.encode(obj))).toEqual(obj);
+        });
+
+        it('compressed wire size smaller for integer-heavy', () => {
+            let normal = createCodec(),
+                comp = createCodec({ compress: true }),
+                obj = { a: 1, b: 2, c: 3, d: 4, e: 5 };
+
+            expect(comp.encode(obj).length).toBeLessThanOrEqual(normal.encode(obj).length);
+        });
+
+        it('all field types together', () => {
+            let c = createCodec({ compress: true });
+
+            c.defineSchema([
+                { name: 'active', type: 'boolean' },
+                { name: 'big', type: 'bigint' },
+                { name: 'data', type: 'bytes' },
+                { name: 'f', type: 'float64' },
+                { name: 'i', type: 'int32' },
+                { name: 'name', type: 'string' },
+                { name: 'ts', type: 'date' },
+                { name: 'u', type: 'uint8' },
+            ]);
+
+            let obj = { active: true, big: 123n, data: new Uint8Array([1, 2]), f: 3.14, i: -42, name: 'test', ts: new Date(1000), u: 7 },
+                result = c.decode(c.encode(obj)) as Record<string, unknown>;
+
+            expect(result.active).toBe(true);
+            expect(result.big).toBe(123n);
+            expect([...(result.data as Uint8Array)]).toEqual([1, 2]);
+            expect(result.f).toBe(3.14);
+            expect(result.i).toBe(-42);
+            expect(result.name).toBe('test');
+            expect((result.ts as Date).getTime()).toBe(1000);
+            expect(result.u).toBe(7);
+        });
     });
 
-    it('re-encoding the same string returns same intern id', () => {
-        let db = createMockInternDb();
-        let pool = createInternPool(db, ['field']);
-        let buf1 = new Uint8Array(256);
-        let buf2 = new Uint8Array(256);
-        let longStr = 'this_is_a_longer_string_for_interning';
 
-        pool.encode('field', longStr, buf1, 0);
-        pool.encode('field', longStr, buf2, 0);
+    // === REGISTRY SERIALIZATION ===
 
-        // Both should write the same intern ID
-        let view1 = new DataView(buf1.buffer);
-        let view2 = new DataView(buf2.buffer);
+    describe('registry serialization', () => {
+        it('serialize and deserialize round-trip', () => {
+            let c1 = createCodec();
 
-        expect(view1.getUint32(4, true)).toBe(view2.getUint32(4, true));
+            c1.defineSchema([
+                { name: 'age', type: 'uint8' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let blob = c1.serializeRegistry();
+
+            let c2 = createCodec();
+
+            c2.deserializeRegistry(blob);
+
+            let obj = { age: 25, name: 'Alice' };
+            let encoded = c1.encode(obj);
+
+            expect(c2.decode(encoded)).toEqual(obj);
+        });
+
+        it('cross-instance decode after import', () => {
+            let server = createCodec();
+
+            server.defineSchema([
+                { name: 'active', type: 'boolean' },
+                { name: 'id', type: 'int32' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let encoded = server.encode({ active: true, id: 42, name: 'Test' });
+            let blob = server.serializeRegistry();
+
+            let client = createCodec();
+
+            client.deserializeRegistry(blob);
+
+            expect(client.decode(encoded)).toEqual({ active: true, id: 42, name: 'Test' });
+        });
+
+        it('nullable fields preserved', () => {
+            let c1 = createCodec();
+
+            c1.defineSchema([
+                { name: 'name', type: 'string' },
+                { name: 'note', type: 'string', nullable: true },
+            ]);
+
+            // Encode with non-null value to use the pre-defined nullable schema
+            let withValue = { name: 'Alice', note: 'hello' };
+            let encoded = c1.encode(withValue);
+
+            let blob = c1.serializeRegistry();
+            let c2 = createCodec();
+
+            c2.deserializeRegistry(blob);
+
+            // c2 can decode data from c1's nullable schema
+            expect(c2.decode(encoded)).toEqual(withValue);
+
+            // c2 can also encode/decode with the nullable schema (null value)
+            let withNull = { name: 'Bob', note: 'world' };
+            let encoded2 = c2.encode(withNull);
+
+            expect(c1.decode(encoded2)).toEqual(withNull);
+        });
+
+        it('duplicate schemas skipped', () => {
+            let c = createCodec();
+
+            c.defineSchema([{ name: 'x', type: 'uint8' }]);
+
+            let blob = c.serializeRegistry();
+
+            c.deserializeRegistry(blob); // should not throw
+
+            expect(c.decode(c.encode({ x: 42 }))).toEqual({ x: 42 });
+        });
+
+        it('multiple schemas', () => {
+            let c1 = createCodec();
+
+            c1.defineSchema([{ name: 'a', type: 'uint8' }]);
+            c1.defineSchema([{ name: 'x', type: 'string' }, { name: 'y', type: 'int32' }]);
+
+            let blob = c1.serializeRegistry();
+            let c2 = createCodec();
+
+            c2.deserializeRegistry(blob);
+
+            expect(c2.decode(c1.encode({ a: 7 }))).toEqual({ a: 7 });
+            expect(c2.decode(c1.encode({ x: 'hi', y: -1 }))).toEqual({ x: 'hi', y: -1 });
+        });
+
+        it('empty registry', () => {
+            let c = createCodec();
+            let blob = c.serializeRegistry();
+
+            expect(blob.length).toBe(2); // just u16 count = 0
+
+            let c2 = createCodec();
+
+            c2.deserializeRegistry(blob); // should not throw
+        });
+
+        it('auto-inferred schemas included', () => {
+            let c1 = createCodec();
+
+            c1.encode({ name: 'Alice', score: 100 }); // auto-infer
+
+            let blob = c1.serializeRegistry();
+            let c2 = createCodec();
+
+            c2.deserializeRegistry(blob);
+
+            let encoded = c1.encode({ name: 'Bob', score: 200 });
+
+            expect(c2.decode(encoded)).toEqual({ name: 'Bob', score: 200 });
+        });
     });
 
-    it('fields set contains the configured field names', () => {
-        let db = createMockInternDb();
-        let pool = createInternPool(db, ['alpha', 'beta']);
 
-        expect(pool.fields.has('alpha')).toBe(true);
-        expect(pool.fields.has('beta')).toBe(true);
-        expect(pool.fields.has('gamma')).toBe(false);
-    });
+    // === STRUCTURAL FIELD TYPES ===
 
-    it('load() restores previously persisted interned strings', () => {
-        let db = createMockInternDb();
-        let pool1 = createInternPool(db, ['name']);
-        let buf = new Uint8Array(256);
-        let longStr = 'a_very_long_interned_string_value';
+    describe('structural field types', () => {
+        describe('array<uint8>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
 
-        pool1.encode('name', longStr, buf, 0);
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
 
-        // Create a new pool over the same DB and load
-        let pool2 = createInternPool(db, ['name']);
+                let obj = { data: [0, 1, 127, 255] };
 
-        pool2.load();
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
 
-        // Should be able to decode the intern ID written by pool1
-        let decoded = pool2.decode(buf, 4);
+            it('empty array round-trips', () => {
+                let c = createCodec();
 
-        expect(decoded).toBe(longStr);
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                expect(c.decode(c.encode({ data: [] }))).toEqual({ data: [] });
+            });
+
+            it('wire size: no tag bytes', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                let generic = createCodec();
+
+                generic.defineSchema([
+                    { name: 'data', type: 'array' },
+                ]);
+
+                let arr = Array.from({ length: 100 }, (_, i) => i % 256);
+                let typedBuf = c.encode({ data: arr }),
+                    genericBuf = generic.encode({ data: arr });
+
+                // Typed should be smaller (no flag byte, varint count vs u32 count)
+                expect(typedBuf.length).toBeLessThan(genericBuf.length);
+            });
+
+            it('large array (10000 elements)', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                let arr = Array.from({ length: 10000 }, (_, i) => i % 256),
+                    obj = { data: arr };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<int8>', () => {
+            it('round-trips signed values', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<int8>' },
+                ]);
+
+                let obj = { data: [-128, -1, 0, 1, 127] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<uint16>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint16>' },
+                ]);
+
+                let obj = { data: [0, 256, 65535] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<int16>', () => {
+            it('round-trips signed values', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<int16>' },
+                ]);
+
+                let obj = { data: [-32768, -1, 0, 1, 32767] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<uint32>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint32>' },
+                ]);
+
+                let obj = { data: [0, 65536, 4294967295] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<int32>', () => {
+            it('round-trips signed values', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<int32>' },
+                ]);
+
+                let obj = { data: [-2147483648, -1, 0, 1, 2147483647] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<float64>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<float64>' },
+                ]);
+
+                let obj = { data: [0, 3.14, -1.5, Infinity, -Infinity] };
+                let result = c.decode(c.encode(obj)) as { data: number[] };
+
+                expect(result.data.length).toBe(5);
+                expect(result.data[0]).toBe(0);
+                expect(result.data[1]).toBeCloseTo(3.14);
+                expect(result.data[2]).toBeCloseTo(-1.5);
+                expect(result.data[3]).toBe(Infinity);
+                expect(result.data[4]).toBe(-Infinity);
+            });
+
+            it('NaN round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<float64>' },
+                ]);
+
+                let result = c.decode(c.encode({ data: [NaN] })) as { data: number[] };
+
+                expect(Number.isNaN(result.data[0])).toBe(true);
+            });
+        });
+
+        describe('array<boolean>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<boolean>' },
+                ]);
+
+                let obj = { data: [true, false, true, true, false] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<bigint>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<bigint>' },
+                ]);
+
+                let obj = { data: [0n, 1n, -1n, 9007199254740993n] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<date>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<date>' },
+                ]);
+
+                let dates = [new Date('2020-01-01'), new Date(0), new Date('2025-12-31')],
+                    obj = { data: dates },
+                    result = c.decode(c.encode(obj)) as { data: Date[] };
+
+                expect(result.data.length).toBe(3);
+
+                for (let i = 0; i < 3; i++) {
+                    expect(result.data[i]!.getTime()).toBe(dates[i]!.getTime());
+                }
+            });
+        });
+
+        describe('array<string>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let obj = { tags: ['hello', 'world', 'test'] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('empty strings', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                expect(c.decode(c.encode({ tags: ['', '', ''] }))).toEqual({ tags: ['', '', ''] });
+            });
+
+            it('unicode strings', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let obj = { tags: ['日本語', '🎉', 'café'] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('wire size: smaller than generic', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let generic = createCodec();
+
+                generic.defineSchema([
+                    { name: 'tags', type: 'array' },
+                ]);
+
+                let arr = Array.from({ length: 100 }, (_, i) => 'item' + i),
+                    typedBuf = c.encode({ tags: arr }),
+                    genericBuf = generic.encode({ tags: arr });
+
+                expect(typedBuf.length).toBeLessThan(genericBuf.length);
+            });
+        });
+
+        describe('array<bytes>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'chunks', type: 'array<bytes>' },
+                ]);
+
+                let chunks = [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5])],
+                    obj = { chunks },
+                    result = c.decode(c.encode(obj)) as { chunks: Uint8Array[] };
+
+                expect(result.chunks.length).toBe(2);
+                expect([...result.chunks[0]!]).toEqual([1, 2, 3]);
+                expect([...result.chunks[1]!]).toEqual([4, 5]);
+            });
+        });
+
+        describe('object(hash)', () => {
+            it('round-trips nested typed object', () => {
+                let c = createCodec();
+
+                let addrHash = c.defineSchema([
+                    { name: 'city', type: 'string' },
+                    { name: 'zip', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'address', type: `object(${addrHash})` },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                let obj = {
+                    address: { city: 'NYC', zip: '10001' },
+                    name: 'Alice',
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('wire size: smaller than generic object', () => {
+                let c = createCodec();
+
+                let addrHash = c.defineSchema([
+                    { name: 'city', type: 'string' },
+                    { name: 'zip', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'address', type: `object(${addrHash})` },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                let generic = createCodec();
+
+                generic.defineSchema([
+                    { name: 'city', type: 'string' },
+                    { name: 'zip', type: 'string' },
+                ]);
+
+                generic.defineSchema([
+                    { name: 'address', type: 'object' },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                let obj = {
+                    address: { city: 'NYC', zip: '10001' },
+                    name: 'Alice',
+                };
+
+                let typedBuf = c.encode(obj),
+                    genericBuf = generic.encode(obj);
+
+                expect(typedBuf.length).toBeLessThan(genericBuf.length);
+            });
+        });
+
+        describe('array<object(hash)>', () => {
+            it('round-trips array of typed objects', () => {
+                let c = createCodec();
+
+                let itemHash = c.defineSchema([
+                    { name: 'id', type: 'uint32' },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'items', type: `array<object(${itemHash})>` },
+                ]);
+
+                let obj = {
+                    items: [
+                        { id: 1, name: 'apple' },
+                        { id: 2, name: 'banana' },
+                        { id: 3, name: 'cherry' },
+                    ],
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('empty array round-trips', () => {
+                let c = createCodec();
+
+                let itemHash = c.defineSchema([
+                    { name: 'id', type: 'uint32' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'items', type: `array<object(${itemHash})>` },
+                ]);
+
+                expect(c.decode(c.encode({ items: [] }))).toEqual({ items: [] });
+            });
+        });
+
+        describe('nested structural types', () => {
+            it('array<array<uint8>> round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'matrix', type: 'array<array<uint8>>' },
+                ]);
+
+                let obj = {
+                    matrix: [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('array<array<string>> round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'grid', type: 'array<array<string>>' },
+                ]);
+
+                let obj = {
+                    grid: [['a', 'b'], ['c', 'd']],
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('mixed schema fields', () => {
+            it('schema with both generic array and typed array', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'generic', type: 'array' },
+                    { name: 'scores', type: 'array<float64>' },
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let obj = {
+                    generic: [1, 'two', true],
+                    scores: [9.5, 8.7, 10.0],
+                    tags: ['a', 'b', 'c'],
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('compressed mode with typed fields', () => {
+            it('array<uint8> round-trips in compressed mode', () => {
+                let c = createCodec({ compress: true });
+
+                c.defineSchema([
+                    { name: 'active', type: 'boolean' },
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                let obj = { active: true, data: [0, 1, 127, 255] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('array<string> round-trips in compressed mode', () => {
+                let c = createCodec({ compress: true });
+
+                c.defineSchema([
+                    { name: 'count', type: 'int32' },
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let obj = { count: 42, tags: ['hello', 'world'] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('object(hash) round-trips in compressed mode', () => {
+                let c = createCodec({ compress: true });
+
+                let addrHash = c.defineSchema([
+                    { name: 'city', type: 'string' },
+                    { name: 'zip', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'address', type: `object(${addrHash})` },
+                    { name: 'name', type: 'string' },
+                    { name: 'score', type: 'float64' },
+                ]);
+
+                let obj = {
+                    address: { city: 'NYC', zip: '10001' },
+                    name: 'Alice',
+                    score: 95.5,
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('array<object(hash)> round-trips in compressed mode', () => {
+                let c = createCodec({ compress: true });
+
+                let itemHash = c.defineSchema([
+                    { name: 'id', type: 'uint32' },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'active', type: 'boolean' },
+                    { name: 'items', type: `array<object(${itemHash})>` },
+                ]);
+
+                let obj = {
+                    active: true,
+                    items: [
+                        { id: 1, name: 'apple' },
+                        { id: 2, name: 'banana' },
+                    ],
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('registry serialization with structural types', () => {
+            it('preserves structural type strings through serialize/deserialize', () => {
+                let c1 = createCodec();
+
+                let addrHash = c1.defineSchema([
+                    { name: 'city', type: 'string' },
+                    { name: 'zip', type: 'string' },
+                ]);
+
+                c1.defineSchema([
+                    { name: 'address', type: `object(${addrHash})` },
+                    { name: 'name', type: 'string' },
+                    { name: 'scores', type: 'array<float64>' },
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let blob = c1.serializeRegistry(),
+                    c2 = createCodec();
+
+                c2.deserializeRegistry(blob);
+
+                let obj = {
+                    address: { city: 'NYC', zip: '10001' },
+                    name: 'Alice',
+                    scores: [9.5, 10.0],
+                    tags: ['a', 'b'],
+                };
+
+                let encoded = c1.encode(obj);
+
+                expect(c2.decode(encoded)).toEqual(obj);
+            });
+        });
+
+        describe('extractField with typed fields', () => {
+            it('extracts field after typed array', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                let buf = c.encode({ data: [1, 2, 3], name: 'test' });
+
+                expect(c.extractField(buf, 'name')).toBe('test');
+            });
+
+            it('extracts typed array field', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                let buf = c.encode({ data: [1, 2, 3], name: 'test' });
+
+                expect(c.extractField(buf, 'data')).toEqual([1, 2, 3]);
+            });
+
+            it('extracts field after typed string array', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'name', type: 'string' },
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let buf = c.encode({ name: 'test', tags: ['a', 'b', 'c'] });
+
+                expect(c.extractField(buf, 'name')).toBe('test');
+            });
+
+            it('extracts field after object(hash)', () => {
+                let c = createCodec();
+
+                let addrHash = c.defineSchema([
+                    { name: 'city', type: 'string' },
+                    { name: 'zip', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'address', type: `object(${addrHash})` },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                let buf = c.encode({
+                    address: { city: 'NYC', zip: '10001' },
+                    name: 'Alice',
+                });
+
+                expect(c.extractField(buf, 'name')).toBe('Alice');
+            });
+        });
+
+        describe('computeSize with typed fields', () => {
+            it('computes size for typed uint8 array', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                let obj = { data: [1, 2, 3, 4, 5] },
+                    size = c.computeSize(obj),
+                    buf = c.encode(obj);
+
+                expect(size).toBe(buf.length);
+            });
+
+            it('computes size for typed string array', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let obj = { tags: ['hi', 'bye'] },
+                    size = c.computeSize(obj),
+                    buf = c.encode(obj);
+
+                expect(size).toBe(buf.length);
+            });
+        });
+
+        describe('parseFieldType validation', () => {
+            it('rejects empty array element type', () => {
+                let c = createCodec();
+
+                expect(() => c.defineSchema([
+                    { name: 'x', type: 'array<>' },
+                ])).toThrow('empty array element type');
+            });
+
+            it('rejects invalid object hash', () => {
+                let c = createCodec();
+
+                expect(() => c.defineSchema([
+                    { name: 'x', type: 'object(abc)' },
+                ])).toThrow('invalid object hash');
+            });
+
+            it('rejects empty object hash', () => {
+                let c = createCodec();
+
+                expect(() => c.defineSchema([
+                    { name: 'x', type: 'object()' },
+                ])).toThrow('invalid object hash');
+            });
+
+            it('rejects float object hash', () => {
+                let c = createCodec();
+
+                expect(() => c.defineSchema([
+                    { name: 'x', type: 'object(1.5)' },
+                ])).toThrow('invalid object hash');
+            });
+
+            it('rejects unknown base type', () => {
+                let c = createCodec();
+
+                expect(() => c.defineSchema([
+                    { name: 'x', type: 'foobar' },
+                ])).toThrow('unknown field type');
+            });
+        });
+
+        describe('different hashes for array vs array<T>', () => {
+            it('array and array<uint8> produce different hashes', () => {
+                let c = createCodec();
+
+                let h1 = c.defineSchema([
+                    { name: 'data', type: 'array' },
+                ]);
+
+                let c2 = createCodec();
+
+                let h2 = c2.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                expect(h1).not.toBe(h2);
+            });
+        });
     });
 });

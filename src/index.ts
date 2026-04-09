@@ -19,25 +19,7 @@ const validator: Validator = {
 
 
 export { codec, type Codec } from './codec';
-export {
-    buildSchema,
-    compileSchema,
-    createCodec,
-    createInternPool,
-    createRegistry,
-    createSchemaStore,
-    decodeFieldDefs,
-    deserializeRegistry,
-    inferFieldType,
-    inferSchema,
-    lookupSchema,
-    parseFieldType,
-    registerSchema,
-    resolveSchema,
-    serializeFieldType,
-    serializeRegistry,
-    validateFieldTypeString,
-} from './sbc';
+export { createCodec } from './sbc';
 export {
     decodeTypedArray,
     encodeTypedArrayInto,
@@ -48,14 +30,12 @@ export { validator };
 export * from './types';
 
 export type {
-    ArrayFieldType,
-    FieldDef,
-    FieldType,
-    InternDb,
-    InternPool,
-    NullableFieldType,
-    ObjectFieldType,
+    CodecOptions,
+    DecodeOptions,
+    EncodeOptions,
+    FieldSpec,
+    PersistentStore,
     Schema,
     SchemaRegistry,
-    SchemaStoreInterface,
+    StoredSchema,
 } from './sbc';

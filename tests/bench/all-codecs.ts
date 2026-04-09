@@ -3,7 +3,7 @@
 
 import { performance } from 'perf_hooks';
 import { pack, unpack } from 'msgpackr';
-import { createCodec as createCodec2 } from '../../src/codec2';
+import { createCodec as createCodec2 } from '../../src/sbc';
 import { createCodec as createSbcCodec } from '../../src/sbc';
 import { createCodec as createProtoCodec } from '../utils';
 

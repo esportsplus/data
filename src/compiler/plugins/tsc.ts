@@ -1,7 +1,7 @@
 import { plugin } from '@esportsplus/typescript/compiler';
 
-import codec2 from '../codec2';
+import sbc from '../sbc';
 import data from '..';
 
 
-export default plugin.tsc([data, codec2]);
+export default plugin.tsc([data, sbc]);

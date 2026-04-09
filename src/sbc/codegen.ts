@@ -1,1375 +1,1294 @@
-// Schema Binary Codec — Codegen
-// Compiler functions for encode/decode/extractors/computeSize
+// Codec2 Codegen — Compile type-specific encode/decode functions via new Function()
+// Zero per-field branching: all type checks happen at compile time
 
-import { byteLen, driver, FIELD_SIZES, isNode, readVarint, readZigzag, varintResult, writeVarint, writeZigzag } from './platform';
-import type { FieldDef, FieldType, Schema, SchemaRegistry } from './platform';
-
-
-// Names used as new Function() parameters in generated code.
-// Field names matching these would shadow parameters and break codegen.
-const CODEGEN_RESERVED_NAMES = new Set([
-    '$bl', '$byteLen', '$d', '$e', '$ls', '$reg', '$rs', '$rv', '$rz', '$sd', '$si', '$utf8w', '$vr', '$wv', '$wz',
-    'buf', 'pos',
-]);
-
-const JS_RESERVED_WORDS = new Set([
-    '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__', '__proto__',
-    'abstract', 'arguments', 'async', 'await', 'boolean', 'break', 'byte', 'case',
-    'catch', 'char', 'class', 'const', 'continue', 'debugger', 'default', 'delete',
-    'do', 'double', 'else', 'enum', 'eval', 'export', 'extends', 'false', 'final',
-    'finally', 'float', 'for', 'function', 'goto', 'if', 'implements', 'import', 'in',
-    'instanceof', 'int', 'interface', 'let', 'long', 'native', 'new', 'null',
-    'package', 'private', 'protected', 'public', 'return', 'short', 'static',
-    'super', 'switch', 'synchronized', 'this', 'throw', 'throws', 'transient',
-    'true', 'try', 'typeof', 'undefined', 'var', 'void', 'volatile', 'while',
-    'with', 'yield',
-]);
-
-const UNSUPPORTED_ARRAY_ELEMENT_TYPES = new Set([
-    'bigint', 'boolean', 'bytes', 'date', 'int8', 'int16',
-]);
-
-const VALID_BASE_TYPES = new Set([
-    'bigint', 'boolean', 'bytes', 'date', 'float64',
-    'int8', 'int16', 'int32', 'mixed', 'string',
-    'uint8', 'uint16', 'uint32',
-]);
-
-const VALID_FIELD_NAME = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
+import { codegenDriver, readVarint, readZigzag, writeVarint, writeZigzag } from './platform';
+import type { CodegenDriver } from './platform';
 
 
-function validateFieldName(name: string): void {
-    if (!VALID_FIELD_NAME.test(name)) {
-        throw new Error('SBC: invalid field name: ' + name);
-    }
+interface ParsedType {
+    base: string;
+    elementType?: ParsedType;
+    hash?: number;
+}
 
-    if (name.length > 128) {
-        throw new Error('SBC: field name too long (max 128): ' + name);
-    }
+interface FieldDef {
+    elementType?: ParsedType;
+    fixedSize: number;
+    name: string;
+    nullable: boolean;
+    nullIndex: number;
+    offset: number;
+    rawType: string;
+    refHash?: number;
+    type: string;
+}
 
-    if (JS_RESERVED_WORDS.has(name)) {
-        throw new Error('SBC: reserved word used as field name: ' + name);
-    }
+interface Schema {
+    bitmapBytes: number;
+    boolFields: number[];
+    compFixedSize: number;
+    compressedDecodeFn: ((buf: Uint8Array, pos: number, depth: number) => unknown) | null;
+    compressedEncodeFn: ((obj: unknown, buf: Uint8Array, pos: number) => number) | null;
+    compressible: boolean;
+    decodeFn: ((buf: Uint8Array, pos: number, depth: number) => unknown) | null;
+    encodeFn: ((obj: unknown, buf: Uint8Array, pos: number) => number) | null;
+    fields: FieldDef[];
+    fixedSize: number;
+    float64Fields: number[];
+    hash: number;
+    id: number;
+    intFields: number[];
+    nullableCount: number;
+}
 
-    if (CODEGEN_RESERVED_NAMES.has(name)) {
-        throw new Error('SBC: field name conflicts with codegen internal: ' + name);
+interface SbcHelpers {
+    decodeSbc: (buf: Uint8Array, offset: number, len: number, depth: number) => unknown;
+    decodeTagEnd: (buf: Uint8Array, offset: number, depth: number) => number;
+    encodeObj: (obj: Record<string, unknown>, buf: Uint8Array, pos: number) => number;
+    encodeSbc: (value: unknown, buf: Uint8Array, pos: number) => number;
+    registry: Map<number, Schema>;
+}
+
+
+// Shared frozen null-proto prototype — Object.prototype excluded from chain
+let _safeProto = Object.freeze(Object.create(null));
+
+
+function compileSchema(schema: Schema, helpers: SbcHelpers): void {
+    let d = codegenDriver;
+
+    schema.encodeFn = compileEncoder(schema, d, helpers);
+    schema.decodeFn = compileDecoder(schema, d, helpers);
+
+    if (schema.compressible) {
+        schema.compressedEncodeFn = compileCompressedEncoder(schema, d, helpers);
+        schema.compressedDecodeFn = compileCompressedDecoder(schema, d, helpers);
     }
 }
 
 
-// Validate a serialized field type string recursively (e.g. "string", "array<float64>", "nullable<object(1)>")
-function validateFieldTypeString(type: string, depth: number = 0): void {
-    if (depth > 32) {
-        throw new Error('SBC: field type nesting exceeds maximum depth (32): ' + type);
-    }
+function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (obj: unknown, buf: Uint8Array, pos: number) => number {
+    let body = `'use strict';\n`,
+        fields = schema.fields,
+        n = fields.length;
 
-    if (VALID_BASE_TYPES.has(type)) {
-        return;
-    }
+    // Collect unique ref hashes for direct-call encode
+    let refHashes: Map<number, string> = new Map(),
+        refIdx = 0;
 
-    if (type.startsWith('array<') && type.endsWith('>')) {
-        let inner = type.slice(6, -1);
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!;
 
-        validateFieldTypeString(inner, depth + 1);
+        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
+            let rs = helpers.registry.get(f.refHash);
 
-        if (UNSUPPORTED_ARRAY_ELEMENT_TYPES.has(inner)) {
-            throw new Error('SBC: unsupported array element type: ' + inner);
-        }
-
-        return;
-    }
-
-    if (type.startsWith('nullable<') && type.endsWith('>')) {
-        validateFieldTypeString(type.slice(9, -1), depth + 1);
-
-        return;
-    }
-
-    if (type.startsWith('object(') && type.endsWith(')')) {
-        let id = parseInt(type.slice(7, -1), 10);
-
-        if (isNaN(id) || id < 0) {
-            throw new Error('SBC: invalid object schema id in type: ' + type);
-        }
-
-        return;
-    }
-
-    throw new Error('SBC: unknown field type: ' + type);
-}
-
-
-function validateAllFieldNames(fields: FieldDef[]): void {
-    for (let i = 0, n = fields.length; i < n; i++) {
-        validateFieldName(fields[i]!.name);
-    }
-}
-
-
-function assignNullIndices(fields: FieldDef[]): void {
-    let nullIndex = 0;
-
-    for (let i = 0, n = fields.length; i < n; i++) {
-        let field = fields[i]!;
-
-        if (typeof field.type === 'object' && field.type.kind === 'nullable') {
-            field._nullIndex = nullIndex++;
-        }
-    }
-}
-
-function bitmapBytes(count: number): number {
-    return (count + 7) >> 3;
-}
-
-function buildComputeSize(schema: Schema, registry?: SchemaRegistry, lookupFn?: (obj: Record<string, unknown>, registry: SchemaRegistry) => Schema | null): (obj: unknown) => number {
-    validateAllFieldNames(schema.fields);
-
-    let bmBytes = bitmapBytes(schema.nullableCount),
-        fixedTotal = 9 + bmBytes + schema.fixedSize,
-        hasObjectFields = false,
-        lines: string[] = ['let s=' + fixedTotal];
-
-    for (let i = 0, n = schema.fields.length; i < n; i++) {
-        let f = schema.fields[i]!;
-
-        if (f.fixedSize > 0) {
-            continue;
-        }
-
-        let type = f.type,
-            val = 'obj["' + f.name + '"]';
-
-        if (typeof type === 'string') {
-            if (type === 'string') {
-                lines.push('s+=4+$bl(' + val + ')');
-            }
-            else if (type === 'bytes') {
-                lines.push('s+=4+' + val + '.length');
+            if (rs && rs.encodeFn) {
+                refHashes.set(f.refHash, `_re${refIdx++}`);
             }
         }
-        else if (type.kind === 'object') {
-            hasObjectFields = true;
-            lines.push('{let _i=$ls(' + val + ',$reg);if(!_i||!_i.computeSize)return -1;let _n=_i.computeSize(' + val + ');if(_n<0)return -1;s+=4+_n}');
-        }
-        else if (type.kind === 'array') {
-            let elem = type.element;
 
-            if (typeof elem === 'string') {
-                let elemSize = FIELD_SIZES[elem];
+        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
+            let rs = helpers.registry.get(f.elementType.hash);
 
-                if (elemSize && elemSize > 0) {
-                    lines.push('s+=2+' + val + '.length*' + elemSize);
-                }
-                else if (elem === 'string') {
-                    lines.push('{let a=' + val + ';s+=2;for(let j=0,n=a.length;j<n;j++)s+=4+$bl(a[j])}');
-                }
-            }
-        }
-        else if (type.kind === 'nullable') {
-            let inner = type.inner;
-
-            if (typeof inner === 'string') {
-                if (inner === 'string') {
-                    lines.push('if(' + val + '!=null)s+=4+$bl(' + val + ')');
-                }
-                else if (inner === 'bytes') {
-                    lines.push('if(' + val + '!=null)s+=4+' + val + '.length');
-                }
-                else {
-                    let innerSize = FIELD_SIZES[inner];
-
-                    if (innerSize && innerSize > 0) {
-                        lines.push('if(' + val + '!=null)s+=' + innerSize);
-                    }
-                }
-            }
-            else if (typeof inner === 'object' && inner.kind === 'array') {
-                let elem = inner.element;
-
-                if (typeof elem === 'string') {
-                    let elemSize = FIELD_SIZES[elem];
-
-                    if (elemSize && elemSize > 0) {
-                        lines.push('if(' + val + '!=null)s+=2+' + val + '.length*' + elemSize);
-                    }
-                    else if (elem === 'string') {
-                        lines.push('if(' + val + '!=null){let a=' + val + ';s+=2;for(let j=0,n=a.length;j<n;j++)s+=4+$bl(a[j])}');
-                    }
-                }
+            if (rs && rs.encodeFn) {
+                refHashes.set(f.elementType.hash, `_re${refIdx++}`);
             }
         }
     }
 
-    lines.push('return s');
-
-    if (hasObjectFields) {
-        return new Function('$bl', '$ls', '$reg', 'obj', lines.join(';')).bind(null, byteLen, lookupFn, registry) as (obj: unknown) => number;
-    }
-
-    return new Function('$bl', 'obj', lines.join(';')).bind(null, byteLen) as (obj: unknown) => number;
-}
-
-function buildSchema(fields: FieldDef[], hash: number, id: number): Schema {
-    for (let i = 0, n = fields.length; i < n; i++) {
-        validateFieldName(fields[i]!.name);
-    }
-
-    fields.sort(sortFields);
-
-    let fixedSize = computeFieldOffsets(fields),
-        nullableCount = 0;
-
-    for (let i = 0, n = fields.length; i < n; i++) {
-        if (typeof fields[i]!.type === 'object' && (fields[i]!.type as { kind: string }).kind === 'nullable') {
-            nullableCount++;
-        }
-    }
-
-    if (nullableCount > 16) {
-        throw new Error('SBC: maximum 16 nullable fields supported (got ' + nullableCount + ')');
-    }
-
-    return {
-        compressedDecodeFn: null,
-        compressedEncodeFn: null,
-        compressible: isCompressible(fields),
-        computeSize: null,
-        decodeFn: null,
-        encodeFn: null,
-        fieldExtractors: null,
-        fields,
-        fieldsSorted: null,
-        fixedSize,
-        hash,
-        id,
-        nullIndexMap: null,
-        nullableCount,
-    };
-}
-
-function buildSchemaFromDef(def: { fields: { fixedSize: number; name: string; type: string }[]; hash: number; id: number; nullableCount: number }, parseFieldType: (str: string) => FieldType): Schema {
-    let fields: FieldDef[] = def.fields.map((f) => {
-        validateFieldName(f.name);
-        validateFieldTypeString(f.type);
-
-        return {
-            fixedSize: f.fixedSize,
-            name: f.name,
-            offset: 0,
-            type: parseFieldType(f.type),
-        };
-    });
-
-    assignNullIndices(fields);
-
-    let fixedSize = computeFieldOffsets(fields),
-        nullableCount = 0;
-
-    for (let i = 0, n = fields.length; i < n; i++) {
-        if (typeof fields[i]!.type === 'object' && (fields[i]!.type as { kind: string }).kind === 'nullable') {
-            nullableCount++;
-        }
-    }
-
-    if (nullableCount > 16) {
-        throw new Error('SBC: maximum 16 nullable fields supported (got ' + nullableCount + ')');
-    }
-
-    return {
-        compressedDecodeFn: null,
-        compressedEncodeFn: null,
-        compressible: isCompressible(fields),
-        computeSize: null,
-        decodeFn: null,
-        encodeFn: null,
-        fieldExtractors: null,
-        fields,
-        fieldsSorted: null,
-        fixedSize,
-        hash: def.hash,
-        id: def.id,
-        nullIndexMap: null,
-        nullableCount,
-    };
-}
-
-function classifyFields(schema: Schema): { boolFields: FieldDef[]; float64Fields: FieldDef[]; intFields: FieldDef[]; otherFixed: FieldDef[] } {
-    let boolFields: FieldDef[] = [],
-        float64Fields: FieldDef[] = [],
-        intFields: FieldDef[] = [],
-        otherFixed: FieldDef[] = [];
-
-    for (let i = 0, n = schema.fields.length; i < n; i++) {
-        let field = schema.fields[i]!;
-
-        if (field.type === 'boolean') {
-            boolFields.push(field);
-        }
-        else if (field.type === 'float64') {
-            float64Fields.push(field);
-        }
-        else if (isVarintIntType(field.type)) {
-            intFields.push(field);
-        }
-        else if (field.fixedSize > 0) {
-            otherFixed.push(field);
-        }
-    }
-
-    return { boolFields, float64Fields, intFields, otherFixed };
-}
-
-function compileCompressedDecoder(schema: Schema, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, internFields?: Set<string>, internDecode?: (buf: Uint8Array, pos: number) => string): (buf: Uint8Array, pos: number) => unknown {
-    validateAllFieldNames(schema.fields);
-
-    if (schema.nullableCount > 16) {
-        throw new Error('SBC: nullable field limit exceeded in compressed codec (got ' + schema.nullableCount + ')');
-    }
-
-    let { boolFields, float64Fields, intFields, otherFixed } = classifyFields(schema),
-        compFixedOffset = 0,
-        hasNullable = schema.nullableCount > 0,
-        lines: string[] = [],
-        nullBmBytes = hasNullable ? bitmapBytes(schema.nullableCount) : 0,
-        vp = 'vp';
-
-    if (hasNullable) {
-        emitNullBitmapRead(lines, nullBmBytes);
-    }
-
-    let boolBmBytes = bitmapBytes(boolFields.length);
-
-    if (boolFields.length > 0) {
-        lines.push('let _bb=buf[pos]');
-
-        if (boolBmBytes > 1) {
-            lines.push('_bb|=buf[pos+1]<<8');
-        }
-
-        lines.push('pos+=' + boolBmBytes);
-
-        for (let i = 0, n = boolFields.length; i < n; i++) {
-            lines.push('let ' + boolFields[i]!.name + '=!!(_bb&' + (1 << i) + ')');
-        }
-    }
-
-    for (let i = 0, n = otherFixed.length; i < n; i++) {
-        let field = otherFixed[i]!;
-
-        emitFixed(lines, field, 'pos+' + compFixedOffset, 'decode');
-        compFixedOffset += field.fixedSize;
-    }
-
-    lines.push('let ' + vp + '=pos+' + compFixedOffset);
-
-    for (let i = 0, n = intFields.length; i < n; i++) {
-        let field = intFields[i]!;
-
-        if (isSignedIntType(field.type as string)) {
-            lines.push('$rz(buf,' + vp + ')');
-        }
-        else {
-            lines.push('$rv(buf,' + vp + ')');
-        }
-
-        lines.push('let ' + field.name + '=$vr.value');
-        lines.push(vp + '=$vr.pos');
-    }
-
-    for (let i = 0, n = float64Fields.length; i < n; i++) {
-        let f = float64Fields[i]!.name;
-
-        lines.push('let ' + f + 'F=buf[' + vp + '++]');
-        lines.push('let ' + f);
-        lines.push('if(' + f + 'F===0){$rz(buf,' + vp + ');' + f + '=$vr.value;' + vp + '=$vr.pos}else{' + f + '=' + driver.readF64(vp) + ';' + vp + '+=8}');
-    }
-
-    emitVarFields(lines, schema, vp, 'decode', true, internFields);
-
-    let allFields = sortFieldsByName(schema);
-
-    lines.push('return{' + allFields.map((f) => f.name).join(',') + '}');
-
-    let $d = helpers?.decodeSbc ?? ((_buf: Uint8Array, _offset: number, _len: number) => null),
-        body = finalizeBody(lines);
-
-    if (internFields && internFields.size > 0 && internDecode) {
-        return new Function('$d', '$rv', '$rz', '$vr', '$sd', driver.decoderParams() + 'buf', 'pos', body).bind(null, $d, readVarint, readZigzag, varintResult, internDecode, ...driver.decoderBindArgs()) as (buf: Uint8Array, pos: number) => unknown;
-    }
-
-    return new Function('$d', '$rv', '$rz', '$vr', driver.decoderParams() + 'buf', 'pos', body).bind(null, $d, readVarint, readZigzag, varintResult, ...driver.decoderBindArgs()) as (buf: Uint8Array, pos: number) => unknown;
-}
-
-function compileCompressedEncoder(schema: Schema, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Uint8Array, pos: number) => number): (obj: unknown, buf: Uint8Array, pos: number) => number {
-    validateAllFieldNames(schema.fields);
-
-    if (schema.nullableCount > 16) {
-        throw new Error('SBC: nullable field limit exceeded in compressed codec (got ' + schema.nullableCount + ')');
-    }
-
-    let { boolFields, float64Fields, intFields, otherFixed } = classifyFields(schema),
-        compFixedOffset = 0,
-        hasNullable = schema.nullableCount > 0,
-        lines: string[] = [],
-        nullBmBytes = hasNullable ? bitmapBytes(schema.nullableCount) : 0,
-        vp = 'vp';
-
-    if (hasNullable) {
-        emitNullBitmapInit(lines, nullBmBytes);
-    }
-
-    let boolBmBytes = bitmapBytes(boolFields.length);
-
-    if (boolFields.length > 0) {
-        lines.push('let _bb=0');
-        lines.push('let _bbPos=pos');
-        lines.push('pos+=' + boolBmBytes);
-
-        for (let i = 0, n = boolFields.length; i < n; i++) {
-            lines.push('if(obj["' + boolFields[i]!.name + '"]){_bb|=' + (1 << i) + '}');
-        }
-    }
-
-    for (let i = 0, n = otherFixed.length; i < n; i++) {
-        let field = otherFixed[i]!;
-
-        emitFixed(lines, field, 'pos+' + compFixedOffset, 'encode');
-        compFixedOffset += field.fixedSize;
-    }
-
-    lines.push('let ' + vp + '=pos+' + compFixedOffset);
-
-    for (let i = 0, n = intFields.length; i < n; i++) {
-        let field = intFields[i]!;
-
-        if (isSignedIntType(field.type as string)) {
-            lines.push(vp + '=$wz(buf,' + vp + ',obj["' + field.name + '"])');
-        }
-        else {
-            lines.push(vp + '=$wv(buf,' + vp + ',obj["' + field.name + '"])');
-        }
-    }
-
-    for (let i = 0, n = float64Fields.length; i < n; i++) {
-        let f = float64Fields[i]!.name;
-
-        lines.push('let ' + f + 'I=obj["' + f + '"]===(' + 'obj["' + f + '"]|0)');
-        lines.push('if(' + f + 'I){buf[' + vp + ']=0;' + vp + '++;' + vp + '=$wz(buf,' + vp + ',obj["' + f + '"])}else{buf[' + vp + ']=1;' + vp + '++;' + driver.writeF64(vp, 'obj["' + f + '"]') + ';' + vp + '+=8}');
-    }
-
-    emitVarFields(lines, schema, vp, 'encode', true, internFields);
-
-    if (boolFields.length > 0) {
-        lines.push('buf[_bbPos]=_bb&0xFF');
-
-        if (boolBmBytes > 1) {
-            lines.push('buf[_bbPos+1]=(_bb>>8)&0xFF');
-        }
-    }
-
-    if (hasNullable) {
-        emitNullBitmapWrite(lines, nullBmBytes);
-    }
-
-    lines.push('return ' + vp);
-
-    let $e = helpers?.encodeSbc ?? ((_value: unknown, buf: Uint8Array, pos: number) => { buf[pos] = 0; return pos + 1; }),
-        body = finalizeBody(lines);
-
-    if (internFields && internFields.size > 0 && internEncode) {
-        return new Function('$e', '$wv', '$wz', '$si', driver.encoderParams() + 'obj', 'buf', 'pos', body).bind(null, $e, writeVarint, writeZigzag, internEncode, ...driver.encoderBindArgs()) as (obj: unknown, buf: Uint8Array, pos: number) => number;
-    }
-
-    return new Function('$e', '$wv', '$wz', driver.encoderParams() + 'obj', 'buf', 'pos', body).bind(null, $e, writeVarint, writeZigzag, ...driver.encoderBindArgs()) as (obj: unknown, buf: Uint8Array, pos: number) => number;
-}
-
-function compileDecoder(schema: Schema, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, internFields?: Set<string>, internDecode?: (buf: Uint8Array, pos: number) => string): (buf: Uint8Array, pos: number) => unknown {
-    validateAllFieldNames(schema.fields);
-
-    let hasNullable = schema.nullableCount > 0,
-        lines: string[] = [],
-        nullBmBytes = hasNullable ? bitmapBytes(schema.nullableCount) : 0,
-        vp = 'vp';
-
-    if (hasNullable) {
-        emitNullBitmapRead(lines, nullBmBytes);
-    }
-
-    for (let i = 0, n = schema.fields.length; i < n; i++) {
-        let field = schema.fields[i]!;
-
-        if (field.fixedSize > 0) {
-            emitFixed(lines, field, 'pos+' + field.offset, 'decode');
-        }
-    }
-
-    emitVarFields(lines, schema, vp, 'decode', false, internFields);
-
-    let allFields = sortFieldsByName(schema);
-
-    lines.push('return{' + allFields.map((f) => f.name).join(',') + '}');
-
-    let $d = helpers?.decodeSbc ?? ((_buf: Uint8Array, _offset: number, _len: number) => null),
-        body = finalizeBody(lines);
-
-    if (internFields && internFields.size > 0 && internDecode) {
-        return new Function('$d', '$sd', driver.decoderParams() + 'buf', 'pos', body).bind(null, $d, internDecode, ...driver.decoderBindArgs()) as (buf: Uint8Array, pos: number) => unknown;
-    }
-
-    return new Function('$d', driver.decoderParams() + 'buf', 'pos', body).bind(null, $d, ...driver.decoderBindArgs()) as (buf: Uint8Array, pos: number) => unknown;
-}
-
-function compileEncoder(schema: Schema, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Uint8Array, pos: number) => number): (obj: unknown, buf: Uint8Array, pos: number) => number {
-    validateAllFieldNames(schema.fields);
-
-    let hasNullable = schema.nullableCount > 0,
-        lines: string[] = [],
-        nullBmBytes = hasNullable ? bitmapBytes(schema.nullableCount) : 0,
-        vp = 'vp';
-
-    if (hasNullable) {
-        emitNullBitmapInit(lines, nullBmBytes);
-    }
-
-    for (let i = 0, n = schema.fields.length; i < n; i++) {
-        let field = schema.fields[i]!;
-
-        if (field.fixedSize > 0) {
-            emitFixed(lines, field, 'pos+' + field.offset, 'encode');
-        }
-    }
-
-    let hasVar = emitVarFields(lines, schema, vp, 'encode', false, internFields);
-
-    if (hasNullable) {
-        emitNullBitmapWrite(lines, nullBmBytes);
-    }
-
-    lines.push('return ' + (hasVar ? vp : 'pos+' + schema.fixedSize));
-
-    let $e = helpers?.encodeSbc ?? ((_value: unknown, buf: Uint8Array, pos: number) => { buf[pos] = 0; return pos + 1; }),
-        body = finalizeBody(lines);
-
-    if (internFields && internFields.size > 0 && internEncode) {
-        return new Function('$e', '$si', driver.encoderParams() + 'obj', 'buf', 'pos', body).bind(null, $e, internEncode, ...driver.encoderBindArgs()) as (obj: unknown, buf: Uint8Array, pos: number) => number;
-    }
-
-    return new Function('$e', driver.encoderParams() + 'obj', 'buf', 'pos', body).bind(null, $e, ...driver.encoderBindArgs()) as (obj: unknown, buf: Uint8Array, pos: number) => number;
-}
-
-function compileFieldExtractors(schema: Schema): void {
-    validateAllFieldNames(schema.fields);
-
-    let extractors = new Map<string, (buf: Uint8Array, pos: number) => unknown>();
-
-    // Fixed-size fields: direct offset read (O(1), no scanning)
-    for (let i = 0, n = schema.fields.length; i < n; i++) {
-        let field = schema.fields[i]!;
-
-        if (field.fixedSize <= 0) {
-            continue;
-        }
-
-        let lines: string[] = [],
-            off = 'pos+' + field.offset;
-
-        switch (field.type) {
-            case 'bigint': lines.push('return ' + driver.readBI64(off)); break;
-            case 'boolean': lines.push('return !!buf[' + off + ']'); break;
-            case 'date': lines.push('return new Date(' + driver.readF64(off) + ')'); break;
-            case 'float64': lines.push('return ' + driver.readF64(off)); break;
-            case 'int8': lines.push('return (buf[' + off + ']<<24>>24)'); break;
-            case 'int16': lines.push('return ' + driver.readI16(off)); break;
-            case 'int32': lines.push('return ' + driver.readI32(off)); break;
-            case 'uint8': lines.push('return buf[' + off + ']'); break;
-            case 'uint16': lines.push('return ' + driver.readU16(off)); break;
-            case 'uint32': lines.push('return ' + driver.readU32(off)); break;
-            default: continue;
-        }
-
-        let body = finalizeBody(lines);
-
-        extractors.set(field.name, new Function(driver.decoderParams() + 'buf', 'pos', body).bind(null, ...driver.decoderBindArgs()) as (buf: Uint8Array, pos: number) => unknown);
-    }
-
-    // Variable-size fields: scan from fixedSize offset
-    // Each extractor scans through preceding variable fields to find its own offset
-    let varFields: FieldDef[] = [];
-
-    for (let i = 0, n = schema.fields.length; i < n; i++) {
-        if (schema.fields[i]!.fixedSize <= 0) {
-            varFields.push(schema.fields[i]!);
-        }
-    }
-
-    outer: for (let vi = 0, vn = varFields.length; vi < vn; vi++) {
-        let target = varFields[vi]!;
-
-        // Support string, bytes, nullable<string>, nullable<bytes> extraction
-        let targetInner = extractableInner(target.type);
-
-        if (!targetInner) {
-            continue;
-        }
-
-        let lines: string[] = [];
-
-        lines.push('let bl=buf.length,vp=pos+' + schema.fixedSize);
-
-        // Skip preceding variable fields with bounds checks
-        for (let j = 0; j < vi; j++) {
-            let prev = varFields[j]!;
-
-            if (typeof prev.type === 'string' && (prev.type === 'string' || prev.type === 'bytes')) {
-                lines.push('if(vp+4>bl)return undefined');
-                lines.push('{let s=' + driver.readU32('vp') + ';if(vp+4+s>bl)return undefined;vp+=4+s}');
-            }
-            else if (typeof prev.type === 'object') {
-                if (prev.type.kind === 'object') {
-                    lines.push('if(vp+4>bl)return undefined');
-                    lines.push('{let s=' + driver.readU32('vp') + ';if(vp+4+s>bl)return undefined;vp+=4+s}');
-                }
-                else if (prev.type.kind === 'nullable' && prev._nullIndex !== undefined) {
-                    // Nullable with u32-prefixed inner: check null bit, skip data only if non-null
-                    let inner = prev.type.inner;
-
-                    if (
-                        (typeof inner === 'string' && (inner === 'string' || inner === 'bytes'))
-                        || (typeof inner === 'object' && inner.kind === 'object')
-                    ) {
-                        let byteOff = 9 + (prev._nullIndex >> 3),
-                            bitMask = 1 << (prev._nullIndex & 7);
-
-                        lines.push('if(buf[' + byteOff + ']&' + bitMask + '){');
-                        lines.push('if(vp+4>bl)return undefined');
-                        lines.push('{let s=' + driver.readU32('vp') + ';if(vp+4+s>bl)return undefined;vp+=4+s}');
-                        lines.push('}');
-                    }
-                    else {
-                        continue outer;
-                    }
-                }
-                else if (prev.type.kind === 'array') {
-                    continue outer;
-                }
-                else {
-                    continue outer;
-                }
-            }
-            else {
-                continue outer;
-            }
-        }
-
-        if (targetInner === 'string') {
-            lines.push('if(vp+4>bl)return undefined');
-            lines.push('let l=' + driver.readU32('vp'));
-            lines.push('vp+=4');
-            lines.push('if(vp+l>bl)return undefined');
-            lines.push('return $rs(buf,vp,vp+l)');
-        }
-        else {
-            lines.push('if(vp+4>bl)return undefined');
-            lines.push('let l=' + driver.readU32('vp'));
-            lines.push('vp+=4');
-            lines.push('if(vp+l>bl)return undefined');
-            lines.push('return buf.subarray(vp,vp+l)');
-        }
-
-        let body = finalizeBody(lines);
-
-        extractors.set(target.name, new Function(driver.decoderParams() + 'buf', 'pos', body).bind(null, ...driver.decoderBindArgs()) as (buf: Uint8Array, pos: number) => unknown);
-    }
-
-    schema.fieldExtractors = extractors;
+    body += d.preamble('b');
+    body += `let p=pos;\n`;
 
     if (schema.nullableCount > 0) {
-        let nullMap = new Map<string, number>();
+        body += `let _bm=0,_bp=p;p+=${schema.bitmapBytes};\n`;
+    }
 
-        for (let i = 0, n = schema.fields.length; i < n; i++) {
-            let field = schema.fields[i]!;
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            name = f.name,
+            safeKey = JSON.stringify(name),
+            val = `o[${safeKey}]`;
 
-            if (field._nullIndex !== undefined) {
-                nullMap.set(field.name, field._nullIndex);
-            }
+        if (f.nullable) {
+            body += `if(${val}!=null){_bm|=${1 << f.nullIndex};`;
         }
 
-        schema.nullIndexMap = nullMap;
-    }
-}
-
-function compileSchema(schema: Schema, registry?: SchemaRegistry, helpers?: { decodeSbc?: (buf: Uint8Array, offset: number, len: number) => unknown; encodeSbc?: (value: unknown, buf: Uint8Array, pos: number) => number }, compression?: boolean, internFields?: Set<string>, internEncode?: (field: string, value: string, buf: Uint8Array, pos: number) => number, internDecode?: (buf: Uint8Array, pos: number) => string, lookupFn?: (obj: Record<string, unknown>, registry: SchemaRegistry) => Schema | null): void {
-    let reg = registry || createRegistryInternal();
-
-    for (let i = 0, n = schema.fields.length; i < n; i++) {
-        validateFieldName(schema.fields[i]!.name);
-    }
-
-    assignNullIndices(schema.fields);
-
-    schema.decodeFn = compileDecoder(schema, helpers, internFields, internDecode);
-    schema.encodeFn = compileEncoder(schema, helpers, internFields, internEncode);
-    compileFieldExtractors(schema);
-
-    if (!compression && isSizeComputable(schema)) {
-        schema.computeSize = buildComputeSize(schema, reg, lookupFn);
-    }
-
-    if (compression && schema.compressible) {
-        schema.compressedDecodeFn = compileCompressedDecoder(schema, helpers, internFields, internDecode);
-        schema.compressedEncodeFn = compileCompressedEncoder(schema, helpers, internFields, internEncode);
-    }
-}
-
-function computeFieldOffsets(fields: FieldDef[]): number {
-    let offset = 0;
-
-    for (let i = 0, n = fields.length; i < n; i++) {
-        let field = fields[i]!;
-
-        if (field.fixedSize > 0) {
-            field.offset = offset;
-            offset += field.fixedSize;
-        }
-        else {
-            field.offset = -1;
-        }
-    }
-
-    return offset;
-}
-
-// Minimal registry creation for internal use (avoids circular dependency)
-function createRegistryInternal(): SchemaRegistry {
-    return {
-        constructorCache: new WeakMap(),
-        lastSchema: null,
-        nextId: 1,
-        schemas: new Map(),
-        schemasByCount: new Map(),
-        schemasByHash: new Map(),
-    };
-}
-
-function emitDeltaArray(lines: string[], field: FieldDef, vp: string, dir: 'decode' | 'encode'): void {
-    let n = field.name;
-
-    if (dir === 'decode') {
-        lines.push('let ' + n + 'C=' + driver.readU16(vp));
-        lines.push(vp + '+=2');
-        lines.push('let ' + n + '=new Array(' + n + 'C)');
-        lines.push('if(' + n + 'C>0){$rv(buf,' + vp + ')');
-        lines.push('let _base=$vr.value');
-        lines.push(vp + '=$vr.pos');
-        lines.push(n + '[0]=_base');
-        lines.push('for(let j=1;j<' + n + 'C;j++){$rz(buf,' + vp + ');_base+=$vr.value;' + vp + '=$vr.pos;' + n + '[j]=_base}}');
-    }
-    else {
-        let val = 'obj["' + n + '"]';
-
-        lines.push('let ' + n + 'A=' + val);
-        lines.push('let ' + n + 'C=' + n + 'A.length');
-        lines.push(driver.writeU16(vp, n + 'C'));
-        lines.push(vp + '+=2');
-        lines.push('if(' + n + 'C>0){' + vp + '=$wv(buf,' + vp + ',' + n + 'A[0])');
-        lines.push('for(let j=1;j<' + n + 'C;j++){' + vp + '=$wz(buf,' + vp + ',' + n + 'A[j]-' + n + 'A[j-1])}}');
-    }
-}
-
-function emitArrayElements(lines: string[], n: string, elem: FieldType, vp: string, dir: 'decode' | 'encode'): void {
-    if (typeof elem === 'string' && elem === 'mixed') {
-        if (dir === 'decode') {
-            lines.push('for(let j=0;j<' + n + 'C;j++){let el=' + driver.readU32(vp) + ';' + vp + '+=4;' + n + '[j]=$d(buf,' + vp + ',el);' + vp + '+=el}');
-        }
-        else {
-            lines.push('for(let j=0;j<' + n + 'C;j++){let es=' + vp + ';' + vp + '+=4;' + vp + '=$e(' + n + 'A[j],buf,' + vp + ');' + driver.writeU32('es', vp + '-es-4') + '}');
-        }
-
-        return;
-    }
-
-    if (typeof elem === 'object' && elem.kind === 'object') {
-        if (dir === 'decode') {
-            lines.push('for(let j=0;j<' + n + 'C;j++){let el=' + driver.readU32(vp) + ';' + vp + '+=4;' + n + '[j]=$d(buf,' + vp + ',el);' + vp + '+=el}');
-        }
-        else {
-            lines.push('for(let j=0;j<' + n + 'C;j++){let es=' + vp + ';' + vp + '+=4;' + vp + '=$e(' + n + 'A[j],buf,' + vp + ');' + driver.writeU32('es', vp + '-es-4') + '}');
-        }
-
-        return;
-    }
-
-    if (typeof elem !== 'string') {
-        return;
-    }
-
-    let src = dir === 'decode' ? n + '[j]' : n + 'A[j]';
-
-    switch (elem) {
-        case 'float64':
-            if (dir === 'decode') {
-                lines.push('for(let j=0;j<' + n + 'C;j++){' + n + '[j]=' + driver.readF64(vp) + ';' + vp + '+=8}');
-            }
-            else {
-                lines.push('for(let j=0;j<' + n + 'C;j++){' + driver.writeF64(vp, src) + ';' + vp + '+=8}');
-            }
-            break;
-        case 'int32':
-            if (dir === 'decode') {
-                lines.push('for(let j=0;j<' + n + 'C;j++){' + n + '[j]=' + driver.readI32(vp) + ';' + vp + '+=4}');
-            }
-            else {
-                lines.push('for(let j=0;j<' + n + 'C;j++){' + driver.writeI32(vp, src) + ';' + vp + '+=4}');
-            }
-            break;
-        case 'string':
-            if (dir === 'decode') {
-                lines.push('for(let j=0;j<' + n + 'C;j++){let l=' + driver.readU32(vp) + ';' + vp + '+=4;' + n + '[j]=' + driver.readUtf8(vp, vp + '+l') + ';' + vp + '+=l}');
-            }
-            else if (isNode) {
-                lines.push('for(let j=0;j<' + n + 'C;j++){let l=buf.utf8Write(' + src + ',' + vp + '+4);' + driver.writeU32(vp, 'l') + ';' + vp + '+=4+l}');
-            }
-            else {
-                lines.push('for(let j=0;j<' + n + 'C;j++){let l=' + driver.byteLen(src) + ';' + driver.writeU32(vp, 'l') + ';' + vp + '+=4;' + vp + '+=' + driver.writeUtf8(src, vp, 'l') + '}');
-            }
-            break;
-        case 'uint16':
-            if (dir === 'decode') {
-                lines.push('for(let j=0;j<' + n + 'C;j++){' + n + '[j]=' + driver.readU16(vp) + ';' + vp + '+=2}');
-            }
-            else {
-                lines.push('for(let j=0;j<' + n + 'C;j++){' + driver.writeU16(vp, src) + ';' + vp + '+=2}');
-            }
-            break;
-        case 'uint32':
-            if (dir === 'decode') {
-                lines.push('for(let j=0;j<' + n + 'C;j++){' + n + '[j]=' + driver.readU32(vp) + ';' + vp + '+=4}');
-            }
-            else {
-                lines.push('for(let j=0;j<' + n + 'C;j++){' + driver.writeU32(vp, src) + ';' + vp + '+=4}');
-            }
-            break;
-        case 'uint8':
-            if (dir === 'decode') {
-                lines.push('for(let j=0;j<' + n + 'C;j++){' + n + '[j]=buf[' + vp + '++]}');
-            }
-            else {
-                lines.push('for(let j=0;j<' + n + 'C;j++){buf[' + vp + '++]=' + src + '}');
-            }
-            break;
-    }
-}
-
-function emitFixed(lines: string[], field: FieldDef, off: string, dir: 'decode' | 'encode'): void {
-    let n = field.name;
-
-    if (dir === 'decode') {
-        switch (field.type) {
-            case 'bigint': lines.push('let ' + n + '=' + driver.readBI64(off)); break;
-            case 'boolean': lines.push('let ' + n + '=!!buf[' + off + ']'); break;
-            case 'date': lines.push('let ' + n + '=new Date(' + driver.readF64(off) + ')'); break;
-            case 'float64': lines.push('let ' + n + '=' + driver.readF64(off)); break;
-            case 'int8': lines.push('let ' + n + '=(buf[' + off + ']<<24>>24)'); break;
-            case 'int16': lines.push('let ' + n + '=' + driver.readI16(off)); break;
-            case 'int32': lines.push('let ' + n + '=' + driver.readI32(off)); break;
-            case 'uint8': lines.push('let ' + n + '=buf[' + off + ']'); break;
-            case 'uint16': lines.push('let ' + n + '=' + driver.readU16(off)); break;
-            case 'uint32': lines.push('let ' + n + '=' + driver.readU32(off)); break;
-        }
-    }
-    else {
-        let val = 'obj["' + n + '"]';
-
-        switch (field.type) {
-            case 'bigint': lines.push(driver.writeBI64(off, val)); break;
-            case 'boolean': lines.push('buf[' + off + ']=' + val + '?1:0'); break;
-            case 'date': lines.push(driver.writeF64(off, val + '.getTime()')); break;
-            case 'float64': lines.push(driver.writeF64(off, val)); break;
-            case 'int8': lines.push('buf[' + off + ']=(' + val + ')&0xFF'); break;
-            case 'int16': lines.push(driver.writeI16(off, val)); break;
-            case 'int32': lines.push(driver.writeI32(off, val)); break;
-            case 'uint8': lines.push('buf[' + off + ']=' + val); break;
-            case 'uint16': lines.push(driver.writeU16(off, val)); break;
-            case 'uint32': lines.push(driver.writeU32(off, val)); break;
-        }
-    }
-}
-
-function emitFloat64ArrayCompressed(lines: string[], field: FieldDef, vp: string, dir: 'decode' | 'encode'): void {
-    let n = field.name;
-
-    if (dir === 'decode') {
-        lines.push('let ' + n + 'C=' + driver.readU16(vp));
-        lines.push(vp + '+=2');
-        lines.push('let ' + n + '=new Array(' + n + 'C)');
-        lines.push('if(' + n + 'C>0){let _flg=buf[' + vp + '++]');
-        lines.push('if(_flg===0){$rv(buf,' + vp + ')');
-        lines.push('let _base=$vr.value');
-        lines.push(vp + '=$vr.pos');
-        lines.push(n + '[0]=_base');
-        lines.push('for(let j=1;j<' + n + 'C;j++){$rz(buf,' + vp + ');_base+=$vr.value;' + vp + '=$vr.pos;' + n + '[j]=_base}');
-        lines.push('}else{for(let j=0;j<' + n + 'C;j++){' + n + '[j]=' + driver.readF64(vp) + ';' + vp + '+=8}}}');
-    }
-    else {
-        let val = 'obj["' + n + '"]';
-
-        lines.push('let ' + n + 'A=' + val);
-        lines.push('let ' + n + 'C=' + n + 'A.length');
-        lines.push(driver.writeU16(vp, n + 'C'));
-        lines.push(vp + '+=2');
-        lines.push('if(' + n + 'C>0){let _allInt=true');
-        lines.push('for(let j=0;j<' + n + 'C;j++){if(' + n + 'A[j]!==(' + n + 'A[j]|0)){_allInt=false;break}}');
-        lines.push('if(_allInt){buf[' + vp + '++]=0');
-        lines.push(vp + '=$wv(buf,' + vp + ',' + n + 'A[0])');
-        lines.push('for(let j=1;j<' + n + 'C;j++){' + vp + '=$wz(buf,' + vp + ',' + n + 'A[j]-' + n + 'A[j-1])}');
-        lines.push('}else{buf[' + vp + '++]=1');
-        lines.push('for(let j=0;j<' + n + 'C;j++){' + driver.writeF64(vp, n + 'A[j]') + ';' + vp + '+=8}}}');
-    }
-}
-
-function emitNullBitmapInit(lines: string[], bitmapBytes: number): void {
-    lines.push('let _bm=0');
-    lines.push('let _bmPos=pos');
-    lines.push('pos+=' + bitmapBytes);
-}
-
-function emitNullBitmapRead(lines: string[], bitmapBytes: number): void {
-    lines.push('let _bm=buf[pos]');
-
-    if (bitmapBytes > 1) {
-        lines.push('_bm|=buf[pos+1]<<8');
-    }
-
-    lines.push('pos+=' + bitmapBytes);
-}
-
-function emitNullBitmapWrite(lines: string[], nullBmBytes: number): void {
-    lines.push('buf[_bmPos]=_bm&0xFF');
-
-    if (nullBmBytes > 1) {
-        lines.push('buf[_bmPos+1]=(_bm>>8)&0xFF');
-    }
-}
-
-function emitVar(lines: string[], field: FieldDef, vp: string, dir: 'decode' | 'encode', internFields?: Set<string>): void {
-    let n = field.name,
-        type = field.type;
-
-    if (typeof type === 'string') {
-        if (dir === 'decode') {
-            switch (type) {
-                case 'bytes':
-                    lines.push('let ' + n + 'L=' + driver.readU32(vp));
-                    lines.push(vp + '+=4');
-                    lines.push('let ' + n + '=buf.subarray(' + vp + ',' + vp + '+' + n + 'L)');
-                    lines.push(vp + '+=' + n + 'L');
-                    break;
-                case 'string':
-                    if (internFields && internFields.has(n)) {
-                        lines.push('let ' + n + 'L=' + driver.readU32(vp));
-                        lines.push(vp + '+=4');
-                        lines.push('let ' + n);
-                        lines.push('if(' + n + 'L===0xFFFFFFFF){' + n + '=$sd(buf,' + vp + ');' + vp + '+=4}else{' + n + '=' + driver.readUtf8(vp, vp + '+' + n + 'L') + ';' + vp + '+=' + n + 'L}');
-                    }
-                    else {
-                        lines.push('let ' + n + 'L=' + driver.readU32(vp));
-                        lines.push(vp + '+=4');
-                        lines.push('let ' + n + '=' + driver.readUtf8(vp, vp + '+' + n + 'L'));
-                        lines.push(vp + '+=' + n + 'L');
-                    }
-                    break;
-            }
-        }
-        else {
-            let val = 'obj["' + n + '"]';
-
-            switch (type) {
-                case 'bytes':
-                    lines.push('let ' + n + 'L=' + val + '.length');
-                    lines.push(driver.writeU32(vp, n + 'L'));
-                    lines.push(vp + '+=4');
-                    lines.push('buf.set(' + val + ',' + vp + ')');
-                    lines.push(vp + '+=' + n + 'L');
-                    break;
-                case 'string':
-                    if (internFields && internFields.has(n)) {
-                        lines.push(vp + '=$si(\'' + n + '\',' + val + ',buf,' + vp + ')');
-                    }
-                    else if (isNode) {
-                        lines.push('let ' + n + 'L=buf.utf8Write(' + val + ',' + vp + '+4)');
-                        lines.push(driver.writeU32(vp, n + 'L'));
-                        lines.push(vp + '+=4+' + n + 'L');
-                    }
-                    else {
-                        lines.push('let ' + n + 'L=' + driver.byteLen(val));
-                        lines.push(driver.writeU32(vp, n + 'L'));
-                        lines.push(vp + '+=4');
-                        lines.push(vp + '+=' + driver.writeUtf8(val, vp, n + 'L'));
-                    }
-                    break;
-            }
-        }
-
-        return;
-    }
-
-    if (type.kind === 'nullable') {
-        if (dir === 'decode') {
-            lines.push('let ' + n + '=null');
-            lines.push('if(_bm&' + (1 << field._nullIndex!) + '){');
-            emitVarInner(lines, n, type.inner, vp, 'decode');
-            lines.push('}');
-        }
-        else {
-            let val = 'obj["' + n + '"]';
-
-            lines.push('if(' + val + '!=null){_bm|=' + (1 << field._nullIndex!) + ';');
-            emitVarInner(lines, val, type.inner, vp, 'encode');
-            lines.push('}');
-        }
-
-        return;
-    }
-
-    if (type.kind === 'object') {
-        if (dir === 'decode') {
-            lines.push('let ' + n + 'L=' + driver.readU32(vp));
-            lines.push(vp + '+=4');
-            lines.push('let ' + n + '=$d(buf,' + vp + ',' + n + 'L)');
-            lines.push(vp + '+=' + n + 'L');
-        }
-        else {
-            let val = 'obj["' + n + '"]';
-
-            lines.push('let ' + n + 'S=' + vp);
-            lines.push(vp + '+=4');
-            lines.push(vp + '=$e(' + val + ',buf,' + vp + ')');
-            lines.push(driver.writeU32(n + 'S', vp + '-' + n + 'S-4'));
-        }
-
-        return;
-    }
-
-    if (type.kind === 'array') {
-        let elem = type.element;
-
-        if (dir === 'decode') {
-            lines.push('let ' + n + 'C=' + driver.readU16(vp));
-            lines.push(vp + '+=2');
-            lines.push('let ' + n + '=new Array(' + n + 'C)');
-        }
-        else {
-            lines.push('let ' + n + 'A=obj["' + n + '"]');
-            lines.push('let ' + n + 'C=' + n + 'A.length');
-            lines.push(driver.writeU16(vp, n + 'C'));
-            lines.push(vp + '+=2');
-        }
-
-        emitArrayElements(lines, n, elem, vp, dir);
-
-        return;
-    }
-}
-
-function emitVarInner(lines: string[], nameOrVal: string, type: FieldType, vp: string, dir: 'decode' | 'encode'): void {
-    if (typeof type !== 'string') {
-        throw new Error('SBC: compound inner types (array, object, nullable) are not supported in nullable fields');
-    }
-
-    if (dir === 'decode') {
-        switch (type) {
-            case 'bigint':
-                lines.push(nameOrVal + '=' + driver.readBI64(vp));
-                lines.push(vp + '+=8');
-                break;
+        switch (f.type) {
             case 'boolean':
-                lines.push(nameOrVal + '=!!buf[' + vp + '++]');
+                body += `b[p]=${val}?1:0;p+=1;\n`;
                 break;
-            case 'bytes':
-                lines.push('let ' + nameOrVal + 'L=' + driver.readU32(vp));
-                lines.push(vp + '+=4');
-                lines.push(nameOrVal + '=buf.subarray(' + vp + ',' + vp + '+' + nameOrVal + 'L)');
-                lines.push(vp + '+=' + nameOrVal + 'L');
-                break;
-            case 'date':
-                lines.push(nameOrVal + '=new Date(' + driver.readF64(vp) + ')');
-                lines.push(vp + '+=8');
-                break;
-            case 'float64':
-                lines.push(nameOrVal + '=' + driver.readF64(vp));
-                lines.push(vp + '+=8');
-                break;
-            case 'int8':
-                lines.push(nameOrVal + '=(buf[' + vp + '++]<<24>>24)');
-                break;
-            case 'int16':
-                lines.push(nameOrVal + '=' + driver.readI16(vp));
-                lines.push(vp + '+=2');
-                break;
-            case 'int32':
-                lines.push(nameOrVal + '=' + driver.readI32(vp));
-                lines.push(vp + '+=4');
-                break;
-            case 'string':
-                lines.push('let ' + nameOrVal + 'L=' + driver.readU32(vp));
-                lines.push(vp + '+=4');
-                lines.push(nameOrVal + '=' + driver.readUtf8(vp, vp + '+' + nameOrVal + 'L'));
-                lines.push(vp + '+=' + nameOrVal + 'L');
-                break;
+
             case 'uint8':
-                lines.push(nameOrVal + '=buf[' + vp + '++]');
+                body += `b[p]=${val};p+=1;\n`;
                 break;
-            case 'uint16':
-                lines.push(nameOrVal + '=' + driver.readU16(vp));
-                lines.push(vp + '+=2');
-                break;
-            case 'uint32':
-                lines.push(nameOrVal + '=' + driver.readU32(vp));
-                lines.push(vp + '+=4');
-                break;
-            default:
-                throw new Error('SBC: unsupported nullable inner type: ' + type);
-        }
-    }
-    else {
-        switch (type) {
-            case 'bigint':
-                lines.push(driver.writeBI64(vp, nameOrVal));
-                lines.push(vp + '+=8');
-                break;
-            case 'boolean':
-                lines.push('buf[' + vp + '++]=' + nameOrVal + '?1:0');
-                break;
-            case 'bytes':
-                lines.push('let _bl=' + nameOrVal + '.length');
-                lines.push(driver.writeU32(vp, '_bl'));
-                lines.push(vp + '+=4');
-                lines.push('buf.set(' + nameOrVal + ',' + vp + ')');
-                lines.push(vp + '+=_bl');
-                break;
-            case 'date':
-                lines.push(driver.writeF64(vp, nameOrVal + '.getTime()'));
-                lines.push(vp + '+=8');
-                break;
-            case 'float64':
-                lines.push(driver.writeF64(vp, nameOrVal));
-                lines.push(vp + '+=8');
-                break;
+
             case 'int8':
-                lines.push('buf[' + vp + '++]=(' + nameOrVal + ')&0xFF');
+                body += `b[p]=${val}&0xFF;p+=1;\n`;
                 break;
+
+            case 'uint16':
+                body += `b[p]=${val}&0xFF;b[p+1]=(${val}>>>8)&0xFF;p+=2;\n`;
+                break;
+
             case 'int16':
-                lines.push(driver.writeI16(vp, nameOrVal));
-                lines.push(vp + '+=2');
+                body += `{let v=${val};b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}\n`;
                 break;
+
+            case 'uint32':
+                body += `{let v=${val};b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}\n`;
+                break;
+
             case 'int32':
-                lines.push(driver.writeI32(vp, nameOrVal));
-                lines.push(vp + '+=4');
+                body += `{let v=${val};b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}\n`;
                 break;
+
+            case 'float64':
+                body += `${d.writeF64('p', val)};p+=8;\n`;
+                break;
+
+            case 'bigint':
+                body += `_wBI64.call(b,${val},p);p+=8;\n`;
+                break;
+
+            case 'date':
+                body += `${d.writeF64('p', `${val}.getTime()`)};p+=8;\n`;
+                break;
+
             case 'string':
-                if (isNode) {
-                    lines.push('let _nl=buf.utf8Write(' + nameOrVal + ',' + vp + '+4)');
-                    lines.push(driver.writeU32(vp, '_nl'));
-                    lines.push(vp + '+=4+_nl');
+
+                // ASCII fast path — single-pass check+write for short strings (varint length)
+                body += `{let s=${val},sl=s.length;`;
+                body += `if(sl<17){`;
+                body += `b[p]=sl;p+=1;`;
+                body += `let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}`;
+                body += `if(_ok){p+=sl;}`;
+                body += `else{p-=1;let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}`;
+                body += `else{let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}\n`;
+                break;
+
+            case 'bytes':
+
+                body += `{let v=${val},l=v.length;`;
+                body += `p=_wv(b,p,l);`;
+                body += `b.set(v,p);p+=l;}\n`;
+                break;
+
+            case 'array':
+                if (f.elementType) {
+                    let et = f.elementType;
+
+                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
+                        et.base === 'uint16' || et.base === 'int16' ||
+                        et.base === 'uint32' || et.base === 'int32' ||
+                        et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
+                        // Typed array: varint count + raw fixed-size elements
+                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);`;
+
+                        switch (et.base) {
+                            case 'boolean':
+                                body += `for(let i=0;i<l;i++){b[p]=a[i]?1:0;p+=1;}`;
+                                break;
+                            case 'uint8':
+                                body += `for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;`;
+                                break;
+                            case 'int8':
+                                body += `for(let i=0;i<l;i++){b[p]=a[i]&0xFF;p+=1;}`;
+                                break;
+                            case 'uint16':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
+                                break;
+                            case 'int16':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
+                                break;
+                            case 'uint32':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
+                                break;
+                            case 'int32':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
+                                break;
+                            case 'float64':
+                                body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}`;
+                                break;
+                            case 'date':
+                                body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}`;
+                                break;
+                            case 'bigint':
+                                body += `for(let i=0;i<l;i++){_wBI64.call(b,a[i],p);p+=8;}`;
+                                break;
+                        }
+
+                        body += `}\n`;
+                    }
+                    else if (et.base === 'string') {
+                        // Typed array<string>: varint count + per-element [varint len][utf8 data]
+                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let s=a[i],sl=s.length;`;
+                        body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}`;
+                        body += `else{let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}}\n`;
+                    }
+                    else if (et.base === 'bytes') {
+                        // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
+                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let v=a[i],vl=v.length;p=_wv(b,p,vl);b.set(v,p);p+=vl;}}\n`;
+                    }
+                    else if (et.base === 'object' && et.hash !== undefined) {
+                        // Typed array<object(hash)>: varint count + per-element [varint payloadLen][fields]
+                        let refParam = refHashes.get(et.hash);
+
+                        if (refParam) {
+                            body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){`;
+                            body += `let _lp=p;p+=1;let _end=${refParam}(a[i],b,p);let _dl=_end-p;`;
+                            body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
+                            body += `else{p=_encObj(a[i],b,_lp);}}}\n`;
+                        }
+                        else {
+                            // Referenced schema not compiled — tagged fallback
+                            body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
+                        }
+                    }
+                    else {
+                        // Container element types: varint count + tagged elements
+                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
+                    }
                 }
                 else {
-                    lines.push('let _nl=' + driver.byteLen(nameOrVal));
-                    lines.push(driver.writeU32(vp, '_nl'));
-                    lines.push(vp + '+=4');
-                    lines.push(vp + '+=' + driver.writeUtf8(nameOrVal, vp, '_nl'));
+                    // Existing generic path — inline packed numeric detection
+                    body += `{let a=${val},l=a.length,_pk=0;`;
+                    body += `if(l>0&&typeof a[0]==='number'){`;
+                    body += `let _u8=1,_i32=1,_an=1;`;
+                    body += `for(let i=0;i<l;i++){let v=a[i];if(typeof v!=='number'){_an=0;break;}`;
+                    body += `if(v!==((v&0xFF)>>>0)){_u8=0;}`;
+                    body += `if(v!==(v|0)){_i32=0;}}`;
+                    // packed uint8: flag=1, u32 count, raw bytes
+                    body += `if(_an&&_u8){_pk=1;b[p]=1;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;}`;
+                    // packed int32: flag=2, u32 count, 4 bytes each
+                    body += `else if(_an&&_i32){_pk=1;b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
+                    // packed float64: flag=3, u32 count, 8 bytes each
+                    body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}}`;
+                    // generic: flag=0, u32 count, tagged elements
+                    body += `if(!_pk){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
                 }
+
                 break;
-            case 'uint8':
-                lines.push('buf[' + vp + '++]=' + nameOrVal);
+
+            case 'object':
+                if (f.refHash !== undefined) {
+                    let rp = refHashes.get(f.refHash);
+
+                    if (rp) {
+                        // Direct encode: reserve 1 byte for varint len, call ref encoder
+                        body += `{let _lp=p;p+=1;let _end=${rp}(${val},b,p);let _dl=_end-p;`;
+                        body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
+                        body += `else{p=_encObj(${val},b,_lp);}}\n`;
+                    }
+                    else {
+                        body += `p=_encObj(${val},b,p);\n`;
+                    }
+                }
+                else {
+                    body += `p=_encObj(${val},b,p);\n`;
+                }
+
                 break;
-            case 'uint16':
-                lines.push(driver.writeU16(vp, nameOrVal));
-                lines.push(vp + '+=2');
+
+            case 'map':
+            case 'set':
+            case 'typedarray':
+
+                body += `p=_enc(${val},b,p);\n`;
                 break;
-            case 'uint32':
-                lines.push(driver.writeU32(vp, nameOrVal));
-                lines.push(vp + '+=4');
+
+            case 'mixed':
+
+                body += `p=_enc(${val},b,p);\n`;
                 break;
-            default:
-                throw new Error('SBC: unsupported nullable inner type: ' + type);
         }
+
+        if (f.nullable) {
+            body += `}\n`;
+        }
+    }
+
+    if (schema.nullableCount > 0) {
+        body += `b[_bp]=_bm&0xFF;\n`;
+
+        if (schema.bitmapBytes > 1) {
+            body += `b[_bp+1]=(_bm>>>8)&0xFF;\n`;
+        }
+    }
+
+    body += `return p;\n`;
+
+    let bindArgs = d.encoderBindArgs(),
+        params = d.encoderParams(),
+        refEncParamNames = [...refHashes.values()],
+        refEncBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.encodeFn!);
+
+    try {
+        return (
+            new Function(params, '_enc', '_encObj', '_wv', ...refEncParamNames, `return function encode(o,b,pos){${body}}`)
+        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint, ...refEncBindValues);
+    }
+    catch (e) {
+        throw new Error('Codec2: encoder compilation failed: ' + (e instanceof Error ? e.message : e));
     }
 }
 
-function emitVarFields(lines: string[], schema: Schema, vp: string, dir: 'decode' | 'encode', isCompressed: boolean, internFields?: Set<string>): boolean {
-    let hasVar = false;
 
-    for (let i = 0, n = schema.fields.length; i < n; i++) {
-        let field = schema.fields[i]!;
+function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (buf: Uint8Array, pos: number) => unknown {
+    let body = `'use strict';\n`,
+        fields = schema.fields,
+        n = fields.length;
 
-        if (isCompressed) {
-            if (field.fixedSize > 0 || field.type === 'boolean') {
-                continue;
+    // Collect unique ref hashes for direct-call decode
+    let refHashes: Map<number, string> = new Map(),
+        refIdx = 0;
+
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!;
+
+        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
+            let rs = helpers.registry.get(f.refHash);
+
+            if (rs && rs.decodeFn) {
+                refHashes.set(f.refHash, `_rd${refIdx++}`);
             }
+        }
 
-            if (typeof field.type === 'object' && field.type.kind === 'array' && isVarintIntType(field.type.element)) {
-                emitDeltaArray(lines, field, vp, dir);
-                continue;
-            }
+        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
+            let rs = helpers.registry.get(f.elementType.hash);
 
-            if (typeof field.type === 'object' && field.type.kind === 'array' && field.type.element === 'float64') {
-                emitFloat64ArrayCompressed(lines, field, vp, dir);
-                continue;
+            if (rs && rs.decodeFn) {
+                refHashes.set(f.elementType.hash, `_rd${refIdx++}`);
             }
+        }
+    }
 
-            if (!isVarintIntType(field.type) && field.type !== 'float64') {
-                emitVar(lines, field, vp, dir, internFields);
-            }
+    body += d.preamble('b');
+    body += `let p=pos;\n`;
+
+    if (schema.nullableCount > 0) {
+        if (schema.bitmapBytes === 1) {
+            body += `let _bm=b[p];p+=1;\n`;
         }
         else {
-            if (field.fixedSize > 0) {
-                continue;
-            }
-
-            if (!hasVar) {
-                lines.push('let ' + vp + '=pos+' + schema.fixedSize);
-                hasVar = true;
-            }
-
-            emitVar(lines, field, vp, dir, internFields);
+            body += `let _bm=b[p]|(b[p+1]<<8);p+=2;\n`;
         }
     }
 
-    return hasVar;
-}
-
-function extractableInner(type: FieldType): string | null {
-    if (typeof type === 'string') {
-        return (type === 'string' || type === 'bytes') ? type : null;
-    }
-
-    if (typeof type === 'object' && type.kind === 'nullable' && typeof type.inner === 'string') {
-        return (type.inner === 'string' || type.inner === 'bytes') ? type.inner : null;
-    }
-
-    return null;
-}
-
-function finalizeBody(lines: string[]): string {
-    let preamble = driver.preamble('buf');
-
-    if (preamble) {
-        lines.unshift(preamble);
-    }
-
-    return lines.join(';');
-}
-
-function isCompressible(fields: FieldDef[]): boolean {
-    let boolCount = 0,
-        hasCompressible = false;
-
-    for (let i = 0, n = fields.length; i < n; i++) {
-        let field = fields[i]!;
-
-        if (field.type === 'boolean') {
-            boolCount++;
-            continue;
+    // Declare all field variables — nullable fields default to null
+    for (let i = 0; i < n; i++) {
+        if (fields[i]!.nullable) {
+            body += `let f${i}=null;\n`;
         }
-
-        if (field.type === 'float64' || isVarintIntType(field.type)) {
-            hasCompressible = true;
-            continue;
-        }
-
-        if (typeof field.type === 'object' && field.type.kind === 'array' && (isVarintIntType(field.type.element) || field.type.element === 'float64')) {
-            hasCompressible = true;
+        else {
+            body += `let f${i};\n`;
         }
     }
 
-    if (boolCount > 16) {
-        return false;
-    }
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!;
 
-    return hasCompressible || boolCount > 0;
-}
-
-function isSignedIntType(type: string): boolean {
-    return type === 'int8' || type === 'int16' || type === 'int32';
-}
-
-function isSizeComputable(schema: Schema): boolean {
-    for (let i = 0, n = schema.fields.length; i < n; i++) {
-        let type = schema.fields[i]!.type;
-
-        if (typeof type === 'string') {
-            if (FIELD_SIZES[type] || type === 'bytes' || type === 'string') {
-                continue;
-            }
-
-            return false;
+        if (f.nullable) {
+            body += `if(_bm&${1 << f.nullIndex}){`;
         }
 
-        if (type.kind === 'object') {
-            continue;
-        }
+        switch (f.type) {
+            case 'boolean':
+                body += `f${i}=!!b[p];p+=1;\n`;
+                break;
 
-        if (type.kind === 'array') {
-            let elem = type.element;
+            case 'uint8':
+                body += `f${i}=b[p];p+=1;\n`;
+                break;
 
-            if (typeof elem === 'string' && (FIELD_SIZES[elem] || elem === 'string')) {
-                continue;
-            }
+            case 'int8':
+                body += `f${i}=(b[p]<<24)>>24;p+=1;\n`;
+                break;
 
-            return false;
-        }
+            case 'uint16':
+                body += `f${i}=b[p]|(b[p+1]<<8);p+=2;\n`;
+                break;
 
-        if (type.kind === 'nullable') {
-            let inner = type.inner;
+            case 'int16':
+                body += `f${i}=((b[p]|(b[p+1]<<8))<<16)>>16;p+=2;\n`;
+                break;
 
-            if (typeof inner === 'string') {
-                if (FIELD_SIZES[inner] || inner === 'bytes' || inner === 'string') {
-                    continue;
+            case 'uint32':
+                body += `f${i}=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;\n`;
+                break;
+
+            case 'int32':
+                body += `f${i}=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;\n`;
+                break;
+
+            case 'float64':
+                body += `f${i}=${d.readF64('p')};p+=8;\n`;
+                break;
+
+            case 'bigint':
+                body += `f${i}=_rBI64.call(b,p);p+=8;\n`;
+                break;
+
+            case 'date':
+                body += `f${i}=new Date(${d.readF64('p')});p+=8;\n`;
+                break;
+
+            case 'string':
+                // Inline varint read — single byte for lengths < 128 (common case)
+                body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}if(p+l>b.length)throw new Error('Codec2: truncated string');f${i}=${d.readStr('p', 'l')};p+=l;}\n`;
+                break;
+
+            case 'bytes':
+                body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}if(p+l>b.length)throw new Error('Codec2: truncated bytes');f${i}=b.slice(p,p+l);p+=l;}\n`;
+                break;
+
+            case 'array':
+                if (f.elementType) {
+                    let et = f.elementType;
+
+                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
+                        et.base === 'uint16' || et.base === 'int16' ||
+                        et.base === 'uint32' || et.base === 'int32' ||
+                        et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
+                        // Typed array: varint count + raw fixed-size elements
+                        body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+
+                        switch (et.base) {
+                            case 'boolean':
+                                body += `for(let i=0;i<l;i++){a[i]=!!b[p];p+=1;}`;
+                                break;
+                            case 'uint8':
+                                body += `for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;`;
+                                break;
+                            case 'int8':
+                                body += `for(let i=0;i<l;i++){a[i]=(b[p]<<24)>>24;p+=1;}`;
+                                break;
+                            case 'uint16':
+                                body += `for(let i=0;i<l;i++){a[i]=b[p]|(b[p+1]<<8);p+=2;}`;
+                                break;
+                            case 'int16':
+                                body += `for(let i=0;i<l;i++){a[i]=((b[p]|(b[p+1]<<8))<<16)>>16;p+=2;}`;
+                                break;
+                            case 'uint32':
+                                body += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;}`;
+                                break;
+                            case 'int32':
+                                body += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}`;
+                                break;
+                            case 'float64':
+                                body += `for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}`;
+                                break;
+                            case 'date':
+                                body += `for(let i=0;i<l;i++){a[i]=new Date(${d.readF64('p')});p+=8;}`;
+                                break;
+                            case 'bigint':
+                                body += `for(let i=0;i<l;i++){a[i]=_rBI64.call(b,p);p+=8;}`;
+                                break;
+                        }
+
+                        body += `f${i}=a;}\n`;
+                    }
+                    else if (et.base === 'string') {
+                        // Typed array<string>: varint count + per-element [varint len][utf8 data]
+                        body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{let _vr=_rv(b,p);sl=_vr[0];p=_vr[1];}a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
+                        body += `f${i}=a;}\n`;
+                    }
+                    else if (et.base === 'bytes') {
+                        // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
+                        body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{let _vr=_rv(b,p);bl=_vr[0];p=_vr[1];}a[i]=b.slice(p,p+bl);p+=bl;}`;
+                        body += `f${i}=a;}\n`;
+                    }
+                    else if (et.base === 'object' && et.hash !== undefined) {
+                        // Typed array<object(hash)>: varint count + per-element [varint payloadLen][fields]
+                        let refParam = refHashes.get(et.hash);
+
+                        if (refParam) {
+                            body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                            body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            body += `let a=new Array(l);`;
+                            body += `for(let i=0;i<l;i++){let _dl=b[p];`;
+                            body += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
+                            body += `else{if(b[p]===8||b[p]===18){`;
+                            body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                            body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                            body += `_s=_reg.get(_h);`;
+                            body += `if(_s&&_s.decodeFn){a[i]=_s.decodeFn(b,p+9,_d+1);}else{a[i]=null;}`;
+                            body += `p+=9+_dl2;}`;
+                            body += `else{let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}}`;
+                            body += `f${i}=a;}\n`;
+                        }
+                        else {
+                            // Referenced schema not compiled — tagged fallback
+                            body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                            body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            body += `let a=new Array(l);`;
+                            body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
+                            body += `f${i}=a;}\n`;
+                        }
+                    }
+                    else {
+                        // Container element types: varint count + tagged elements
+                        body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+                        body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
+                        body += `f${i}=a;}\n`;
+                    }
+                }
+                else {
+                    // Existing generic path — flag byte + u32 count
+                    body += `{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
+                    // flag=0: generic tagged elements
+                    body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
+                    // flag=1: packed uint8
+                    body += `else if(_f===1){for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
+                    // flag=2: packed int32
+                    body += `else if(_f===2){for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
+                    // flag=3: packed float64
+                    body += `else{for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}}`;
+                    body += `f${i}=a;}\n`;
                 }
 
-                return false;
-            }
+                break;
 
-            if (typeof inner === 'object' && inner.kind === 'array') {
-                let elem = inner.element;
+            case 'object':
+                if (f.refHash !== undefined) {
+                    let rp = refHashes.get(f.refHash);
 
-                if (typeof elem === 'string' && (FIELD_SIZES[elem] || elem === 'string')) {
-                    continue;
+                    if (rp) {
+                        // Direct decode: 1-byte varint len fast path, fallback to tag-8 header
+                        body += `{let _dl=b[p];`;
+                        body += `if(_dl<128){p+=1;f${i}=${rp}(b,p,_d+1);p+=_dl;}`;
+                        body += `else if(b[p]===8||b[p]===18){`;
+                        body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                        body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                        body += `_s=_reg.get(_h);`;
+                        body += `if(_s&&_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}`;
+                        body += `p+=9+_dl2;}`;
+                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
+                    }
+                    else {
+                        // Ref schema not compiled — generic path
+                        body += `{if(b[p]===8){`;
+                        body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                        body += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                        body += `_s=_reg.get(_h);`;
+                        body += `if(_s&&_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}`;
+                        body += `p+=9+_dl;}`;
+                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
+                    }
+                }
+                else {
+                    // Inline tag-8 fast path: skip decodeTagEnd + decodeSbc switch overhead
+                    body += `{if(b[p]===8){`;
+                    body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                    body += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                    body += `_s=_reg.get(_h);`;
+                    body += `if(_s&&_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}`;
+                    body += `p+=9+_dl;}`;
+                    body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
                 }
 
-                return false;
-            }
+                break;
 
-            return false;
+            case 'map':
+            case 'set':
+            case 'typedarray':
+                body += `{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}\n`;
+
+                break;
+
+            case 'mixed':
+                body += `{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}\n`;
+
+                break;
         }
 
-        // mixed and other complex types are not size-computable
-        return false;
+        if (f.nullable) {
+            body += `}\n`;
+        }
     }
 
-    return true;
-}
+    // Build return object — constructor with frozen null-proto prototype for V8 hidden class + safety
+    body += `let _r=new _Ctor();`;
 
-function isVarintIntType(type: FieldType): boolean {
-    return type === 'int16' || type === 'int32' || type === 'uint16' || type === 'uint32';
-}
-
-function sortFields(a: FieldDef, b: FieldDef): number {
-    if (a.fixedSize > 0 && b.fixedSize === 0) {
-        return -1;
+    for (let i = 0; i < n; i++) {
+        body += `_r[${JSON.stringify(fields[i]!.name)}]=f${i};`;
     }
 
-    if (a.fixedSize === 0 && b.fixedSize > 0) {
-        return 1;
+    body += `return _r;\n`;
+
+    // Create per-schema constructor — V8 creates stable hidden class for instances
+    let Ctor = new Function('') as new () => Record<string, unknown>;
+
+    Ctor.prototype = _safeProto;
+
+    let bindArgs = d.decoderBindArgs(),
+        refDecParamNames = [...refHashes.values()],
+        refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
+
+    try {
+        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_Ctor', ...refDecParamNames, `return function decode(b,pos,_d){${body}}`);
+
+        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, Ctor, ...refDecBindValues);
+    }
+    catch (e) {
+        throw new Error('Codec2: decoder compilation failed: ' + (e instanceof Error ? e.message : e));
+    }
+}
+
+
+function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (buf: Uint8Array, pos: number, depth: number) => unknown {
+    let body = `'use strict';\n`,
+        fields = schema.fields,
+        n = fields.length;
+
+    // Collect unique ref hashes for direct-call decode
+    let refHashes: Map<number, string> = new Map(),
+        refIdx = 0;
+
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!;
+
+        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
+            let rs = helpers.registry.get(f.refHash);
+
+            if (rs && rs.decodeFn) {
+                refHashes.set(f.refHash, `_rd${refIdx++}`);
+            }
+        }
+
+        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
+            let rs = helpers.registry.get(f.elementType.hash);
+
+            if (rs && rs.decodeFn) {
+                refHashes.set(f.elementType.hash, `_rd${refIdx++}`);
+            }
+        }
     }
 
-    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    body += d.preamble('b');
+    body += `let p=pos;\n`;
+
+    // Declare field variables
+    for (let i = 0; i < n; i++) {
+        body += `let f${i}${fields[i]!.nullable ? '=null' : ''};\n`;
+    }
+
+    // Read null bitmap
+    if (schema.nullableCount > 0) {
+        body += schema.bitmapBytes === 1 ? `let _bm=b[p];p+=1;\n` : `let _bm=b[p]|(b[p+1]<<8);p+=2;\n`;
+    }
+
+    // Read bool bitmap
+    let boolCount = schema.boolFields.length,
+        boolBitmapBytes = boolCount > 0 ? Math.ceil(boolCount / 8) : 0;
+
+    if (boolCount > 0) {
+        body += boolBitmapBytes === 1 ? `let _bb=b[p];p+=1;\n` : `let _bb=b[p]|(b[p+1]<<8);p+=2;\n`;
+    }
+
+    // Pass 1: Booleans, bigint, date, uint8, int8
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            no = f.nullable ? `if(_bm&${1 << f.nullIndex}){` : '',
+            nc = f.nullable ? `}` : '';
+
+        switch (f.type) {
+            case 'boolean': {
+                let bi = schema.boolFields.indexOf(i);
+
+                body += `${no}f${i}=!!(_bb&${1 << bi});${nc}\n`;
+                break;
+            }
+            case 'bigint':
+                body += `${no}f${i}=_rBI64.call(b,p);p+=8;${nc}\n`;
+                break;
+            case 'date':
+                body += `${no}f${i}=new Date(${d.readF64('p')});p+=8;${nc}\n`;
+                break;
+            case 'uint8':
+                body += `${no}f${i}=b[p];p+=1;${nc}\n`;
+                break;
+            case 'int8':
+                body += `${no}f${i}=(b[p]<<24)>>24;p+=1;${nc}\n`;
+                break;
+        }
+    }
+
+    // Pass 2: Varint integers
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            no = f.nullable ? `if(_bm&${1 << f.nullIndex}){` : '',
+            nc = f.nullable ? `}` : '';
+
+        if (f.type === 'int16' || f.type === 'int32') {
+            body += `${no}{let _r=_rz(b,p);f${i}=_r[0];p=_r[1];}${nc}\n`;
+        }
+        else if (f.type === 'uint16' || f.type === 'uint32') {
+            body += `${no}{let _r=_rv(b,p);f${i}=_r[0];p=_r[1];}${nc}\n`;
+        }
+    }
+
+    // Pass 3: Adaptive float64
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            no = f.nullable ? `if(_bm&${1 << f.nullIndex}){` : '',
+            nc = f.nullable ? `}` : '';
+
+        if (f.type === 'float64') {
+            body += `${no}{let _fl=b[p++];if(_fl===0){let _r=_rz(b,p);f${i}=_r[0];p=_r[1];}else{f${i}=${d.readF64('p')};p+=8;}}${nc}\n`;
+        }
+    }
+
+    // Pass 4: Variable fields
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            no = f.nullable ? `if(_bm&${1 << f.nullIndex}){` : '',
+            nc = f.nullable ? `}` : '';
+
+        switch (f.type) {
+            case 'string':
+                body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}f${i}=${d.readStr('p', 'l')};p+=l;}${nc}\n`;
+                break;
+            case 'bytes':
+                body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}f${i}=b.slice(p,p+l);p+=l;}${nc}\n`;
+                break;
+            case 'array':
+                if (f.elementType) {
+                    let et = f.elementType;
+
+                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
+                        et.base === 'uint16' || et.base === 'int16' ||
+                        et.base === 'uint32' || et.base === 'int32' ||
+                        et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
+                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+
+                        switch (et.base) {
+                            case 'boolean':
+                                body += `for(let i=0;i<l;i++){a[i]=!!b[p];p+=1;}`;
+                                break;
+                            case 'uint8':
+                                body += `for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;`;
+                                break;
+                            case 'int8':
+                                body += `for(let i=0;i<l;i++){a[i]=(b[p]<<24)>>24;p+=1;}`;
+                                break;
+                            case 'uint16':
+                                body += `for(let i=0;i<l;i++){a[i]=b[p]|(b[p+1]<<8);p+=2;}`;
+                                break;
+                            case 'int16':
+                                body += `for(let i=0;i<l;i++){a[i]=((b[p]|(b[p+1]<<8))<<16)>>16;p+=2;}`;
+                                break;
+                            case 'uint32':
+                                body += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;}`;
+                                break;
+                            case 'int32':
+                                body += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}`;
+                                break;
+                            case 'float64':
+                                body += `for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}`;
+                                break;
+                            case 'date':
+                                body += `for(let i=0;i<l;i++){a[i]=new Date(${d.readF64('p')});p+=8;}`;
+                                break;
+                            case 'bigint':
+                                body += `for(let i=0;i<l;i++){a[i]=_rBI64.call(b,p);p+=8;}`;
+                                break;
+                        }
+
+                        body += `f${i}=a;}${nc}\n`;
+                    }
+                    else if (et.base === 'string') {
+                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{let _vr=_rv(b,p);sl=_vr[0];p=_vr[1];}a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
+                        body += `f${i}=a;}${nc}\n`;
+                    }
+                    else if (et.base === 'bytes') {
+                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{let _vr=_rv(b,p);bl=_vr[0];p=_vr[1];}a[i]=b.slice(p,p+bl);p+=bl;}`;
+                        body += `f${i}=a;}${nc}\n`;
+                    }
+                    else if (et.base === 'object' && et.hash !== undefined) {
+                        let refParam = refHashes.get(et.hash);
+
+                        if (refParam) {
+                            body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                            body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            body += `let a=new Array(l);`;
+                            body += `for(let i=0;i<l;i++){let _dl=b[p];`;
+                            body += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
+                            body += `else{if(b[p]===8||b[p]===18){`;
+                            body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                            body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                            body += `_s=_reg.get(_h);`;
+                            body += `if(_s&&_s.decodeFn){a[i]=_s.decodeFn(b,p+9,_d+1);}else{a[i]=null;}`;
+                            body += `p+=9+_dl2;}`;
+                            body += `else{let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}}`;
+                            body += `f${i}=a;}${nc}\n`;
+                        }
+                        else {
+                            body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                            body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            body += `let a=new Array(l);`;
+                            body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
+                            body += `f${i}=a;}${nc}\n`;
+                        }
+                    }
+                    else {
+                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `let a=new Array(l);`;
+                        body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
+                        body += `f${i}=a;}${nc}\n`;
+                    }
+                }
+                else {
+                    body += `${no}{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
+                    body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
+                    body += `else if(_f===1){for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
+                    body += `else if(_f===2){for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
+                    body += `else{for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}}`;
+                    body += `f${i}=a;}${nc}\n`;
+                }
+
+                break;
+            case 'object':
+                if (f.refHash !== undefined) {
+                    let rp = refHashes.get(f.refHash);
+
+                    if (rp) {
+                        body += `${no}{let _dl=b[p];`;
+                        body += `if(_dl<128){p+=1;f${i}=${rp}(b,p,_d+1);p+=_dl;}`;
+                        body += `else if(b[p]===8||b[p]===18){`;
+                        body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                        body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                        body += `_s=_reg.get(_h);`;
+                        body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
+                        body += `p+=9+_dl2;}`;
+                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
+                    }
+                    else {
+                        body += `${no}{if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h);`;
+                        body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
+                        body += `p+=9+_dl;}`;
+                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
+                    }
+                }
+                else {
+                    body += `${no}{if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h);`;
+                    body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
+                    body += `p+=9+_dl;}`;
+                    body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
+                }
+
+                break;
+            case 'map': case 'set': case 'typedarray': case 'mixed':
+                body += `${no}{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}${nc}\n`;
+                break;
+        }
+    }
+
+    // Build return object — constructor with frozen null-proto prototype for V8 hidden class + safety
+    body += `let _r=new _Ctor();`;
+
+    for (let i = 0; i < n; i++) {
+        body += `_r[${JSON.stringify(fields[i]!.name)}]=f${i};`;
+    }
+
+    body += `return _r;\n`;
+
+    let Ctor = new Function('') as new () => Record<string, unknown>;
+
+    Ctor.prototype = _safeProto;
+
+    let bindArgs = d.decoderBindArgs(),
+        refDecParamNames = [...refHashes.values()],
+        refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
+
+    try {
+        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_rz', '_Ctor', ...refDecParamNames, `return function decodeC(b,pos,_d){${body}}`)
+        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, readZigzag, Ctor, ...refDecBindValues);
+    }
+    catch (e) {
+        throw new Error('Codec2: compressed decoder compilation failed: ' + (e instanceof Error ? e.message : e));
+    }
 }
 
-function sortFieldsByName(schema: Schema): FieldDef[] {
-    return schema.fieldsSorted ??= schema.fields.slice().sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+
+function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (obj: unknown, buf: Uint8Array, pos: number) => number {
+    let body = `'use strict';\n`,
+        fields = schema.fields,
+        n = fields.length;
+
+    // Collect unique ref hashes for direct-call encode
+    let refHashes: Map<number, string> = new Map(),
+        refIdx = 0;
+
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!;
+
+        if (f.refHash !== undefined && !refHashes.has(f.refHash)) {
+            let rs = helpers.registry.get(f.refHash);
+
+            if (rs && rs.encodeFn) {
+                refHashes.set(f.refHash, `_re${refIdx++}`);
+            }
+        }
+
+        if (f.elementType?.hash !== undefined && !refHashes.has(f.elementType.hash)) {
+            let rs = helpers.registry.get(f.elementType.hash);
+
+            if (rs && rs.encodeFn) {
+                refHashes.set(f.elementType.hash, `_re${refIdx++}`);
+            }
+        }
+    }
+
+    body += d.preamble('b');
+    body += `let p=pos;\n`;
+
+    // Null bitmap
+    if (schema.nullableCount > 0) {
+        body += `let _bm=0,_bp=p;p+=${schema.bitmapBytes};\n`;
+    }
+
+    // Bool bitmap
+    let boolCount = schema.boolFields.length,
+        boolBitmapBytes = boolCount > 0 ? Math.ceil(boolCount / 8) : 0;
+
+    if (boolCount > 0) {
+        body += `let _bb=0,_bbp=p;p+=${boolBitmapBytes};\n`;
+    }
+
+    // Pass 1: Booleans (into bitmap), bigint, date, uint8, int8
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            sk = JSON.stringify(f.name),
+            v = `o[${sk}]`;
+
+        switch (f.type) {
+            case 'boolean': {
+                let bi = schema.boolFields.indexOf(i);
+
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};if(${v}){_bb|=${1 << bi};}}\n`;
+                }
+                else {
+                    body += `if(${v}){_bb|=${1 << bi};}\n`;
+                }
+
+                break;
+            }
+            case 'bigint':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `_wBI64.call(b,${v},p);p+=8;\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'date':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `${d.writeF64('p', `${v}.getTime()`)};p+=8;\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'uint8':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `b[p]=${v};p+=1;\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'int8':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `b[p]=${v}&0xFF;p+=1;\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+        }
+    }
+
+    // Pass 2: Varint integers
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            sk = JSON.stringify(f.name),
+            v = `o[${sk}]`;
+
+        if (f.type === 'int16' || f.type === 'int32') {
+            if (f.nullable) {
+                body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+            }
+
+            body += `p=_wz(b,p,${v});\n`;
+
+            if (f.nullable) {
+                body += `}\n`;
+            }
+        }
+        else if (f.type === 'uint16' || f.type === 'uint32') {
+            if (f.nullable) {
+                body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+            }
+
+            body += `p=_wv(b,p,${v});\n`;
+
+            if (f.nullable) {
+                body += `}\n`;
+            }
+        }
+    }
+
+    // Pass 3: Adaptive float64
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            sk = JSON.stringify(f.name),
+            v = `o[${sk}]`;
+
+        if (f.type === 'float64') {
+            if (f.nullable) {
+                body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+            }
+
+            body += `{let _v=${v};if(Number.isInteger(_v)&&_v>=-2147483648&&_v<=2147483647){b[p++]=0;p=_wz(b,p,_v);}else{b[p++]=1;${d.writeF64('p', '_v')};p+=8;}}\n`;
+
+            if (f.nullable) {
+                body += `}\n`;
+            }
+        }
+    }
+
+    // Pass 4: Variable fields (string, bytes, array, object, mixed, map, set, typedarray)
+    for (let i = 0; i < n; i++) {
+        let f = fields[i]!,
+            sk = JSON.stringify(f.name),
+            v = `o[${sk}]`;
+
+        switch (f.type) {
+            case 'string':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `{let s=${v},sl=s.length;`;
+                body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}`;
+                body += `else{let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'bytes':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `{let _v=${v},l=_v.length;p=_wv(b,p,l);b.set(_v,p);p+=l;}\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'array':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                if (f.elementType) {
+                    let et = f.elementType;
+
+                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
+                        et.base === 'uint16' || et.base === 'int16' ||
+                        et.base === 'uint32' || et.base === 'int32' ||
+                        et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
+                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);`;
+
+                        switch (et.base) {
+                            case 'boolean':
+                                body += `for(let i=0;i<l;i++){b[p]=a[i]?1:0;p+=1;}`;
+                                break;
+                            case 'uint8':
+                                body += `for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;`;
+                                break;
+                            case 'int8':
+                                body += `for(let i=0;i<l;i++){b[p]=a[i]&0xFF;p+=1;}`;
+                                break;
+                            case 'uint16':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
+                                break;
+                            case 'int16':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
+                                break;
+                            case 'uint32':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
+                                break;
+                            case 'int32':
+                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
+                                break;
+                            case 'float64':
+                                body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}`;
+                                break;
+                            case 'date':
+                                body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}`;
+                                break;
+                            case 'bigint':
+                                body += `for(let i=0;i<l;i++){_wBI64.call(b,a[i],p);p+=8;}`;
+                                break;
+                        }
+
+                        body += `}\n`;
+                    }
+                    else if (et.base === 'string') {
+                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let s=a[i],sl=s.length;`;
+                        body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}`;
+                        body += `else{let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}}\n`;
+                    }
+                    else if (et.base === 'bytes') {
+                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let v=a[i],vl=v.length;p=_wv(b,p,vl);b.set(v,p);p+=vl;}}\n`;
+                    }
+                    else if (et.base === 'object' && et.hash !== undefined) {
+                        let refParam = refHashes.get(et.hash);
+
+                        if (refParam) {
+                            body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){`;
+                            body += `let _lp=p;p+=1;let _end=${refParam}(a[i],b,p);let _dl=_end-p;`;
+                            body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
+                            body += `else{p=_encObj(a[i],b,_lp);}}}\n`;
+                        }
+                        else {
+                            body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
+                        }
+                    }
+                    else {
+                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
+                    }
+                }
+                else {
+                    body += `{let a=${v},l=a.length,_pk=0;`;
+                    body += `if(l>0&&typeof a[0]==='number'){let _u8=1,_i32=1,_an=1;for(let i=0;i<l;i++){let v=a[i];if(typeof v!=='number'){_an=0;break;}if(v!==((v&0xFF)>>>0)){_u8=0;}if(v!==(v|0)){_i32=0;}}`;
+                    body += `if(_an&&_u8){_pk=1;b[p]=1;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;}`;
+                    body += `else if(_an&&_i32){_pk=1;b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
+                    body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}}`;
+                    body += `if(!_pk){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
+                }
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'object':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                if (f.refHash !== undefined) {
+                    let rp = refHashes.get(f.refHash);
+
+                    if (rp) {
+                        body += `{let _lp=p;p+=1;let _end=${rp}(${v},b,p);let _dl=_end-p;`;
+                        body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
+                        body += `else{p=_encObj(${v},b,_lp);}}\n`;
+                    }
+                    else {
+                        body += `p=_encObj(${v},b,p);\n`;
+                    }
+                }
+                else {
+                    body += `p=_encObj(${v},b,p);\n`;
+                }
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+            case 'map': case 'set': case 'typedarray': case 'mixed':
+                if (f.nullable) {
+                    body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
+                }
+
+                body += `p=_enc(${v},b,p);\n`;
+
+                if (f.nullable) {
+                    body += `}\n`;
+                }
+
+                break;
+        }
+    }
+
+    // Write bitmaps
+    if (schema.nullableCount > 0) {
+        body += `b[_bp]=_bm&0xFF;\n`;
+
+        if (schema.bitmapBytes > 1) {
+            body += `b[_bp+1]=(_bm>>>8)&0xFF;\n`;
+        }
+    }
+
+    if (boolCount > 0) {
+        body += `b[_bbp]=_bb&0xFF;\n`;
+
+        if (boolBitmapBytes > 1) {
+            body += `b[_bbp+1]=(_bb>>>8)&0xFF;\n`;
+        }
+    }
+
+    body += `return p;\n`;
+
+    let bindArgs = d.encoderBindArgs(),
+        params = d.encoderParams(),
+        refEncParamNames = [...refHashes.values()],
+        refEncBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.encodeFn!);
+
+    try {
+        return (
+            new Function(params, '_enc', '_encObj', '_wv', '_wz', ...refEncParamNames, `return function encodeC(o,b,pos){${body}}`)
+        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint, writeZigzag, ...refEncBindValues);
+    }
+    catch (e) {
+        throw new Error('Codec2: compressed encoder compilation failed: ' + (e instanceof Error ? e.message : e));
+    }
 }
 
 
-export { buildSchema, buildSchemaFromDef, compileCompressedDecoder, compileCompressedEncoder, compileSchema, validateFieldName, validateFieldTypeString };
+export { compileSchema };
+export type { FieldDef, ParsedType, Schema, SbcHelpers };

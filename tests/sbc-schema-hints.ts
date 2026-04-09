@@ -2,8 +2,8 @@ import { coordinator } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
 import { describe, expect, test } from 'vitest';
 
-import { createCodec } from '../src/codec2';
-import codec2Plugin from '../src/compiler/codec2';
+import { createCodec } from '../src/sbc';
+import sbcPlugin from '../src/compiler/sbc';
 
 
 let compilerOptions: ts.CompilerOptions = {
@@ -58,7 +58,7 @@ function transformCodec2(code: string): string {
         shared = new Map(),
         sourceFile = program.getSourceFile(filename)!;
 
-    return coordinator.transform([codec2Plugin], fullCode, sourceFile, program, shared).code;
+    return coordinator.transform([sbcPlugin], fullCode, sourceFile, program, shared).code;
 }
 
 
