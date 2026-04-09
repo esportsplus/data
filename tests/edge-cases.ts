@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createValidator, mightNeedTransform, transformCode } from './utils';
+import { min } from '../src/validators';
 
 
 describe('Edge Cases', () => {
@@ -449,4 +450,30 @@ describe('Null vs Undefined Handling', () => {
             expect(result.ok).toBe(true);
         });
     });
+});
+
+
+describe('Custom Validator Guard Suppression', () => {
+    it('custom callback is NOT invoked when field validation fails', () => {
+        // The generated code wraps custom validator in `if (!_errors) { ... }`
+        // When field validation pushes errors, _errors becomes truthy and the
+        // custom callback is skipped.
+        let validate = createValidator(`
+            type WithAge = { age: number; name: string };
+            validator.build<WithAge>((data, errors) => {
+                errors.push({ message: 'custom ran', path: 'custom' });
+            });
+        `);
+
+        // Pass invalid data: age is a string instead of number
+        let result = validate({ age: 'not-a-number', name: 'Alice' });
+
+        expect(result.ok).toBe(false);
+        // The custom callback pushes { message: 'custom ran', path: 'custom' }
+        // If guard works, that error should NOT appear
+        let messages = result.errors!.map((e: { message: string }) => e.message);
+
+        expect(messages).not.toContain('custom ran');
+    });
+
 });

@@ -1784,6 +1784,81 @@ describe('Codec2', () => {
 
             expect(addr.city).toBe('NYC');
         });
+
+        it('extracts field after map field', () => {
+            let c = codec();
+
+            c.defineSchema([
+                { name: 'meta', type: 'map' },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let buf = c.encode({ meta: new Map([['a', 1]]), id: 42 });
+
+            expect(c.extractField(buf, 'id')).toBe(42);
+        });
+
+        it('extracts field after set field', () => {
+            let c = codec();
+
+            c.defineSchema([
+                { name: 'tags', type: 'set' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let buf = c.encode({ tags: new Set(['x', 'y']), name: 'test' });
+
+            expect(c.extractField(buf, 'name')).toBe('test');
+        });
+
+        it('extracts field after multiple map/set fields', () => {
+            let c = codec();
+
+            c.defineSchema([
+                { name: 'meta', type: 'map' },
+                { name: 'tags', type: 'set' },
+                { name: 'id', type: 'uint8' },
+            ]);
+
+            let buf = c.encode({
+                meta: new Map([['k1', 'v1'], ['k2', 'v2']]),
+                tags: new Set([10, 20, 30]),
+                id: 99,
+            });
+
+            expect(c.extractField(buf, 'id')).toBe(99);
+        });
+
+        it('extracts map field directly', () => {
+            let c = codec();
+
+            c.defineSchema([
+                { name: 'id', type: 'uint8' },
+                { name: 'meta', type: 'map' },
+            ]);
+
+            let buf = c.encode({ id: 1, meta: new Map([['key', 'val']]) });
+            let meta = c.extractField(buf, 'meta') as Map<string, string>;
+
+            expect(meta).toBeInstanceOf(Map);
+            expect(meta.get('key')).toBe('val');
+        });
+
+        it('extracts set field directly', () => {
+            let c = codec();
+
+            c.defineSchema([
+                { name: 'id', type: 'uint8' },
+                { name: 'tags', type: 'set' },
+            ]);
+
+            let buf = c.encode({ id: 1, tags: new Set(['a', 'b']) });
+            let tags = c.extractField(buf, 'tags') as Set<string>;
+
+            expect(tags).toBeInstanceOf(Set);
+            expect(tags.has('a')).toBe(true);
+            expect(tags.has('b')).toBe(true);
+        });
     });
 
 
@@ -1948,6 +2023,62 @@ describe('Codec2', () => {
             expect(c.decode(c.encode(obj))).toEqual(obj);
         });
 
+        it('roundtrips value requiring 4-byte varint (2097152)', () => {
+            let c = codec({ compress: true });
+
+            c.defineSchema([
+                { name: 'small', type: 'uint32' },
+                { name: 'big', type: 'uint32' },
+            ]);
+
+            // 2097152 = 2^21, first value needing 4-byte varint
+            let obj = { small: 42, big: 2097152 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('roundtrips value requiring 5-byte varint (268435456)', () => {
+            let c = codec({ compress: true });
+
+            c.defineSchema([
+                { name: 'count', type: 'uint32' },
+            ]);
+
+            // 268435456 = 2^28, first value needing 5-byte varint
+            let obj = { count: 268435456 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('roundtrips max uint32 via 5-byte varint (4294967295)', () => {
+            let c = codec({ compress: true });
+
+            c.defineSchema([
+                { name: 'max', type: 'uint32' },
+            ]);
+
+            let obj = { max: 4294967295 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('4-byte varint boundary via array count', () => {
+            // An array<uint8> with 2097152 elements uses a 4-byte varint for count.
+            // Instead of allocating 2M elements, test via compressed uint32 which
+            // also uses writeVarint directly.
+            let c = codec({ compress: true });
+
+            c.defineSchema([
+                { name: 'a', type: 'uint32' },
+                { name: 'b', type: 'uint32' },
+                { name: 'c', type: 'uint32' },
+            ]);
+
+            let obj = { a: 2097151, b: 2097152, c: 268435455 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
         it('varint exceeds 5 bytes throws', () => {
             // Encode a compressed schema with a string field, then corrupt the string
             // length varint to have 6 consecutive continuation bytes (all 0x80).
@@ -2034,6 +2165,54 @@ describe('Codec2', () => {
                 obj = { a: true, b: false, c: true, d: false };
 
             expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('compressed schema with 9 boolean fields (2-byte bitmap)', () => {
+            let c = codec({ compress: true }),
+                fields = [];
+
+            for (let i = 0; i < 9; i++) {
+                fields.push({ name: `b${i}`, type: 'boolean' });
+            }
+
+            c.defineSchema(fields);
+
+            let obj: Record<string, boolean> = {};
+
+            for (let i = 0; i < 9; i++) {
+                obj[`b${i}`] = i % 2 === 0;
+            }
+
+            let buf = c.encode(obj),
+                decoded = c.decode(buf) as Record<string, boolean>;
+
+            for (let i = 0; i < 9; i++) {
+                expect(decoded[`b${i}`]).toBe(i % 2 === 0);
+            }
+        });
+
+        it('compressed schema with 16 boolean fields (2-byte bitmap full)', () => {
+            let c = codec({ compress: true }),
+                fields = [];
+
+            for (let i = 0; i < 16; i++) {
+                fields.push({ name: `flag${i}`, type: 'boolean' });
+            }
+
+            c.defineSchema(fields);
+
+            let obj: Record<string, boolean> = {};
+
+            for (let i = 0; i < 16; i++) {
+                obj[`flag${i}`] = i % 3 === 0;
+            }
+
+            let buf = c.encode(obj),
+                decoded = c.decode(buf) as Record<string, boolean>;
+
+            for (let i = 0; i < 16; i++) {
+                expect(decoded[`flag${i}`]).toBe(i % 3 === 0);
+            }
         });
 
         it('mixed compressed and uncompressed in same stream', () => {
