@@ -1,5 +1,5 @@
 import { bench, describe } from 'vitest';
-import { transformCode } from '../tests/utils';
+import { transformCode } from '../utils';
 
 
 describe('Compile - Validator', () => {
@@ -21,23 +21,6 @@ describe('Compile - Validator', () => {
         transformCode(`
             type T = { address: { city: string; zip: string }; name: string };
             validator.build<T>();
-        `);
-    });
-});
-
-
-describe('Compile - Codec', () => {
-    bench('compile: codec simple', () => {
-        transformCode(`
-            type T = { name: string };
-            codec<T>();
-        `);
-    });
-
-    bench('compile: codec complex (5 fields)', () => {
-        transformCode(`
-            type T = { active: boolean; age: number; email: string; name: string; score: number };
-            codec<T>();
         `);
     });
 });

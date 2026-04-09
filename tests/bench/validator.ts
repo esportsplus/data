@@ -1,5 +1,5 @@
 import { bench, describe } from 'vitest';
-import { createValidator } from '../tests/utils';
+import { createValidator } from '../utils';
 
 
 // Setup: create validators outside bench functions (setup cost not measured)

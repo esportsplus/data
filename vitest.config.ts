@@ -11,7 +11,16 @@ export default defineConfig({
     test: {
         environment: 'node',
         globals: true,
-        exclude: ['tests/compile-validators.ts', 'tests/utils.ts'],
+        exclude: [
+            'tests/bench/all-codecs.ts',
+            'tests/bench/autoresearch-sbc.ts',
+            'tests/bench/compile.ts',
+            'tests/bench/sbc-standalone.ts',
+            'tests/bench/sbc-vs-msgpack.ts',
+            'tests/bench/validator.ts',
+            'tests/compile-validators.ts',
+            'tests/utils.ts',
+        ],
         include: ['tests/**/*.ts']
     }
 });
