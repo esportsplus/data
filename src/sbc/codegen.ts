@@ -504,7 +504,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                             body += `let a=new Array(l);`;
                             body += `for(let i=0;i<l;i++){let _dl=b[p];`;
                             body += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
-                            body += `else{if(b[p]===8||b[p]===18){`;
+                            body += `else{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
                             body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                             body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
                             body += `_s=_reg.get(_h);`;
@@ -555,17 +555,17 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         // Direct decode: 1-byte varint len fast path, fallback to tag-8 header
                         body += `{let _dl=b[p];`;
                         body += `if(_dl<128){p+=1;f${i}=${rp}(b,p,_d+1);p+=_dl;}`;
-                        body += `else if(b[p]===8||b[p]===18){`;
+                        body += `else{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
                         body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                         body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
                         body += `_s=_reg.get(_h);`;
                         body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
                         body += `p+=9+_dl2;}`;
-                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
+                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}}\n`;
                     }
                     else {
                         // Ref schema not compiled — generic path
-                        body += `{if(b[p]===8||b[p]===18){`;
+                        body += `{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
                         body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                         body += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
                         body += `_s=_reg.get(_h);`;
@@ -576,7 +576,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 }
                 else {
                     // Inline tag-8/18 fast path: skip decodeTagEnd + decodeSbc switch overhead
-                    body += `{if(b[p]===8||b[p]===18){`;
+                    body += `{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
                     body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                     body += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
                     body += `_s=_reg.get(_h);`;
@@ -798,7 +798,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                             body += `let a=new Array(l);`;
                             body += `for(let i=0;i<l;i++){let _dl=b[p];`;
                             body += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
-                            body += `else{if(b[p]===8||b[p]===18){`;
+                            body += `else{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
                             body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                             body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
                             body += `_s=_reg.get(_h);`;
@@ -840,23 +840,23 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     if (rp) {
                         body += `${no}{let _dl=b[p];`;
                         body += `if(_dl<128){p+=1;f${i}=${rp}(b,p,_d+1);p+=_dl;}`;
-                        body += `else if(b[p]===8||b[p]===18){`;
+                        body += `else{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
                         body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                         body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
                         body += `_s=_reg.get(_h);`;
                         body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
                         body += `p+=9+_dl2;}`;
-                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
+                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}}${nc}\n`;
                     }
                     else {
-                        body += `${no}{if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h);`;
+                        body += `${no}{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h);`;
                         body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
                         body += `p+=9+_dl;}`;
                         body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
                     }
                 }
                 else {
-                    body += `${no}{if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h);`;
+                    body += `${no}{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h);`;
                     body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
                     body += `p+=9+_dl;}`;
                     body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;

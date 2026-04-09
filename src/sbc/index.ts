@@ -1046,12 +1046,14 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                     let len = value.length;
 
                     if (len > 0 && typeof value[0] === 'number') {
-                        // Try packed numeric array
+                        // Try packed numeric array — tiered early-exit classification
                         let allUint8 = true,
                             allInt32 = true,
-                            allNumber = true;
+                            allNumber = true,
+                            i = 0;
 
-                        for (let i = 0; i < len; i++) {
+                        // Phase 1: check uint8 eligibility
+                        for (; i < len; i++) {
                             let v = value[i];
 
                             if (typeof v !== 'number') {
@@ -1061,14 +1063,37 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                                 break;
                             }
 
-                            let isInt = Number.isInteger(v);
-
-                            if (!isInt || v < 0 || v > 255) {
+                            if (!Number.isInteger(v) || v < 0 || v > 255) {
                                 allUint8 = false;
+                                break;
+                            }
+                        }
+
+                        // Phase 2: check int32 eligibility (only if uint8 failed on non-type reason)
+                        if (!allUint8 && allNumber) {
+                            for (; i < len; i++) {
+                                let v = value[i];
+
+                                if (typeof v !== 'number') {
+                                    allNumber = false;
+                                    allInt32 = false;
+                                    break;
+                                }
+
+                                if (!Number.isInteger(v) || v < -2147483648 || v > 2147483647) {
+                                    allInt32 = false;
+                                    break;
+                                }
                             }
 
-                            if (!isInt || v < -2147483648 || v > 2147483647) {
-                                allInt32 = false;
+                            // Phase 3: verify remaining are numbers (only if int32 failed)
+                            if (!allInt32 && allNumber) {
+                                for (; i < len; i++) {
+                                    if (typeof value[i] !== 'number') {
+                                        allNumber = false;
+                                        break;
+                                    }
+                                }
                             }
                         }
 
@@ -1281,7 +1306,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         }
 
         // Fast path: tag 8 (uncompressed object) — hottest path, minimize overhead
-        if (buffer[0] === 8 && len === buffer.length) {
+        if (buffer[0] === 8 && len >= 9 && len === buffer.length) {
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
 
             if (hash === lastDecodeHash && lastDecodeFn) {
@@ -1300,7 +1325,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         }
 
         // Tag 18 (compressed object) fast path
-        if (buffer[0] === 18 && len === buffer.length) {
+        if (buffer[0] === 18 && len >= 9 && len === buffer.length) {
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
                 schema = hash === lastDecodeHash && lastDecodeSchema
                     ? lastDecodeSchema

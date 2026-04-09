@@ -3586,6 +3586,55 @@ describe('Codec2', () => {
     });
 
 
+    describe('nested truncated tag-8/18 in array (F-CORR-15)', () => {
+        it('array containing truncated tag-8 header throws', () => {
+            // tag 7 (generic array) + count=1 (u32 LE) + then tag-8 with only 4 bytes (needs 9)
+            let buf = new Uint8Array([7, 1, 0, 0, 0, 8, 0, 0, 0, 0]);
+
+            expect(() => c.decode(buf)).toThrow('truncated');
+        });
+
+        it('array containing truncated tag-18 header throws', () => {
+            let buf = new Uint8Array([7, 1, 0, 0, 0, 18, 0, 0, 0, 0]);
+
+            expect(() => c.decode(buf)).toThrow('truncated');
+        });
+    });
+
+
+    describe('compressed decoder truncation (S-NEW-1)', () => {
+        it('truncated compressed buffer throws', () => {
+            let c = codec({ compress: true });
+
+            c.defineSchema([{ name: 'msg', type: 'string' }]);
+
+            let valid = c.encode({ msg: 'hello world' }),
+                truncated = valid.slice(0, 10);
+
+            expect(() => c.decode(truncated)).toThrow();
+        });
+    });
+
+
+    describe('decode fast path len < 9 guard (S5)', () => {
+        it('tag-8 buffer with len < 9 skips fast path without reading OOB', () => {
+            // 1-byte buffer with tag 8 — len < 9 so fast path must not execute
+            let buf = new Uint8Array([8]);
+
+            // The fast path would try to read buffer[1..8] — with len=1 that's OOB.
+            // After fix, fast path is skipped. decodeSbc still tries to handle tag 8
+            // but does not crash from the fast-path read.
+            expect(() => c.decode(buf)).not.toThrow('SBC: silent data corruption');
+        });
+
+        it('tag-18 buffer with len < 9 skips fast path without reading OOB', () => {
+            let buf = new Uint8Array([18]);
+
+            expect(() => c.decode(buf)).not.toThrow('SBC: silent data corruption');
+        });
+    });
+
+
     describe('nested compressed object tag-18 dispatch', () => {
         it('encode nested typed object with compress:true, decode with compress:false', () => {
             let comp = codec({ compress: true }),

@@ -369,6 +369,35 @@ describe('Record Validation', () => {
 });
 
 
+describe('Nullable Object Extraction (F-CORR-14)', () => {
+    let validate = createValidator(`
+        type Address = { city: string; zip: string };
+        type Person = { address: Address | null; name: string };
+        validator.build<Person>();
+    `);
+
+    it('accepts null for nullable object and extracts correctly', () => {
+        let result = validate({ address: null, name: 'Alice' });
+
+        expect(result.ok).toBe(true);
+        expect(result.data).toEqual({ address: null, name: 'Alice' });
+    });
+
+    it('accepts non-null object and extracts correctly', () => {
+        let result = validate({ address: { city: 'NYC', zip: '10001' }, name: 'Bob' });
+
+        expect(result.ok).toBe(true);
+        expect(result.data).toEqual({ address: { city: 'NYC', zip: '10001' }, name: 'Bob' });
+    });
+
+    it('rejects invalid nested object', () => {
+        let result = validate({ address: { city: 123, zip: '10001' }, name: 'Bob' });
+
+        expect(result.ok).toBe(false);
+    });
+});
+
+
 describe('Complex Combined Types', () => {
     describe('array of records', () => {
         let validate = createValidator(`

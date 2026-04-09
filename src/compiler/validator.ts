@@ -452,7 +452,7 @@ function generateTupleValidation(
         if (${prop.nullable ? `${varname} !== null && ` : ''}(!Array.isArray(${varname}) || ${lengthCheck})) {
             ${error.generate('invalid tuple type', pathMode, context)}
         }
-        else {
+        else ${prop.nullable ? `if (${varname} !== null) ` : ''}{
             ${parts.join('\n')}
         }
     `;

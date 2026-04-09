@@ -78,6 +78,20 @@ describe('Primitive Type Validation', () => {
         });
     });
 
+    describe('non-nullable number rejects null (F-CORR-12)', () => {
+        let validate = createValidator(`
+            type Data = { value: number };
+            validator.build<Data>();
+        `);
+
+        it('rejects null for non-nullable number field', () => {
+            let result = validate({ value: null });
+
+            expect(result.ok).toBe(false);
+            expect(result.errors![0].message).toBe('must be a number');
+        });
+    });
+
     describe('boolean', () => {
         let validate = createValidator(`
             type Flags = { active: boolean };

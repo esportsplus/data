@@ -465,3 +465,29 @@ describe('Tuple in Union Validation', () => {
         expect(result.ok).toBe(true);
     });
 });
+
+
+describe('Nullable Tuple Validation (F-CORR-13)', () => {
+    let validate = createValidator(`
+        type Data = { value: [number, string] | null };
+        validator.build<Data>();
+    `);
+
+    it('accepts null for nullable tuple', () => {
+        let result = validate({ value: null });
+
+        expect(result.ok).toBe(true);
+    });
+
+    it('accepts valid tuple', () => {
+        let result = validate({ value: [42, 'hello'] });
+
+        expect(result.ok).toBe(true);
+    });
+
+    it('rejects invalid tuple', () => {
+        let result = validate({ value: ['not a number', 'hello'] });
+
+        expect(result.ok).toBe(false);
+    });
+});
