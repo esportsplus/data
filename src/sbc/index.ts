@@ -2,7 +2,7 @@
 // JIT-compiled per-shape encode/decode, zero per-field branching at runtime
 
 import { compileSchema } from './codegen';
-import { allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readStr, readVarint, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
+import { _vr, allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readStr, readVarint, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 
 import type { FieldDef, ParsedType, Schema, SbcHelpers } from './codegen';
 import type { StoredSchema } from './cache';
@@ -1010,7 +1010,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
                     let p = pos + 5;
 
-                    value.forEach((v, k) => { p = encodeSbc(k, buf, p); p = encodeSbc(v, buf, p); });
+                    for (let [k, v] of value) { p = encodeSbc(k, buf, p); p = encodeSbc(v, buf, p); }
                     return p;
                 }
 
@@ -1029,7 +1029,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
                     let p = pos + 5;
 
-                    value.forEach((v) => { p = encodeSbc(v, buf, p); });
+                    for (let v of value) { p = encodeSbc(v, buf, p); }
                     return p;
                 }
 
@@ -1184,7 +1184,9 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
     function matchSchema(obj: Record<string, unknown>): Schema | null {
         // Ring buffer cache — match on key names AND value types
-        let keyCount = Object.keys(obj).length;
+        let keyCount = 0;
+
+        for (let _ in obj) { keyCount++; }
 
         for (let i = 0; i < 4; i++) {
             let schema = cacheSchemas[i];
@@ -1726,17 +1728,18 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             switch (f.type) {
                 case 'bytes':
                 case 'string': {
-                    let [len, np] = readVarint(buffer, pos);
-
-                    pos = np + len;
+                    readVarint(buffer, pos);
+                    pos = _vr.p + _vr.v;
                     break;
                 }
                 case 'array': {
                     if (f.elementType) {
                         // Typed array: varint count + element-specific data
-                        let [count, np] = readVarint(buffer, pos);
+                        readVarint(buffer, pos);
 
-                        pos = np;
+                        let count = _vr.v;
+
+                        pos = _vr.p;
 
                         let elemSize = f.elementType.base ? FIELD_SIZES[f.elementType.base] : 0;
 
@@ -1745,9 +1748,8 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                         }
                         else if (f.elementType.base === 'string' || f.elementType.base === 'bytes') {
                             for (let j = 0; j < count; j++) {
-                                let [el, enp] = readVarint(buffer, pos);
-
-                                pos = enp + el;
+                                readVarint(buffer, pos);
+                                pos = _vr.p + _vr.v;
                             }
                         }
                         else if (f.elementType.base === 'object' && f.elementType.hash !== undefined) {
@@ -1839,14 +1841,12 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
         switch (target.type) {
             case 'string': {
-                let [len, np] = readVarint(buffer, pos);
-
-                return readStr(buffer, np, len);
+                readVarint(buffer, pos);
+                return readStr(buffer, _vr.p, _vr.v);
             }
             case 'bytes': {
-                let [len, np] = readVarint(buffer, pos);
-
-                return buffer.slice(np, np + len);
+                readVarint(buffer, pos);
+                return buffer.slice(_vr.p, _vr.p + _vr.v);
             }
             case 'array': {
                 if (target.elementType) {

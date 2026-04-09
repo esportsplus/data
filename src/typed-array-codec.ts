@@ -98,7 +98,7 @@ const decodeTypedArray = (bytes: Uint8Array): TypedArrayInstance | null => {
     // This preserves value stability across subsequent reads.
     let aligned = new Uint8Array(dataLen);
 
-    aligned.set(new Uint8Array(bytes.buffer, bytes.byteOffset + 4, dataLen));
+    aligned.set(bytes.subarray(4, 4 + dataLen));
 
     return new Ctor(aligned.buffer, 0, dataLen / Ctor.BYTES_PER_ELEMENT);
 };

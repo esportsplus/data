@@ -217,7 +217,12 @@ let codegenDriver: CodegenDriver = isNode
     };
 
 
-function readVarint(buf: Uint8Array, pos: number): [number, number] {
+// Shared mutable return slot — eliminates tuple allocation on every varint read.
+// Safe because the codec is single-threaded.
+let _vr = { p: 0, v: 0 };
+
+
+function readVarint(buf: Uint8Array, pos: number): void {
     let b: number,
         i = 0,
         len = buf.length,
@@ -239,14 +244,14 @@ function readVarint(buf: Uint8Array, pos: number): [number, number] {
         i++;
     } while (b & 0x80);
 
-    return [value >>> 0, pos];
+    _vr.v = value >>> 0;
+    _vr.p = pos;
 }
 
 
-function readZigzag(buf: Uint8Array, pos: number): [number, number] {
-    let [v, p] = readVarint(buf, pos);
-
-    return [zigzagDecode(v), p];
+function readZigzag(buf: Uint8Array, pos: number): void {
+    readVarint(buf, pos);
+    _vr.v = zigzagDecode(_vr.v);
 }
 
 
@@ -295,6 +300,7 @@ for (let i = 0, n = TYPED_ARRAY_CTORS.length; i < n; i++) {
 
 
 export {
+    _vr,
     allocBuf,
     allocUnsafe,
     byteLen,

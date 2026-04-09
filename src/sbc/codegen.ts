@@ -1,7 +1,7 @@
 // Codec2 Codegen — Compile type-specific encode/decode functions via new Function()
 // Zero per-field branching: all type checks happen at compile time
 
-import { codegenDriver, readVarint, readZigzag, writeVarint, writeZigzag } from './platform';
+import { _vr, codegenDriver, readVarint, readZigzag, writeVarint, writeZigzag } from './platform';
 import type { CodegenDriver } from './platform';
 
 
@@ -434,11 +434,11 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
             case 'string':
                 // Inline varint read — single byte for lengths < 128 (common case)
-                body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}if(p+l>b.length)throw new Error('Codec2: truncated string');f${i}=${d.readStr('p', 'l')};p+=l;}\n`;
+                body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('Codec2: truncated string');f${i}=${d.readStr('p', 'l')};p+=l;}\n`;
                 break;
 
             case 'bytes':
-                body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}if(p+l>b.length)throw new Error('Codec2: truncated bytes');f${i}=b.slice(p,p+l);p+=l;}\n`;
+                body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('Codec2: truncated bytes');f${i}=b.slice(p,p+l);p+=l;}\n`;
                 break;
 
             case 'array':
@@ -450,7 +450,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         et.base === 'uint32' || et.base === 'int32' ||
                         et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
                         // Typed array: varint count + raw fixed-size elements
-                        body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
 
@@ -491,18 +491,18 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     }
                     else if (et.base === 'string') {
                         // Typed array<string>: varint count + per-element [varint len][utf8 data]
-                        body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{let _vr=_rv(b,p);sl=_vr[0];p=_vr[1];}a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
+                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{_rv(b,p);sl=_vrs.v;p=_vrs.p;}a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
                         body += `f${i}=a;}\n`;
                     }
                     else if (et.base === 'bytes') {
                         // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
-                        body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{let _vr=_rv(b,p);bl=_vr[0];p=_vr[1];}a[i]=b.slice(p,p+bl);p+=bl;}`;
+                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}a[i]=b.slice(p,p+bl);p+=bl;}`;
                         body += `f${i}=a;}\n`;
                     }
                     else if (et.base === 'object' && et.hash !== undefined) {
@@ -510,7 +510,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         let refParam = refHashes.get(et.hash);
 
                         if (refParam) {
-                            body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                            body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                             body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                             body += `let a=new Array(l);`;
                             body += `for(let i=0;i<l;i++){let _dl=b[p];`;
@@ -526,7 +526,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         }
                         else {
                             // Referenced schema not compiled — tagged fallback
-                            body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                            body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                             body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                             body += `let a=new Array(l);`;
                             body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
@@ -535,7 +535,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     }
                     else {
                         // Container element types: varint count + tagged elements
-                        body += `{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
                         body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
@@ -635,9 +635,9 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
         refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
 
     try {
-        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_Ctor', ...refDecParamNames, `return function decode(b,pos,_d){${body}}`);
+        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_vrs', '_Ctor', ...refDecParamNames, `return function decode(b,pos,_d){${body}}`);
 
-        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, Ctor, ...refDecBindValues);
+        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, _vr, Ctor, ...refDecBindValues);
     }
     catch (e) {
         throw new Error('Codec2: decoder compilation failed: ' + (e instanceof Error ? e.message : e));
@@ -730,10 +730,10 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
             nc = f.nullable ? `}` : '';
 
         if (f.type === 'int16' || f.type === 'int32') {
-            body += `${no}{let _r=_rz(b,p);f${i}=_r[0];p=_r[1];}${nc}\n`;
+            body += `${no}{_rz(b,p);f${i}=_vrs.v;p=_vrs.p;}${nc}\n`;
         }
         else if (f.type === 'uint16' || f.type === 'uint32') {
-            body += `${no}{let _r=_rv(b,p);f${i}=_r[0];p=_r[1];}${nc}\n`;
+            body += `${no}{_rv(b,p);f${i}=_vrs.v;p=_vrs.p;}${nc}\n`;
         }
     }
 
@@ -744,7 +744,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
             nc = f.nullable ? `}` : '';
 
         if (f.type === 'float64') {
-            body += `${no}{let _fl=b[p++];if(_fl===0){let _r=_rz(b,p);f${i}=_r[0];p=_r[1];}else{f${i}=${d.readF64('p')};p+=8;}}${nc}\n`;
+            body += `${no}{let _fl=b[p++];if(_fl===0){_rz(b,p);f${i}=_vrs.v;p=_vrs.p;}else{f${i}=${d.readF64('p')};p+=8;}}${nc}\n`;
         }
     }
 
@@ -756,10 +756,10 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
 
         switch (f.type) {
             case 'string':
-                body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}f${i}=${d.readStr('p', 'l')};p+=l;}${nc}\n`;
+                body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}f${i}=${d.readStr('p', 'l')};p+=l;}${nc}\n`;
                 break;
             case 'bytes':
-                body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}f${i}=b.slice(p,p+l);p+=l;}${nc}\n`;
+                body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}f${i}=b.slice(p,p+l);p+=l;}${nc}\n`;
                 break;
             case 'array':
                 if (f.elementType) {
@@ -769,7 +769,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         et.base === 'uint16' || et.base === 'int16' ||
                         et.base === 'uint32' || et.base === 'int32' ||
                         et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
-                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
 
@@ -809,24 +809,24 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         body += `f${i}=a;}${nc}\n`;
                     }
                     else if (et.base === 'string') {
-                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{let _vr=_rv(b,p);sl=_vr[0];p=_vr[1];}a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
+                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{_rv(b,p);sl=_vrs.v;p=_vrs.p;}a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
                         body += `f${i}=a;}${nc}\n`;
                     }
                     else if (et.base === 'bytes') {
-                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{let _vr=_rv(b,p);bl=_vr[0];p=_vr[1];}a[i]=b.slice(p,p+bl);p+=bl;}`;
+                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}a[i]=b.slice(p,p+bl);p+=bl;}`;
                         body += `f${i}=a;}${nc}\n`;
                     }
                     else if (et.base === 'object' && et.hash !== undefined) {
                         let refParam = refHashes.get(et.hash);
 
                         if (refParam) {
-                            body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                            body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                             body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                             body += `let a=new Array(l);`;
                             body += `for(let i=0;i<l;i++){let _dl=b[p];`;
@@ -841,7 +841,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                             body += `f${i}=a;}${nc}\n`;
                         }
                         else {
-                            body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                            body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                             body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                             body += `let a=new Array(l);`;
                             body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
@@ -849,7 +849,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         }
                     }
                     else {
-                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{let _vr=_rv(b,p);l=_vr[0];p=_vr[1];}`;
+                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
                         body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
@@ -920,8 +920,8 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
         refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
 
     try {
-        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_rz', '_Ctor', ...refDecParamNames, `return function decodeC(b,pos,_d){${body}}`)
-        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, readZigzag, Ctor, ...refDecBindValues);
+        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_rz', '_vrs', '_Ctor', ...refDecParamNames, `return function decodeC(b,pos,_d){${body}}`)
+        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, readZigzag, _vr, Ctor, ...refDecBindValues);
     }
     catch (e) {
         throw new Error('Codec2: compressed decoder compilation failed: ' + (e instanceof Error ? e.message : e));
