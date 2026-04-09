@@ -225,7 +225,7 @@ function generateNumberValidation(
         if (
             ${prop.nullable && `${varname} !== null &&`}
             (
-                typeof ${varname} !== 'number' &&
+                ${varname} === null || typeof ${varname} !== 'number' &&
                 isNaN(${varname} = +${varname})
                 ${prop.brand === 'integer' && ` || ${varname} % 1 !== 0`}
             )
@@ -304,7 +304,14 @@ function generatePropertyExtraction(properties: AnalyzedProperty[], varname: str
             parts.push(`...(${access} !== undefined && { ${key}: ${access} })`);
         }
         else if (prop.type === 'object' && prop.properties) {
-            parts.push(`${key}: ${generatePropertyExtraction(prop.properties, access)}`);
+            let extraction = generatePropertyExtraction(prop.properties, access);
+
+            if (prop.nullable) {
+                parts.push(`${key}: ${access} !== null ? ${extraction} : null`);
+            }
+            else {
+                parts.push(`${key}: ${extraction}`);
+            }
         }
         else {
             parts.push(`${key}: ${access}`);
@@ -442,7 +449,7 @@ function generateTupleValidation(
         : `${varname}.length < ${requiredCount} || ${varname}.length > ${tupleTypes.length}`;
 
     return `
-        if (!Array.isArray(${varname}) || ${lengthCheck}) {
+        if (${prop.nullable ? `${varname} !== null && ` : ''}(!Array.isArray(${varname}) || ${lengthCheck})) {
             ${error.generate('invalid tuple type', pathMode, context)}
         }
         else {

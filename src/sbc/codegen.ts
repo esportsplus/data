@@ -483,7 +483,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{_rv(b,p);sl=_vrs.v;p=_vrs.p;}a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
+                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{_rv(b,p);sl=_vrs.v;p=_vrs.p;}if(p+sl>b.length)throw new Error('SBC: truncated');a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
                         body += `f${i}=a;}\n`;
                     }
                     else if (et.base === 'bytes') {
@@ -491,7 +491,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}a[i]=b.slice(p,p+bl);p+=bl;}`;
+                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}if(p+bl>b.length)throw new Error('SBC: truncated');a[i]=b.slice(p,p+bl);p+=bl;}`;
                         body += `f${i}=a;}\n`;
                     }
                     else if (et.base === 'object' && et.hash !== undefined) {
@@ -723,10 +723,10 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
 
         switch (f.type) {
             case 'string':
-                body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}f${i}=${d.readStr('p', 'l')};p+=l;}${nc}\n`;
+                body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('SBC: truncated');f${i}=${d.readStr('p', 'l')};p+=l;}${nc}\n`;
                 break;
             case 'bytes':
-                body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}f${i}=b.slice(p,p+l);p+=l;}${nc}\n`;
+                body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('SBC: truncated');f${i}=b.slice(p,p+l);p+=l;}${nc}\n`;
                 break;
             case 'array':
                 if (f.elementType) {
@@ -779,14 +779,14 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{_rv(b,p);sl=_vrs.v;p=_vrs.p;}a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
+                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{_rv(b,p);sl=_vrs.v;p=_vrs.p;}if(p+sl>b.length)throw new Error('SBC: truncated');a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
                         body += `f${i}=a;}${nc}\n`;
                     }
                     else if (et.base === 'bytes') {
                         body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}a[i]=b.slice(p,p+bl);p+=bl;}`;
+                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}if(p+bl>b.length)throw new Error('SBC: truncated');a[i]=b.slice(p,p+bl);p+=bl;}`;
                         body += `f${i}=a;}${nc}\n`;
                     }
                     else if (et.base === 'object' && et.hash !== undefined) {

@@ -786,6 +786,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                 return p;
             }
             case 8: case 18: {
+                if (offset + 9 > buf.length) {
+                    throw new Error('Codec2: truncated tag-8/18 header');
+                }
+
                 let dataLen = (buf[offset + 5]! | (buf[offset + 6]! << 8) | (buf[offset + 7]! << 16) | (buf[offset + 8]! << 24)) >>> 0;
                 return offset + 9 + dataLen;
             }
@@ -1012,7 +1016,10 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
                     let p = pos + 5;
 
-                    value.forEach((v: unknown, k: unknown) => { p = encodeSbc(k, buf, p); p = encodeSbc(v, buf, p); });
+                    for (let [k, v] of value) {
+                        p = encodeSbc(k, buf, p);
+                        p = encodeSbc(v, buf, p);
+                    }
                     return p;
                 }
 
