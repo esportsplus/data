@@ -303,8 +303,6 @@ export {
     writeUtf8,
     writeVarint,
     writeZigzag,
-    zigzagDecode,
-    zigzagEncode,
 };
 
 export type { CodegenDriver };
