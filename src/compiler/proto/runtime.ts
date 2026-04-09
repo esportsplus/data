@@ -55,7 +55,9 @@ const HELPER_BIGINT = `
             result -= 0x10000000000000000n;
         }
 
-        return [result, offset];
+        _pos = offset;
+
+        return result;
     }
 
     function _bigIntVarintSize(value) {
@@ -133,7 +135,9 @@ const HELPER_DOUBLE = `
         _f64Bytes[6] = buffer[offset + 6];
         _f64Bytes[7] = buffer[offset + 7];
 
-        return [_f64View.getFloat64(0, true), offset + 8];
+        _pos = offset + 8;
+
+        return _f64View.getFloat64(0, true);
     }
 `;
 
@@ -159,7 +163,9 @@ const HELPER_FLOAT = `
         _f32Bytes[2] = buffer[offset + 2];
         _f32Bytes[3] = buffer[offset + 3];
 
-        return [_f32View.getFloat32(0, true), offset + 4];
+        _pos = offset + 4;
+
+        return _f32View.getFloat32(0, true);
     }
 `;
 
@@ -181,10 +187,12 @@ const HELPER_STRING = `
     }
 
     function _readString(buffer, offset) {
-        let [length, newOffset] = _readVarint(buffer, offset);
-        let str = _decode.call(_textDecoder, _subarray.call(buffer, newOffset, newOffset + length));
+        let length = _readVarint(buffer, offset),
+            start = _pos;
 
-        return [str, newOffset + length];
+        _pos = start + length;
+
+        return _decode.call(_textDecoder, _subarray.call(buffer, start, _pos));
     }
 `;
 
