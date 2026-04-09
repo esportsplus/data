@@ -339,7 +339,11 @@ function generateRecordValidation(
     }
 
     return code`
-        if (${varname} === null || typeof ${varname} !== 'object' || Array.isArray(${varname})) {
+        if (${
+            prop.nullable
+                ? `${varname} !== null && (typeof ${varname} !== 'object' || Array.isArray(${varname}))`
+                : `${varname} === null || typeof ${varname} !== 'object' || Array.isArray(${varname})`
+        }) {
             ${error.generate('invalid record type', pathMode, context)}
         }
         ${type && `
@@ -490,7 +494,11 @@ function generateUnionValidation(prop: AnalyzedProperty, varname: string, pathMo
                 checks.push(`(typeof ${varname} !== 'object' || ${varname} === null || Array.isArray(${varname}))`);
                 break;
             case 'array':
+            case 'tuple':
                 checks.push(`!Array.isArray(${varname})`);
+                break;
+            case 'record':
+                checks.push(`(typeof ${varname} !== 'object' || ${varname} === null || Array.isArray(${varname}))`);
                 break;
         }
     }

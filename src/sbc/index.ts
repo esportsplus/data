@@ -1805,6 +1805,12 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
                     break;
                 }
+                case 'map':
+                case 'set':
+                case 'typedarray': {
+                    pos = decodeTagEnd(buffer, pos, 0);
+                    break;
+                }
                 default:
                     return undefined;
             }
@@ -1829,26 +1835,22 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                 return buffer.slice(_vr.p, _vr.p + _vr.v);
             }
             case 'array': {
-                if (target.elementType) {
-                    // Typed array — use full object decode to get the field
-                    let s = registry.schemas.get(hash);
+                // Both typed and generic arrays use schema-specific encoding;
+                // fall back to full object decode to read the field correctly
+                let s = registry.schemas.get(hash);
 
-                    if (s && s.decodeFn) {
-                        let obj = s.decodeFn(buffer, dataStart, 0) as Record<string, unknown>;
+                if (s && s.decodeFn) {
+                    let obj = s.decodeFn(buffer, dataStart, 0) as Record<string, unknown>;
 
-                        return obj[fieldName];
-                    }
-
-                    return undefined;
+                    return obj[fieldName];
                 }
 
-                let end = (buffer[pos] === 8 || buffer[pos] === 18)
-                    ? pos + 9 + ((buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0)
-                    : decodeTagEnd(buffer, pos, 0);
-
-                return decodeSbc(buffer, pos, end - pos, 0);
+                return undefined;
             }
+            case 'map':
             case 'mixed':
+            case 'set':
+            case 'typedarray':
                 return decodeSbc(buffer, pos, decodeTagEnd(buffer, pos, 0) - pos, 0);
             case 'object': {
                 if (target.refHash !== undefined) {
