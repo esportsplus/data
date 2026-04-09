@@ -73,6 +73,25 @@ function computeShapeHash(keys: string[], types: string[]): number {
 }
 
 
+function computeNameHash(keys: string[]): number {
+    let h = FNV_OFFSET;
+
+    for (let i = 0, n = keys.length; i < n; i++) {
+        let k = keys[i]!;
+
+        for (let j = 0, m = k.length; j < m; j++) {
+            h ^= k.charCodeAt(j);
+            h = Math.imul(h, FNV_PRIME);
+        }
+
+        h ^= 0xFF;
+        h = Math.imul(h, FNV_PRIME);
+    }
+
+    return h >>> 0;
+}
+
+
 function varintSize(n: number): number {
     if (n < 128) {
         return 1;
@@ -352,6 +371,7 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
         cacheFields: (FieldDef[] | null)[] = [null, null, null, null],
         cacheIdx = 0,
         cacheSchemas: (Schema | null)[] = [null, null, null, null],
+        typedSchemas = new Map<number, Schema>(),  // nameHash → schema for defineSchema with structural types
         weakCache = new WeakMap<object, Schema>();
 
     function setCache(schema: Schema, obj: object): void {
@@ -1094,6 +1114,28 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
             }
         }
 
+        // Last resort: check pre-defined typed schemas by field names only
+        if (typedSchemas.size > 0) {
+            let sortedKeys = Object.keys(obj).sort(),
+                nameHash = computeNameHash(sortedKeys),
+                typed = typedSchemas.get(nameHash);
+
+            if (typed && typed.fields.length === sortedKeys.length) {
+                let match = true;
+
+                for (let j = 0, m = typed.fields.length; j < m; j++) {
+                    if (typed.fields[j]!.name !== sortedKeys[j]) {
+                        match = false;
+                        break;
+                    }
+                }
+
+                if (match) {
+                    return typed;
+                }
+            }
+        }
+
         return null;
     }
 
@@ -1335,6 +1377,20 @@ const createCodec = (options?: CodecOptions): { computeSize(value: unknown): num
 
         compileSchema(schema, helpers);
         registry.schemas.set(hash, schema);
+
+        // Index typed schemas by name hash for matchSchema lookup
+        let hasStructural = false;
+
+        for (let i = 0, m = fieldDefs.length; i < m; i++) {
+            if (fieldDefs[i]!.elementType || fieldDefs[i]!.refHash !== undefined) {
+                hasStructural = true;
+                break;
+            }
+        }
+
+        if (hasStructural) {
+            typedSchemas.set(computeNameHash(keys), schema);
+        }
 
         return hash;
     }

@@ -2180,4 +2180,700 @@ describe('Codec2', () => {
             expect(c2.decode(encoded)).toEqual({ name: 'Bob', score: 200 });
         });
     });
+
+
+    // === STRUCTURAL FIELD TYPES ===
+
+    describe('structural field types', () => {
+        describe('array<uint8>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                let obj = { data: [0, 1, 127, 255] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('empty array round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                expect(c.decode(c.encode({ data: [] }))).toEqual({ data: [] });
+            });
+
+            it('wire size: no tag bytes', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                let generic = createCodec();
+
+                generic.defineSchema([
+                    { name: 'data', type: 'array' },
+                ]);
+
+                let arr = Array.from({ length: 100 }, (_, i) => i % 256);
+                let typedBuf = c.encode({ data: arr }),
+                    genericBuf = generic.encode({ data: arr });
+
+                // Typed should be smaller (no flag byte, varint count vs u32 count)
+                expect(typedBuf.length).toBeLessThan(genericBuf.length);
+            });
+
+            it('large array (10000 elements)', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                let arr = Array.from({ length: 10000 }, (_, i) => i % 256),
+                    obj = { data: arr };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<int8>', () => {
+            it('round-trips signed values', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<int8>' },
+                ]);
+
+                let obj = { data: [-128, -1, 0, 1, 127] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<uint16>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint16>' },
+                ]);
+
+                let obj = { data: [0, 256, 65535] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<int16>', () => {
+            it('round-trips signed values', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<int16>' },
+                ]);
+
+                let obj = { data: [-32768, -1, 0, 1, 32767] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<uint32>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint32>' },
+                ]);
+
+                let obj = { data: [0, 65536, 4294967295] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<int32>', () => {
+            it('round-trips signed values', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<int32>' },
+                ]);
+
+                let obj = { data: [-2147483648, -1, 0, 1, 2147483647] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<float64>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<float64>' },
+                ]);
+
+                let obj = { data: [0, 3.14, -1.5, Infinity, -Infinity] };
+                let result = c.decode(c.encode(obj)) as { data: number[] };
+
+                expect(result.data.length).toBe(5);
+                expect(result.data[0]).toBe(0);
+                expect(result.data[1]).toBeCloseTo(3.14);
+                expect(result.data[2]).toBeCloseTo(-1.5);
+                expect(result.data[3]).toBe(Infinity);
+                expect(result.data[4]).toBe(-Infinity);
+            });
+
+            it('NaN round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<float64>' },
+                ]);
+
+                let result = c.decode(c.encode({ data: [NaN] })) as { data: number[] };
+
+                expect(Number.isNaN(result.data[0])).toBe(true);
+            });
+        });
+
+        describe('array<boolean>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<boolean>' },
+                ]);
+
+                let obj = { data: [true, false, true, true, false] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<bigint>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<bigint>' },
+                ]);
+
+                let obj = { data: [0n, 1n, -1n, 9007199254740993n] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('array<date>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<date>' },
+                ]);
+
+                let dates = [new Date('2020-01-01'), new Date(0), new Date('2025-12-31')],
+                    obj = { data: dates },
+                    result = c.decode(c.encode(obj)) as { data: Date[] };
+
+                expect(result.data.length).toBe(3);
+
+                for (let i = 0; i < 3; i++) {
+                    expect(result.data[i]!.getTime()).toBe(dates[i]!.getTime());
+                }
+            });
+        });
+
+        describe('array<string>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let obj = { tags: ['hello', 'world', 'test'] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('empty strings', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                expect(c.decode(c.encode({ tags: ['', '', ''] }))).toEqual({ tags: ['', '', ''] });
+            });
+
+            it('unicode strings', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let obj = { tags: ['日本語', '🎉', 'café'] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('wire size: smaller than generic', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let generic = createCodec();
+
+                generic.defineSchema([
+                    { name: 'tags', type: 'array' },
+                ]);
+
+                let arr = Array.from({ length: 100 }, (_, i) => 'item' + i),
+                    typedBuf = c.encode({ tags: arr }),
+                    genericBuf = generic.encode({ tags: arr });
+
+                expect(typedBuf.length).toBeLessThan(genericBuf.length);
+            });
+        });
+
+        describe('array<bytes>', () => {
+            it('round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'chunks', type: 'array<bytes>' },
+                ]);
+
+                let chunks = [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5])],
+                    obj = { chunks },
+                    result = c.decode(c.encode(obj)) as { chunks: Uint8Array[] };
+
+                expect(result.chunks.length).toBe(2);
+                expect([...result.chunks[0]!]).toEqual([1, 2, 3]);
+                expect([...result.chunks[1]!]).toEqual([4, 5]);
+            });
+        });
+
+        describe('object(hash)', () => {
+            it('round-trips nested typed object', () => {
+                let c = createCodec();
+
+                let addrHash = c.defineSchema([
+                    { name: 'city', type: 'string' },
+                    { name: 'zip', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'address', type: `object(${addrHash})` },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                let obj = {
+                    address: { city: 'NYC', zip: '10001' },
+                    name: 'Alice',
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('wire size: smaller than generic object', () => {
+                let c = createCodec();
+
+                let addrHash = c.defineSchema([
+                    { name: 'city', type: 'string' },
+                    { name: 'zip', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'address', type: `object(${addrHash})` },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                let generic = createCodec();
+
+                generic.defineSchema([
+                    { name: 'city', type: 'string' },
+                    { name: 'zip', type: 'string' },
+                ]);
+
+                generic.defineSchema([
+                    { name: 'address', type: 'object' },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                let obj = {
+                    address: { city: 'NYC', zip: '10001' },
+                    name: 'Alice',
+                };
+
+                let typedBuf = c.encode(obj),
+                    genericBuf = generic.encode(obj);
+
+                expect(typedBuf.length).toBeLessThan(genericBuf.length);
+            });
+        });
+
+        describe('array<object(hash)>', () => {
+            it('round-trips array of typed objects', () => {
+                let c = createCodec();
+
+                let itemHash = c.defineSchema([
+                    { name: 'id', type: 'uint32' },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'items', type: `array<object(${itemHash})>` },
+                ]);
+
+                let obj = {
+                    items: [
+                        { id: 1, name: 'apple' },
+                        { id: 2, name: 'banana' },
+                        { id: 3, name: 'cherry' },
+                    ],
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('empty array round-trips', () => {
+                let c = createCodec();
+
+                let itemHash = c.defineSchema([
+                    { name: 'id', type: 'uint32' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'items', type: `array<object(${itemHash})>` },
+                ]);
+
+                expect(c.decode(c.encode({ items: [] }))).toEqual({ items: [] });
+            });
+        });
+
+        describe('nested structural types', () => {
+            it('array<array<uint8>> round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'matrix', type: 'array<array<uint8>>' },
+                ]);
+
+                let obj = {
+                    matrix: [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('array<array<string>> round-trips', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'grid', type: 'array<array<string>>' },
+                ]);
+
+                let obj = {
+                    grid: [['a', 'b'], ['c', 'd']],
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('mixed schema fields', () => {
+            it('schema with both generic array and typed array', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'generic', type: 'array' },
+                    { name: 'scores', type: 'array<float64>' },
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let obj = {
+                    generic: [1, 'two', true],
+                    scores: [9.5, 8.7, 10.0],
+                    tags: ['a', 'b', 'c'],
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('compressed mode with typed fields', () => {
+            it('array<uint8> round-trips in compressed mode', () => {
+                let c = createCodec({ compress: true });
+
+                c.defineSchema([
+                    { name: 'active', type: 'boolean' },
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                let obj = { active: true, data: [0, 1, 127, 255] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('array<string> round-trips in compressed mode', () => {
+                let c = createCodec({ compress: true });
+
+                c.defineSchema([
+                    { name: 'count', type: 'int32' },
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let obj = { count: 42, tags: ['hello', 'world'] };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('object(hash) round-trips in compressed mode', () => {
+                let c = createCodec({ compress: true });
+
+                let addrHash = c.defineSchema([
+                    { name: 'city', type: 'string' },
+                    { name: 'zip', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'address', type: `object(${addrHash})` },
+                    { name: 'name', type: 'string' },
+                    { name: 'score', type: 'float64' },
+                ]);
+
+                let obj = {
+                    address: { city: 'NYC', zip: '10001' },
+                    name: 'Alice',
+                    score: 95.5,
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('array<object(hash)> round-trips in compressed mode', () => {
+                let c = createCodec({ compress: true });
+
+                let itemHash = c.defineSchema([
+                    { name: 'id', type: 'uint32' },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'active', type: 'boolean' },
+                    { name: 'items', type: `array<object(${itemHash})>` },
+                ]);
+
+                let obj = {
+                    active: true,
+                    items: [
+                        { id: 1, name: 'apple' },
+                        { id: 2, name: 'banana' },
+                    ],
+                };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+        });
+
+        describe('registry serialization with structural types', () => {
+            it('preserves structural type strings through serialize/deserialize', () => {
+                let c1 = createCodec();
+
+                let addrHash = c1.defineSchema([
+                    { name: 'city', type: 'string' },
+                    { name: 'zip', type: 'string' },
+                ]);
+
+                c1.defineSchema([
+                    { name: 'address', type: `object(${addrHash})` },
+                    { name: 'name', type: 'string' },
+                    { name: 'scores', type: 'array<float64>' },
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let blob = c1.serializeRegistry(),
+                    c2 = createCodec();
+
+                c2.deserializeRegistry(blob);
+
+                let obj = {
+                    address: { city: 'NYC', zip: '10001' },
+                    name: 'Alice',
+                    scores: [9.5, 10.0],
+                    tags: ['a', 'b'],
+                };
+
+                let encoded = c1.encode(obj);
+
+                expect(c2.decode(encoded)).toEqual(obj);
+            });
+        });
+
+        describe('extractField with typed fields', () => {
+            it('extracts field after typed array', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                let buf = c.encode({ data: [1, 2, 3], name: 'test' });
+
+                expect(c.extractField(buf, 'name')).toBe('test');
+            });
+
+            it('extracts typed array field', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                let buf = c.encode({ data: [1, 2, 3], name: 'test' });
+
+                expect(c.extractField(buf, 'data')).toEqual([1, 2, 3]);
+            });
+
+            it('extracts field after typed string array', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'name', type: 'string' },
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let buf = c.encode({ name: 'test', tags: ['a', 'b', 'c'] });
+
+                expect(c.extractField(buf, 'name')).toBe('test');
+            });
+
+            it('extracts field after object(hash)', () => {
+                let c = createCodec();
+
+                let addrHash = c.defineSchema([
+                    { name: 'city', type: 'string' },
+                    { name: 'zip', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'address', type: `object(${addrHash})` },
+                    { name: 'name', type: 'string' },
+                ]);
+
+                let buf = c.encode({
+                    address: { city: 'NYC', zip: '10001' },
+                    name: 'Alice',
+                });
+
+                expect(c.extractField(buf, 'name')).toBe('Alice');
+            });
+        });
+
+        describe('computeSize with typed fields', () => {
+            it('computes size for typed uint8 array', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                let obj = { data: [1, 2, 3, 4, 5] },
+                    size = c.computeSize(obj),
+                    buf = c.encode(obj);
+
+                expect(size).toBe(buf.length);
+            });
+
+            it('computes size for typed string array', () => {
+                let c = createCodec();
+
+                c.defineSchema([
+                    { name: 'tags', type: 'array<string>' },
+                ]);
+
+                let obj = { tags: ['hi', 'bye'] },
+                    size = c.computeSize(obj),
+                    buf = c.encode(obj);
+
+                expect(size).toBe(buf.length);
+            });
+        });
+
+        describe('parseFieldType validation', () => {
+            it('rejects empty array element type', () => {
+                let c = createCodec();
+
+                expect(() => c.defineSchema([
+                    { name: 'x', type: 'array<>' },
+                ])).toThrow('empty array element type');
+            });
+
+            it('rejects invalid object hash', () => {
+                let c = createCodec();
+
+                expect(() => c.defineSchema([
+                    { name: 'x', type: 'object(abc)' },
+                ])).toThrow('invalid object hash');
+            });
+
+            it('rejects empty object hash', () => {
+                let c = createCodec();
+
+                expect(() => c.defineSchema([
+                    { name: 'x', type: 'object()' },
+                ])).toThrow('invalid object hash');
+            });
+
+            it('rejects float object hash', () => {
+                let c = createCodec();
+
+                expect(() => c.defineSchema([
+                    { name: 'x', type: 'object(1.5)' },
+                ])).toThrow('invalid object hash');
+            });
+
+            it('rejects unknown base type', () => {
+                let c = createCodec();
+
+                expect(() => c.defineSchema([
+                    { name: 'x', type: 'foobar' },
+                ])).toThrow('unknown field type');
+            });
+        });
+
+        describe('different hashes for array vs array<T>', () => {
+            it('array and array<uint8> produce different hashes', () => {
+                let c = createCodec();
+
+                let h1 = c.defineSchema([
+                    { name: 'data', type: 'array' },
+                ]);
+
+                let c2 = createCodec();
+
+                let h2 = c2.defineSchema([
+                    { name: 'data', type: 'array<uint8>' },
+                ]);
+
+                expect(h1).not.toBe(h2);
+            });
+        });
+    });
 });
