@@ -18,7 +18,7 @@ const validator: Validator = {
 };
 
 
-export { codec } from './sbc';
+export { codec } from './sbc/index';
 export {
     decodeTypedArray,
     encodeTypedArrayInto,
@@ -37,4 +37,4 @@ export type {
     Schema,
     SchemaRegistry,
     StoredSchema,
-} from './sbc';
+} from './sbc/index';
