@@ -8,6 +8,7 @@
         "@esportsplus/typescript": "^0.27.3",
         "@types/node": "^25.0.3",
         "msgpackr": "^1.11.9",
+        "protobufjs": "^8.0.1",
         "vite": "^7.3.1",
         "vitest": "^4.0.16"
     },
