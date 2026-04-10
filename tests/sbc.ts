@@ -1095,6 +1095,27 @@ describe('Codec2', () => {
 
             expect(() => c.decode(buf)).toThrow('truncated');
         });
+
+        it('truncated packed uint8 (tag 12) throws via direct decodeSbc', () => {
+            let c = codec();
+
+            // tag 12 + u32 LE count=5 + only 2 payload bytes — no tag-7 wrapper
+            expect(() => c.decode(new Uint8Array([12, 5, 0, 0, 0, 0xAA, 0xBB]))).toThrow('truncated packed uint8');
+        });
+
+        it('truncated packed float64 (tag 13) throws via direct decodeSbc', () => {
+            let c = codec();
+
+            // tag 13 + u32 LE count=3 + only 8 payload bytes (need 24)
+            expect(() => c.decode(new Uint8Array([13, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))).toThrow('truncated packed float64');
+        });
+
+        it('truncated packed int32 (tag 14) throws via direct decodeSbc', () => {
+            let c = codec();
+
+            // tag 14 + u32 LE count=3 + only 4 payload bytes (need 12)
+            expect(() => c.decode(new Uint8Array([14, 3, 0, 0, 0, 0, 0, 0, 0]))).toThrow('truncated packed int32');
+        });
     });
 
 
