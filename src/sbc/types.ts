@@ -1,14 +1,5 @@
-import type { SbcHelpers } from './codegen';
 import type { StoredSchema } from './cache';
 
-
-type CodecContext = {
-    compress: boolean;
-    encodeBuf: Uint8Array;
-    helpers: SbcHelpers;
-    registry: SchemaRegistry;
-    store: PersistentStore | null;
-};
 
 type CodecOptions = {
     compress?: boolean;
@@ -52,4 +43,4 @@ type SchemaRegistry = {
 };
 
 
-export type { CodecContext, CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, PersistentStore, SchemaRegistry };
+export type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, PersistentStore, SchemaRegistry };

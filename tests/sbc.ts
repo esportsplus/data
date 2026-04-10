@@ -621,17 +621,14 @@ describe('Codec2', () => {
     // === BUFFER GROWTH ===
 
     describe('buffer growth', () => {
-        // BUG: Buffer growth guard retries after out-of-bounds write already threw.
-        // The encodeFn writes beyond buffer bounds before size is checked.
-
-        it.fails('BUG: large string exceeds initial 64KB buffer', () => {
+        it('large string exceeds initial 64KB buffer', () => {
             let s = 'x'.repeat(100000),
                 data = { big: s };
 
             expect(c.decode(c.encode(data))).toEqual(data);
         });
 
-        it.fails('BUG: large Uint8Array exceeds initial 64KB buffer', () => {
+        it('large Uint8Array exceeds initial 64KB buffer', () => {
             let buf = new Uint8Array(100000);
 
             for (let i = 0; i < buf.length; i++) {
@@ -648,6 +645,18 @@ describe('Codec2', () => {
 
         it('handles large array', () => {
             let data = Array.from({ length: 10000 }, (_, i) => i);
+
+            expect(c.decode(c.encode(data))).toEqual(data);
+        });
+
+        it('standalone string triggers tryEncodeSbc buffer doubling', () => {
+            let s = 'x'.repeat(70000);
+
+            expect(c.decode(c.encode(s))).toBe(s);
+        });
+
+        it('object with large field triggers tryEncode retry', () => {
+            let data = { payload: 'y'.repeat(80000) };
 
             expect(c.decode(c.encode(data))).toEqual(data);
         });
@@ -731,6 +740,21 @@ describe('Codec2', () => {
                 enc2 = c.encode(decoded);
 
             expect(Array.from(enc1)).toEqual(Array.from(enc2));
+        });
+
+        it('DataView falls through to object encoder (F-TEST-4)', () => {
+            let ab = new ArrayBuffer(8),
+                dv = new DataView(ab);
+
+            dv.setFloat64(0, 3.14);
+
+            // DataView is not handled by the typed array branch (explicitly excluded)
+            // It falls through to the plain-object encoder path
+            let encoded = c.encode(dv);
+
+            // Should not throw — documents current behavior
+            expect(encoded).toBeInstanceOf(Uint8Array);
+            expect(encoded.length).toBeGreaterThan(0);
         });
     });
 
@@ -1032,6 +1056,46 @@ describe('Codec2', () => {
                 truncated = valid.slice(0, valid.length - 3); // chop off end of string
 
             expect(() => c.decode(truncated)).toThrow('truncated');
+        });
+    });
+
+
+    describe('packed array truncation (F-TEST-3)', () => {
+        it('truncated packed uint8 array (tag 12) throws via decodeTagEnd', () => {
+            // tag 12 + u32 LE count=5 + only 2 payload bytes (need 5)
+            // Wrap in tag 7 (generic array, count=1) so decodeTagEnd is called
+            let inner = new Uint8Array([12, 5, 0, 0, 0, 0xAA, 0xBB]),
+                buf = new Uint8Array(5 + inner.length);
+
+            buf[0] = 7; // tag 7 = generic array
+            buf[1] = 1; buf[2] = 0; buf[3] = 0; buf[4] = 0; // count = 1
+            buf.set(inner, 5);
+
+            expect(() => c.decode(buf)).toThrow('truncated');
+        });
+
+        it('truncated packed float64 array (tag 13) throws via decodeTagEnd', () => {
+            // tag 13 + u32 LE count=3 + only 8 payload bytes (need 24)
+            let inner = new Uint8Array([13, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+                buf = new Uint8Array(5 + inner.length);
+
+            buf[0] = 7;
+            buf[1] = 1; buf[2] = 0; buf[3] = 0; buf[4] = 0;
+            buf.set(inner, 5);
+
+            expect(() => c.decode(buf)).toThrow('truncated');
+        });
+
+        it('truncated packed int32 array (tag 14) throws via decodeTagEnd', () => {
+            // tag 14 + u32 LE count=3 + only 4 payload bytes (need 12)
+            let inner = new Uint8Array([14, 3, 0, 0, 0, 0, 0, 0, 0]),
+                buf = new Uint8Array(5 + inner.length);
+
+            buf[0] = 7;
+            buf[1] = 1; buf[2] = 0; buf[3] = 0; buf[4] = 0;
+            buf.set(inner, 5);
+
+            expect(() => c.decode(buf)).toThrow('truncated');
         });
     });
 
