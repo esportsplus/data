@@ -217,29 +217,57 @@ let _vr = { p: 0, v: 0 };
 
 
 function readVarint(buf: Uint8Array, pos: number): void {
-    let b: number,
-        i = 0,
-        len = buf.length,
-        shift = 0,
-        value = 0;
+    let len = buf.length;
 
-    do {
-        if (pos >= len) {
-            throw new Error('Codec2: varint read past end of buffer');
-        }
+    if (pos >= len) {
+        throw new Error('Codec2: varint read past end of buffer');
+    }
 
-        if (i >= 5) {
-            throw new Error('Codec2: varint exceeds 5 bytes');
-        }
+    let b = buf[pos++]!,
+        value = b & 0x7F;
 
-        b = buf[pos++]!;
-        value |= (b & 0x7F) << shift;
-        shift += 7;
-        i++;
-    } while (b & 0x80);
+    if (b < 128) { _vr.p = pos; _vr.v = value >>> 0; return; }
 
-    _vr.v = value >>> 0;
+    if (pos >= len) {
+        throw new Error('Codec2: varint read past end of buffer');
+    }
+
+    b = buf[pos++]!;
+    value |= (b & 0x7F) << 7;
+
+    if (b < 128) { _vr.p = pos; _vr.v = value >>> 0; return; }
+
+    if (pos >= len) {
+        throw new Error('Codec2: varint read past end of buffer');
+    }
+
+    b = buf[pos++]!;
+    value |= (b & 0x7F) << 14;
+
+    if (b < 128) { _vr.p = pos; _vr.v = value >>> 0; return; }
+
+    if (pos >= len) {
+        throw new Error('Codec2: varint read past end of buffer');
+    }
+
+    b = buf[pos++]!;
+    value |= (b & 0x7F) << 21;
+
+    if (b < 128) { _vr.p = pos; _vr.v = value >>> 0; return; }
+
+    if (pos >= len) {
+        throw new Error('Codec2: varint read past end of buffer');
+    }
+
+    b = buf[pos++]!;
+    value |= (b & 0x0F) << 28;
+
+    if (b & 0x80) {
+        throw new Error('Codec2: varint exceeds 5 bytes');
+    }
+
     _vr.p = pos;
+    _vr.v = value >>> 0;
 }
 
 

@@ -49,10 +49,11 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
     let store = options?.store ?? null;
 
     // Multi-schema cache — handles nested objects without breaking
-    let cacheCounts: number[] = [0, 0, 0, 0],
-        cacheFields: (FieldDef[] | null)[] = [null, null, null, null],
+    let cacheCounts: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        cacheFields: (FieldDef[] | null)[] = [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
         cacheIdx = 0,
-        cacheSchemas: (Schema | null)[] = [null, null, null, null],
+        cacheSchemas: (Schema | null)[] = [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
+        lastSortedKeys: string[] | null = null,
         typedSchemaFieldCounts = new Set<number>(),
         typedSchemas = new Map<number, Schema>(),  // nameHash → schema for defineSchema with structural types
         weakCache = new WeakMap<object, Schema>();
@@ -61,7 +62,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         cacheSchemas[cacheIdx] = schema;
         cacheFields[cacheIdx] = schema.fields;
         cacheCounts[cacheIdx] = schema.fields.length;
-        cacheIdx = (cacheIdx + 1) & 3;
+        cacheIdx = (cacheIdx + 1) & 15;
         weakCache.set(obj, schema);
     }
 
@@ -93,7 +94,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             schema = matchSchema(obj);
 
             if (!schema) {
-                schema = inferAndRegister(obj, registry, helpers, store);
+                schema = inferAndRegister(obj, registry, helpers, store, lastSortedKeys ?? undefined);
             }
 
             setCache(schema, obj);
@@ -141,6 +142,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
     let ectx: EncodeContext = {
         compress,
         helpers: null as unknown as SbcHelpers,
+        lastSortedKeys: null,
         matchSchema,
         registry,
         setCache,
@@ -168,11 +170,14 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
     function matchSchema(obj: Record<string, unknown>): Schema | null {
         // Ring buffer cache — match on key names AND value types
+        lastSortedKeys = null;
+        ectx.lastSortedKeys = null;
+
         let keyCount = 0;
 
         for (let _ in obj) { keyCount++; }
 
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < 16; i++) {
             let schema = cacheSchemas[i];
 
             if (!schema || cacheCounts[i] !== keyCount) {
@@ -202,6 +207,9 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             let sortedKeys = Object.keys(obj).sort(),
                 nameHash = computeNameHash(sortedKeys),
                 typed = typedSchemas.get(nameHash);
+
+            lastSortedKeys = sortedKeys;
+            ectx.lastSortedKeys = sortedKeys;
 
             if (typed && typed.fields.length === sortedKeys.length) {
                 let match = true;
@@ -415,7 +423,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                 schema = matchSchema(obj);
 
                 if (!schema) {
-                    schema = inferAndRegister(obj, registry, helpers, store);
+                    schema = inferAndRegister(obj, registry, helpers, store, lastSortedKeys ?? undefined);
                 }
 
                 setCache(schema, obj);

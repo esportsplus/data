@@ -22,6 +22,7 @@ type DecodeContext = {
 type EncodeContext = {
     compress: boolean;
     helpers: SbcHelpers;
+    lastSortedKeys: string[] | null;
     matchSchema: (obj: Record<string, unknown>) => Schema | null;
     registry: SchemaRegistry;
     setCache: (schema: Schema, obj: object) => void;
@@ -150,7 +151,14 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
                 throw new Error('Codec2: array count ' + count + ' exceeds limit');
             }
 
-            return Array.from(buf.subarray(offset + 5, offset + 5 + count));
+            let arr = new Array(count),
+                p = offset + 5;
+
+            for (let i = 0; i < count; i++) {
+                arr[i] = buf[p + i]!;
+            }
+
+            return arr;
         }
 
         case 13: {
@@ -451,28 +459,29 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
 
             buf[pos] = 5;
 
-            // Single-pass ASCII fast path for short strings
+            // Single-pass ASCII fast path: scan then write (no wasted writes on failure)
             if (sl < 17) {
-                buf[pos + 1] = sl;
-                buf[pos + 2] = 0;
-                buf[pos + 3] = 0;
-                buf[pos + 4] = 0;
-
-                let ok = true,
-                    p = pos + 5;
+                let ascii = true;
 
                 for (let k = 0; k < sl; k++) {
-                    let c = (value as string).charCodeAt(k);
-
-                    if (c > 127) {
-                        ok = false;
+                    if ((value as string).charCodeAt(k) > 127) {
+                        ascii = false;
                         break;
                     }
-
-                    buf[p + k] = c;
                 }
 
-                if (ok) {
+                if (ascii) {
+                    buf[pos + 1] = sl;
+                    buf[pos + 2] = 0;
+                    buf[pos + 3] = 0;
+                    buf[pos + 4] = 0;
+
+                    let p = pos + 5;
+
+                    for (let k = 0; k < sl; k++) {
+                        buf[p + k] = (value as string).charCodeAt(k);
+                    }
+
                     return p + sl;
                 }
             }
@@ -536,7 +545,9 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 buf[pos + 5] = (bLen >>> 24) & 0xFF;
 
                 if (needed <= buf.length) {
-                    buf.set(new Uint8Array(ta.buffer, ta.byteOffset, bLen), pos + 6);
+                    let src = ta instanceof Uint8Array ? ta : new Uint8Array(ta.buffer, ta.byteOffset, bLen);
+
+                    buf.set(src, pos + 6);
                 }
 
                 return needed;
@@ -717,7 +728,7 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 schema = ectx.matchSchema(obj);
 
                 if (!schema) {
-                    schema = inferAndRegister(obj, ectx.registry, ectx.helpers, ectx.store);
+                    schema = inferAndRegister(obj, ectx.registry, ectx.helpers, ectx.store, ectx.lastSortedKeys ?? undefined);
                 }
 
                 ectx.setCache(schema, obj);

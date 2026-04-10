@@ -167,8 +167,8 @@ function inferType(value: unknown): string {
 }
 
 
-function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers, store: PersistentStore | null): Schema {
-    let keys = Object.keys(obj).sort(),
+function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers, store: PersistentStore | null, sortedKeys?: string[]): Schema {
+    let keys = sortedKeys ?? Object.keys(obj).sort(),
         types: string[] = new Array(keys.length);
 
     for (let i = 0, n = keys.length; i < n; i++) {
