@@ -1,12 +1,14 @@
 // Codec2 — High-performance binary codec
 // JIT-compiled per-shape encode/decode, zero per-field branching at runtime
 
-import { FIELD_NAME_RE, FIELD_SIZES, MAX_ARRAY_COUNT, MAX_SCHEMA_COUNT } from './constants';
+import { FIELD_NAME_RE, FIELD_SIZES, MAX_SCHEMA_COUNT } from './constants';
 import { compileSchema } from './codegen';
-import { _vr, allocBuf, allocUnsafe, byteLen, copyBuf, isNode, readBI64, readF64, readStr, readVarint, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
+import { _vr, allocBuf, allocUnsafe, byteLen, copyBuf, readStr, readVarint, writeUtf8 } from './platform';
 import { computeNameHash, computeShapeHash, inferAndRegister, inferType, parseFieldType, readFixedField, varintSize } from './schema';
+import { decodeSbc, decodeTagEnd, encodeSbc } from './tagged';
 
 import type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, SchemaRegistry } from './types';
+import type { DecodeContext, EncodeContext } from './tagged';
 import type { FieldDef, Schema, SbcHelpers } from './codegen';
 
 import cache from './cache';
@@ -78,11 +80,6 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         return null;
     }
 
-    // Decode fast path: cache last-used schema + fn to avoid Map lookup + property access
-    let lastDecodeFn: ((buf: Uint8Array, pos: number, depth: number) => unknown) | null = null,
-        lastDecodeHash = 0,
-        lastDecodeSchema: Schema | null = null;
-
     // Specialized object encoder — skips typeof/instanceof checks for known-object fields
     function encodeObj(obj: Record<string, unknown>, buf: Uint8Array, pos: number): number {
         let schema = weakCache.get(obj) ?? null;
@@ -124,725 +121,43 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         return end;
     }
 
+    // Decode context — mutable slots for decode cache, shared with tagged.ts
+    let dctx: DecodeContext = {
+        compress,
+        lastDecodeFn: null,
+        lastDecodeHash: 0,
+        lastDecodeSchema: null,
+        resolveSchema: resolveSchemaFromCacheOrStore,
+        schemas: registry.schemas,
+        setCache,
+    };
+
+    // Encode context — mutable slots for encode cache, shared with tagged.ts
+    let ectx: EncodeContext = {
+        compress,
+        helpers: null as unknown as SbcHelpers,
+        matchSchema,
+        registry,
+        setCache,
+        store,
+        weakCache,
+    };
+
+    // Bound wrappers — close over dctx/ectx so call sites keep the original 4/3-arg signature
+    let boundDecodeSbc = (buf: Uint8Array, offset: number, len: number, depth: number) => decodeSbc(dctx, buf, offset, len, depth),
+        boundDecodeTagEnd = decodeTagEnd,
+        boundEncodeSbc = (value: unknown, buf: Uint8Array, pos: number) => encodeSbc(ectx, value, buf, pos);
+
     let helpers: SbcHelpers = {
-        decodeSbc,
-        decodeTagEnd,
+        decodeSbc: boundDecodeSbc,
+        decodeTagEnd: boundDecodeTagEnd,
         encodeObj,
-        encodeSbc,
+        encodeSbc: boundEncodeSbc,
         registry: registry.schemas,
     };
 
-
-    function decodeSbc(buf: Uint8Array, offset: number, len: number, depth: number): unknown {
-        if (depth > 64) {
-            throw new Error('Codec2: max decode depth exceeded');
-        }
-
-        if (len === 0) {
-            return undefined;
-        }
-
-        let tag = buf[offset]!;
-
-        switch (tag) {
-            case 0: return null;
-            case 1: return false;
-            case 2: return true;
-            case 3: return buf[offset + 1]!;
-
-            case 4:
-                return readF64.call(buf, offset + 1);
-
-            case 5: {
-                let sLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (offset + 5 + sLen > buf.length) {
-                    throw new Error('Codec2: truncated string at offset ' + offset);
-                }
-
-                return readStr(buf, offset + 5, sLen);
-            }
-
-            case 6: {
-                let bLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (offset + 5 + bLen > buf.length) {
-                    throw new Error('Codec2: truncated bytes at offset ' + offset);
-                }
-
-                if (isNode) {
-                    return Buffer.from(buf.subarray(offset + 5, offset + 5 + bLen));
-                }
-
-                return new Uint8Array(buf.subarray(offset + 5, offset + 5 + bLen));
-            }
-
-            case 7: {
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
-                }
-
-                let arr = new Array(count),
-                    p = offset + 5;
-
-                for (let i = 0; i < count; i++) {
-                    let end = decodeTagEnd(buf, p, depth + 1);
-
-                    arr[i] = decodeSbc(buf, p, end - p, depth + 1);
-                    p = end;
-                }
-
-                return arr;
-            }
-
-            case 8: {
-                if (offset + 9 > buf.length) {
-                    throw new Error('Codec2: truncated tag-8/18 header');
-                }
-
-                let hash = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
-                    schema = hash === lastDecodeHash && lastDecodeSchema
-                        ? lastDecodeSchema
-                        : (registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash));
-
-                if (!schema || !schema.decodeFn) {
-                    return null;
-                }
-
-                lastDecodeHash = hash;
-                lastDecodeSchema = schema;
-
-                return schema.decodeFn(buf, offset + 9, depth + 1);
-            }
-
-            case 18: {
-                if (offset + 9 > buf.length) {
-                    throw new Error('Codec2: truncated tag-8/18 header');
-                }
-
-                let hash = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
-                    schema = registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash);
-
-                if (!schema) {
-                    return null;
-                }
-
-                if (schema.compressedDecodeFn) {
-                    return schema.compressedDecodeFn(buf, offset + 9, depth + 1);
-                }
-
-                return schema.decodeFn ? schema.decodeFn(buf, offset + 9, depth + 1) : null;
-            }
-
-            case 9:
-                return readBI64.call(buf, offset + 1);
-
-            case 10:
-                return new Date(readF64.call(buf, offset + 1));
-
-            case 11:
-                return (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) | 0;
-
-            case 12: {
-                // packed uint8 array
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
-                }
-
-                return Array.from(buf.subarray(offset + 5, offset + 5 + count));
-            }
-
-            case 13: {
-                // packed float64 array
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
-                }
-
-                let arr = new Array(count),
-                    p = offset + 5;
-
-                for (let i = 0; i < count; i++) {
-                    arr[i] = readF64.call(buf, p);
-                    p += 8;
-                }
-
-                return arr;
-            }
-
-            case 14: {
-                // packed int32 array
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
-                }
-
-                let arr = new Array(count),
-                    p = offset + 5;
-
-                for (let i = 0; i < count; i++) {
-                    arr[i] = (buf[p]! | (buf[p + 1]! << 8) | (buf[p + 2]! << 16) | (buf[p + 3]! << 24)) | 0;
-                    p += 4;
-                }
-
-                return arr;
-            }
-
-            case 15: {
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: map count ' + count + ' exceeds limit');
-                }
-
-                let map = new Map(),
-                    p = offset + 5;
-
-                for (let i = 0; i < count; i++) {
-                    let kEnd = decodeTagEnd(buf, p, depth + 1);
-                    let key = decodeSbc(buf, p, kEnd - p, depth + 1);
-
-                    p = kEnd;
-
-                    let vEnd = decodeTagEnd(buf, p, depth + 1);
-                    let val = decodeSbc(buf, p, vEnd - p, depth + 1);
-
-                    p = vEnd;
-                    map.set(key, val);
-                }
-
-                return map;
-            }
-
-            case 16: {
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: set count ' + count + ' exceeds limit');
-                }
-
-                let set = new Set(),
-                    p = offset + 5;
-
-                for (let i = 0; i < count; i++) {
-                    let end = decodeTagEnd(buf, p, depth + 1);
-
-                    set.add(decodeSbc(buf, p, end - p, depth + 1));
-                    p = end;
-                }
-
-                return set;
-            }
-
-            case 17: {
-                let typeId = buf[offset + 1]!;
-                let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
-                let Ctor = TYPED_ARRAY_CTORS[typeId];
-
-                if (!Ctor) {
-                    throw new Error('Codec2: unknown typed array typeId ' + typeId);
-                }
-
-                let bpe = TYPED_ARRAY_BPE[typeId]!;
-
-                if (bLen % bpe !== 0) {
-                    throw new Error('Codec2: typed array byteLength not aligned');
-                }
-
-                let start = buf.byteOffset + offset + 6,
-                    copied = buf.buffer.slice(start, start + bLen) as ArrayBuffer;
-
-                return new (Ctor as new (buf: ArrayBuffer, off: number, len: number) => ArrayBufferView)(copied, 0, bLen / bpe);
-            }
-
-            default:
-                throw new Error('Codec2: unknown tag ' + tag + ' at offset ' + offset);
-        }
-    }
-
-
-    function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
-        if (depth > 64) {
-            throw new Error('Codec2: max decode depth exceeded');
-        }
-
-        let tag = buf[offset]!;
-
-        switch (tag) {
-            case 0: case 1: case 2:
-                return offset + 1;
-            case 3:
-                return offset + 2;
-            case 4: case 9: case 10:
-                return offset + 9;
-            case 5: {
-                let sLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (offset + 5 + sLen > buf.length) {
-                    throw new Error('Codec2: truncated string at offset ' + offset);
-                }
-
-                return offset + 5 + sLen;
-            }
-            case 6: {
-                let bLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (offset + 5 + bLen > buf.length) {
-                    throw new Error('Codec2: truncated bytes at offset ' + offset);
-                }
-
-                return offset + 5 + bLen;
-            }
-            case 7: {
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
-                }
-
-                let p = offset + 5;
-
-                for (let i = 0; i < count; i++) {
-                    p = decodeTagEnd(buf, p, depth + 1);
-                }
-
-                return p;
-            }
-            case 8: case 18: {
-                if (offset + 9 > buf.length) {
-                    throw new Error('Codec2: truncated tag-8/18 header');
-                }
-
-                let dataLen = (buf[offset + 5]! | (buf[offset + 6]! << 8) | (buf[offset + 7]! << 16) | (buf[offset + 8]! << 24)) >>> 0;
-                return offset + 9 + dataLen;
-            }
-            case 11:
-                return offset + 5;
-            case 12: {
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
-                }
-
-                if (offset + 5 + count > buf.length) {
-                    throw new Error('Codec2: truncated packed uint8 array at offset ' + offset);
-                }
-
-                return offset + 5 + count;
-            }
-            case 13: {
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
-                }
-
-                if (offset + 5 + count * 8 > buf.length) {
-                    throw new Error('Codec2: truncated packed float64 array at offset ' + offset);
-                }
-
-                return offset + 5 + count * 8;
-            }
-            case 14: {
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: array count ' + count + ' exceeds limit');
-                }
-
-                if (offset + 5 + count * 4 > buf.length) {
-                    throw new Error('Codec2: truncated packed int32 array at offset ' + offset);
-                }
-
-                return offset + 5 + count * 4;
-            }
-            case 15: {
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: map count ' + count + ' exceeds limit');
-                }
-
-                let p = offset + 5;
-
-                for (let i = 0, n = count * 2; i < n; i++) {
-                    p = decodeTagEnd(buf, p, depth + 1);
-                }
-
-                return p;
-            }
-            case 16: {
-                let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: set count ' + count + ' exceeds limit');
-                }
-
-                let p = offset + 5;
-
-                for (let i = 0; i < count; i++) {
-                    p = decodeTagEnd(buf, p, depth + 1);
-                }
-
-                return p;
-            }
-            case 17: {
-                let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
-
-                if (offset + 6 + bLen > buf.length) {
-                    throw new Error('Codec2: truncated typed array at offset ' + offset);
-                }
-
-                return offset + 6 + bLen;
-            }
-            default:
-                throw new Error('Codec2: unknown tag ' + tag + ' at offset ' + offset);
-        }
-    }
-
-
-    function encodeSbc(value: unknown, buf: Uint8Array, pos: number): number {
-        if (value === null || value === undefined) {
-            buf[pos] = 0;
-            return pos + 1;
-        }
-
-        switch (typeof value) {
-            case 'bigint':
-                buf[pos] = 9;
-                writeBI64.call(buf, value, pos + 1);
-                return pos + 9;
-
-            case 'boolean':
-                buf[pos] = value ? 2 : 1;
-                return pos + 1;
-
-            case 'number': {
-                let n = value as number;
-
-                if (Number.isInteger(n)) {
-                    if (n >= 0 && n <= 255) {
-                        buf[pos] = 3;
-                        buf[pos + 1] = n;
-                        return pos + 2;
-                    }
-
-                    if (n >= -2147483648 && n <= 2147483647) {
-                        buf[pos] = 11;
-                        buf[pos + 1] = n & 0xFF;
-                        buf[pos + 2] = (n >>> 8) & 0xFF;
-                        buf[pos + 3] = (n >>> 16) & 0xFF;
-                        buf[pos + 4] = (n >>> 24) & 0xFF;
-                        return pos + 5;
-                    }
-                }
-
-                buf[pos] = 4;
-                writeF64.call(buf, n, pos + 1);
-                return pos + 9;
-            }
-
-            case 'string': {
-                let sl = (value as string).length;
-
-                buf[pos] = 5;
-
-                // Single-pass ASCII fast path for short strings
-                if (sl < 17) {
-                    buf[pos + 1] = sl;
-                    buf[pos + 2] = 0;
-                    buf[pos + 3] = 0;
-                    buf[pos + 4] = 0;
-
-                    let ok = true,
-                        p = pos + 5;
-
-                    for (let k = 0; k < sl; k++) {
-                        let c = (value as string).charCodeAt(k);
-
-                        if (c > 127) {
-                            ok = false;
-                            break;
-                        }
-
-                        buf[p + k] = c;
-                    }
-
-                    if (ok) {
-                        return p + sl;
-                    }
-                }
-
-                let sLen = byteLen(value);
-
-                buf[pos + 1] = sLen & 0xFF;
-                buf[pos + 2] = (sLen >>> 8) & 0xFF;
-                buf[pos + 3] = (sLen >>> 16) & 0xFF;
-                buf[pos + 4] = (sLen >>> 24) & 0xFF;
-                writeUtf8.call(buf, value, pos + 5, sLen);
-                return pos + 5 + sLen;
-            }
-
-            case 'object': {
-                if (value instanceof Date) {
-                    buf[pos] = 10;
-                    writeF64.call(buf, value.getTime(), pos + 1);
-                    return pos + 9;
-                }
-
-                if (value instanceof Uint8Array) {
-                    let len = value.length;
-
-                    buf[pos] = 6;
-                    buf[pos + 1] = len & 0xFF;
-                    buf[pos + 2] = (len >>> 8) & 0xFF;
-                    buf[pos + 3] = (len >>> 16) & 0xFF;
-                    buf[pos + 4] = (len >>> 24) & 0xFF;
-                    buf.set(value, pos + 5);
-                    return pos + 5 + len;
-                }
-
-                if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
-                    let ta = value as ArrayBufferView & { buffer: ArrayBuffer; byteLength: number; byteOffset: number };
-                    let typeId = TYPED_ARRAY_IDS.get(ta.constructor);
-
-                    if (typeId === undefined) {
-                        buf[pos] = 0;
-                        return pos + 1;
-                    }
-
-                    let bLen = ta.byteLength;
-
-                    buf[pos] = 17;
-                    buf[pos + 1] = typeId;
-                    buf[pos + 2] = bLen & 0xFF;
-                    buf[pos + 3] = (bLen >>> 8) & 0xFF;
-                    buf[pos + 4] = (bLen >>> 16) & 0xFF;
-                    buf[pos + 5] = (bLen >>> 24) & 0xFF;
-                    buf.set(new Uint8Array(ta.buffer, ta.byteOffset, bLen), pos + 6);
-                    return pos + 6 + bLen;
-                }
-
-                if (value instanceof Map) {
-                    let count = value.size;
-
-                    if (count > MAX_ARRAY_COUNT) {
-                        throw new Error('Codec2: map count exceeds limit');
-                    }
-
-                    buf[pos] = 15;
-                    buf[pos + 1] = count & 0xFF;
-                    buf[pos + 2] = (count >>> 8) & 0xFF;
-                    buf[pos + 3] = (count >>> 16) & 0xFF;
-                    buf[pos + 4] = (count >>> 24) & 0xFF;
-
-                    let p = pos + 5;
-
-                    for (let [k, v] of value) {
-                        p = encodeSbc(k, buf, p);
-                        p = encodeSbc(v, buf, p);
-                    }
-                    return p;
-                }
-
-                if (value instanceof Set) {
-                    let count = value.size;
-
-                    if (count > MAX_ARRAY_COUNT) {
-                        throw new Error('Codec2: set count exceeds limit');
-                    }
-
-                    buf[pos] = 16;
-                    buf[pos + 1] = count & 0xFF;
-                    buf[pos + 2] = (count >>> 8) & 0xFF;
-                    buf[pos + 3] = (count >>> 16) & 0xFF;
-                    buf[pos + 4] = (count >>> 24) & 0xFF;
-
-                    let p = pos + 5;
-
-                    for (let v of value) { p = encodeSbc(v, buf, p); }
-                    return p;
-                }
-
-                if (Array.isArray(value)) {
-                    let len = value.length;
-
-                    if (len > 0 && typeof value[0] === 'number') {
-                        // Try packed numeric array — tiered early-exit classification
-                        let allUint8 = true,
-                            allInt32 = true,
-                            allNumber = true,
-                            i = 0;
-
-                        // Phase 1: check uint8 eligibility
-                        for (; i < len; i++) {
-                            let v = value[i];
-
-                            if (typeof v !== 'number') {
-                                allNumber = false;
-                                allUint8 = false;
-                                allInt32 = false;
-                                break;
-                            }
-
-                            if (!Number.isInteger(v) || v < 0 || v > 255) {
-                                allUint8 = false;
-                                break;
-                            }
-                        }
-
-                        // Phase 2: check int32 eligibility (only if uint8 failed on non-type reason)
-                        if (!allUint8 && allNumber) {
-                            for (; i < len; i++) {
-                                let v = value[i];
-
-                                if (typeof v !== 'number') {
-                                    allNumber = false;
-                                    allInt32 = false;
-                                    break;
-                                }
-
-                                if (!Number.isInteger(v) || v < -2147483648 || v > 2147483647) {
-                                    allInt32 = false;
-                                    break;
-                                }
-                            }
-
-                            // Phase 3: verify remaining are numbers (only if int32 failed)
-                            if (!allInt32 && allNumber) {
-                                for (; i < len; i++) {
-                                    if (typeof value[i] !== 'number') {
-                                        allNumber = false;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (allUint8) {
-                            buf[pos] = 12;
-                            buf[pos + 1] = len & 0xFF;
-                            buf[pos + 2] = (len >>> 8) & 0xFF;
-                            buf[pos + 3] = (len >>> 16) & 0xFF;
-                            buf[pos + 4] = (len >>> 24) & 0xFF;
-
-                            let p = pos + 5;
-
-                            for (let i = 0; i < len; i++) {
-                                buf[p + i] = value[i];
-                            }
-
-                            return p + len;
-                        }
-
-                        if (allInt32) {
-                            buf[pos] = 14;
-                            buf[pos + 1] = len & 0xFF;
-                            buf[pos + 2] = (len >>> 8) & 0xFF;
-                            buf[pos + 3] = (len >>> 16) & 0xFF;
-                            buf[pos + 4] = (len >>> 24) & 0xFF;
-
-                            let p = pos + 5;
-
-                            for (let i = 0; i < len; i++) {
-                                let v = value[i];
-
-                                buf[p] = v & 0xFF;
-                                buf[p + 1] = (v >>> 8) & 0xFF;
-                                buf[p + 2] = (v >>> 16) & 0xFF;
-                                buf[p + 3] = (v >>> 24) & 0xFF;
-                                p += 4;
-                            }
-
-                            return p;
-                        }
-
-                        if (allNumber) {
-                            buf[pos] = 13;
-                            buf[pos + 1] = len & 0xFF;
-                            buf[pos + 2] = (len >>> 8) & 0xFF;
-                            buf[pos + 3] = (len >>> 16) & 0xFF;
-                            buf[pos + 4] = (len >>> 24) & 0xFF;
-
-                            let p = pos + 5;
-
-                            for (let i = 0; i < len; i++) {
-                                writeF64.call(buf, value[i], p);
-                                p += 8;
-                            }
-
-                            return p;
-                        }
-                    }
-
-                    buf[pos] = 7;
-                    buf[pos + 1] = len & 0xFF;
-                    buf[pos + 2] = (len >>> 8) & 0xFF;
-                    buf[pos + 3] = (len >>> 16) & 0xFF;
-                    buf[pos + 4] = (len >>> 24) & 0xFF;
-
-                    let p = pos + 5;
-
-                    for (let i = 0; i < len; i++) {
-                        p = encodeSbc(value[i], buf, p);
-                    }
-
-                    return p;
-                }
-
-                // Plain object → schema-compiled path
-                let obj = value as Record<string, unknown>,
-                    schema = weakCache.get(obj) ?? null;
-
-                if (!schema) {
-                    schema = matchSchema(obj);
-
-                    if (!schema) {
-                        schema = inferAndRegister(obj, registry, helpers, store);
-                    }
-
-                    setCache(schema, obj);
-                }
-
-                let end: number,
-                    h = schema.hash,
-                    useCompressed = compress && schema.compressible && schema.compressedEncodeFn;
-
-                if (useCompressed) {
-                    buf[pos] = 18;
-                    end = schema.compressedEncodeFn!(obj, buf, pos + 9);
-                }
-                else {
-                    buf[pos] = 8;
-                    end = schema.encodeFn!(obj, buf, pos + 9);
-                }
-
-                let dataLen = end - pos - 9;
-
-                buf[pos + 1] = h & 0xFF;
-                buf[pos + 2] = (h >>> 8) & 0xFF;
-                buf[pos + 3] = (h >>> 16) & 0xFF;
-                buf[pos + 4] = (h >>> 24) & 0xFF;
-                buf[pos + 5] = dataLen & 0xFF;
-                buf[pos + 6] = (dataLen >>> 8) & 0xFF;
-                buf[pos + 7] = (dataLen >>> 16) & 0xFF;
-                buf[pos + 8] = (dataLen >>> 24) & 0xFF;
-
-                return end;
-            }
-
-            default:
-                buf[pos] = 0;
-                return pos + 1;
-        }
-    }
+    // Wire helpers into ectx after construction (circular ref)
+    ectx.helpers = helpers;
 
 
     function matchSchema(obj: Record<string, unknown>): Schema | null {
@@ -916,16 +231,16 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                 let bufHash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
 
                 if (bufHash === hintSchema.hash) {
-                    lastDecodeHash = bufHash;
-                    lastDecodeFn = null;
-                    lastDecodeSchema = hintSchema;
+                    dctx.lastDecodeHash = bufHash;
+                    dctx.lastDecodeFn = null;
+                    dctx.lastDecodeSchema = hintSchema;
 
                     if (tag === 18 && hintSchema.compressedDecodeFn) {
                         return hintSchema.compressedDecodeFn(buffer, 9, 0);
                     }
 
                     if (hintSchema.decodeFn) {
-                        lastDecodeFn = hintSchema.decodeFn;
+                        dctx.lastDecodeFn = hintSchema.decodeFn;
 
                         return hintSchema.decodeFn(buffer, 9, 0);
                     }
@@ -938,16 +253,16 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         if (buffer[0] === 8 && len >= 9 && len === buffer.length) {
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
 
-            if (hash === lastDecodeHash && lastDecodeFn) {
-                return lastDecodeFn(buffer, 9, 0);
+            if (hash === dctx.lastDecodeHash && dctx.lastDecodeFn) {
+                return dctx.lastDecodeFn(buffer, 9, 0);
             }
 
             let schema = registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash);
 
             if (schema && schema.decodeFn) {
-                lastDecodeHash = hash;
-                lastDecodeFn = schema.decodeFn;
-                lastDecodeSchema = schema;
+                dctx.lastDecodeHash = hash;
+                dctx.lastDecodeFn = schema.decodeFn;
+                dctx.lastDecodeSchema = schema;
 
                 return schema.decodeFn(buffer, 9, 0);
             }
@@ -956,14 +271,14 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         // Tag 18 (compressed object) fast path
         if (buffer[0] === 18 && len >= 9 && len === buffer.length) {
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
-                schema = hash === lastDecodeHash && lastDecodeSchema
-                    ? lastDecodeSchema
+                schema = hash === dctx.lastDecodeHash && dctx.lastDecodeSchema
+                    ? dctx.lastDecodeSchema
                     : (registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash));
 
             if (schema) {
-                lastDecodeHash = hash;
-                lastDecodeFn = null;
-                lastDecodeSchema = schema;
+                dctx.lastDecodeHash = hash;
+                dctx.lastDecodeFn = null;
+                dctx.lastDecodeSchema = schema;
 
                 if (schema.compressedDecodeFn) {
                     return schema.compressedDecodeFn(buffer, 9, 0);
@@ -975,7 +290,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             }
         }
 
-        return decodeSbc(buffer, 0, len, 0);
+        return boundDecodeSbc(buffer, 0, len, 0);
     }
 
 
@@ -1071,11 +386,11 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         }
 
         // Generic path
-        let end = encodeSbc(value, encodeBuf, 0);
+        let end = boundEncodeSbc(value, encodeBuf, 0);
 
         while (end > encodeBuf.length) {
             encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
-            end = encodeSbc(value, encodeBuf, 0);
+            end = boundEncodeSbc(value, encodeBuf, 0);
         }
 
         if (view) {
@@ -1100,12 +415,12 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
             let dataLen = (buffer[offset + 5]! | (buffer[offset + 6]! << 8) | (buffer[offset + 7]! << 16) | (buffer[offset + 8]! << 24)) >>> 0;
 
-            return decodeSbc(buffer, offset, 9 + dataLen, 0);
+            return boundDecodeSbc(buffer, offset, 9 + dataLen, 0);
         }
 
         let end = decodeTagEnd(buffer, offset, 0);
 
-        return decodeSbc(buffer, offset, end - offset, 0);
+        return boundDecodeSbc(buffer, offset, end - offset, 0);
     }
 
 
@@ -1524,7 +839,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             case 'mixed':
             case 'set':
             case 'typedarray':
-                return decodeSbc(buffer, pos, decodeTagEnd(buffer, pos, 0) - pos, 0);
+                return boundDecodeSbc(buffer, pos, decodeTagEnd(buffer, pos, 0) - pos, 0);
             case 'object': {
                 if (target.refHash !== undefined) {
                     // Typed object — use full object decode
@@ -1547,7 +862,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                     ? pos + 9 + ((buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0)
                     : decodeTagEnd(buffer, pos, 0);
 
-                return decodeSbc(buffer, pos, end - pos, 0);
+                return boundDecodeSbc(buffer, pos, end - pos, 0);
             }
             default:
                 return undefined;
