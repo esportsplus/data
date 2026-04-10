@@ -151,6 +151,10 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
                 throw new Error('Codec2: array count ' + count + ' exceeds limit');
             }
 
+            if (offset + 5 + count > buf.length) {
+                throw new Error('Codec2: truncated packed uint8 array at offset ' + offset);
+            }
+
             let arr = new Array(count),
                 p = offset + 5;
 
@@ -167,6 +171,10 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
 
             if (count > MAX_ARRAY_COUNT) {
                 throw new Error('Codec2: array count ' + count + ' exceeds limit');
+            }
+
+            if (offset + 5 + count * 8 > buf.length) {
+                throw new Error('Codec2: truncated packed float64 array at offset ' + offset);
             }
 
             let arr = new Array(count),
@@ -186,6 +194,10 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
 
             if (count > MAX_ARRAY_COUNT) {
                 throw new Error('Codec2: array count ' + count + ' exceeds limit');
+            }
+
+            if (offset + 5 + count * 4 > buf.length) {
+                throw new Error('Codec2: truncated packed int32 array at offset ' + offset);
             }
 
             let arr = new Array(count),
@@ -459,15 +471,20 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
 
             buf[pos] = 5;
 
-            // Single-pass ASCII fast path: scan then write (no wasted writes on failure)
+            // Single-pass ASCII fast path: write + validate simultaneously
             if (sl < 17) {
-                let ascii = true;
+                let ascii = true,
+                    p = pos + 5;
 
                 for (let k = 0; k < sl; k++) {
-                    if ((value as string).charCodeAt(k) > 127) {
+                    let c = (value as string).charCodeAt(k);
+
+                    if (c > 127) {
                         ascii = false;
                         break;
                     }
+
+                    buf[p + k] = c;
                 }
 
                 if (ascii) {
@@ -475,12 +492,6 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                     buf[pos + 2] = 0;
                     buf[pos + 3] = 0;
                     buf[pos + 4] = 0;
-
-                    let p = pos + 5;
-
-                    for (let k = 0; k < sl; k++) {
-                        buf[p + k] = (value as string).charCodeAt(k);
-                    }
 
                     return p + sl;
                 }

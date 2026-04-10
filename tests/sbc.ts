@@ -431,23 +431,21 @@ describe('Codec2', () => {
 
     // === RING BUFFER CACHE EVICTION ===
 
-    describe('ring buffer cache (4 slots)', () => {
-        it('handles > 4 distinct schemas', () => {
+    describe('ring buffer cache (16 slots)', () => {
+        it('handles > 16 distinct schemas with eviction', () => {
             let c = codec(),
-                schemas = [
-                    { a: 1 },
-                    { b: 2 },
-                    { c: 3 },
-                    { d: 4 },
-                    { e: 5 },
-                    { f: 6 },
-                ];
+                schemas: Record<string, number>[] = [];
 
+            for (let i = 0; i < 20; i++) {
+                schemas.push({ [`key${i}`]: i });
+            }
+
+            // Encode all 20 — exceeds 16-slot ring buffer
             for (let s of schemas) {
                 expect(c.decode(c.encode(s))).toEqual(s);
             }
 
-            // Re-encode earlier schemas after eviction
+            // Re-encode after eviction — schemas re-inferred
             for (let s of schemas) {
                 expect(c.decode(c.encode(s))).toEqual(s);
             }
@@ -4007,6 +4005,31 @@ describe('Codec2', () => {
             let truncated = valid.slice(0, 14);
 
             expect(() => c.decode(truncated)).toThrow('truncated');
+        });
+    });
+
+
+    describe('JIT decoder p+9+_dl payload overflow guard', () => {
+        it('intact inner header but overflowing payload length throws', () => {
+            let c = codec();
+
+            c.defineSchema([
+                { name: 'child', type: 'object' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let valid = c.encode({ child: { a: 1, b: 2 }, name: 'hello' });
+
+            // Find the child field's tag-8 header at offset 9
+            // Corrupt the dataLen (bytes 14-17) to a huge value
+            let corrupted = new Uint8Array(valid);
+
+            corrupted[14] = 0xFF;
+            corrupted[15] = 0xFF;
+            corrupted[16] = 0xFF;
+            corrupted[17] = 0x7F;
+
+            expect(() => c.decode(corrupted)).toThrow('truncated');
         });
     });
 
