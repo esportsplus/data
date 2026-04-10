@@ -3,57 +3,6 @@ import { describe, expect, it } from 'vitest';
 import error from '../src/compiler/error';
 
 
-describe('Error Path Modes: resolvePath', () => {
-    describe('static mode', () => {
-        it('returns empty string literal for empty path', () => {
-            let result = error.resolvePath({ kind: 'static', path: [] });
-
-            expect(result).toBe("''");
-        });
-
-        it('returns single part path', () => {
-            let result = error.resolvePath({ kind: 'static', path: ['name'] });
-
-            expect(result).toBe("'name'");
-        });
-
-        it('returns joined multi-part path', () => {
-            let result = error.resolvePath({ kind: 'static', path: ['address', 'city'] });
-
-            expect(result).toBe("'address.city'");
-        });
-    });
-
-    describe('record mode', () => {
-        it('returns key alone for empty path', () => {
-            let result = error.resolvePath({ kind: 'record', key: '_key', path: [] });
-
-            expect(result).toBe('_key');
-        });
-
-        it('returns path prefix concatenated with key', () => {
-            let result = error.resolvePath({ kind: 'record', key: '_key', path: ['data'] });
-
-            expect(result).toBe("'data.' + _key");
-        });
-    });
-
-    describe('dynamic mode', () => {
-        it('returns bracket notation for empty path', () => {
-            let result = error.resolvePath({ kind: 'dynamic', key: '_i', path: [] });
-
-            expect(result).toBe("'[' + _i + ']'");
-        });
-
-        it('returns path with bracket notation', () => {
-            let result = error.resolvePath({ kind: 'dynamic', key: '_i', path: ['items'] });
-
-            expect(result).toBe("'items[' + _i + ']'");
-        });
-    });
-});
-
-
 describe('Error: generate', () => {
     it('generates error push code with static path', () => {
         let result = error.generate('must be a string', { kind: 'static', path: ['name'] });

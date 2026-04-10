@@ -44,5 +44,5 @@ const generate = (message: string, pathMode: PathMode, context?: GeneratorContex
 };
 
 
-export default { generate, resolvePath };
+export default { generate };
 export { ERRORS_VARIABLE };

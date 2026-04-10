@@ -151,10 +151,8 @@ interface CodegenDriver {
     preamble(bufVar: string): string;
     readF64(off: string): string;
     readStr(start: string, len: string): string;
-    readU32(off: string): string;
     writeF64(off: string, val: string): string;
     writeStr(str: string, off: string, len: string): string;
-    writeU32(off: string, val: string): string;
 }
 
 
@@ -178,10 +176,8 @@ let codegenDriver: CodegenDriver = isNode
         preamble: () => '',
         readF64: (off) => `_rF64.call(b,${off})`,
         readStr: (start, len) => `_rStr(b,${start},${len})`,
-        readU32: (off) => `b[${off}]|(b[${off}+1]<<8)|(b[${off}+2]<<16)|(b[${off}+3]<<24)>>>0`,
         writeF64: (off, val) => `_wF64.call(b,${val},${off})`,
         writeStr: (str, off, len) => `_wUtf8.call(b,${str},${off},${len})`,
-        writeU32: (off, val) => `b[${off}]=${val}&0xFF;b[${off}+1]=(${val}>>>8)&0xFF;b[${off}+2]=(${val}>>>16)&0xFF;b[${off}+3]=(${val}>>>24)&0xFF`,
     }
     : {
         byteLen: (str) => `_bl(${str})`,
@@ -210,10 +206,8 @@ let codegenDriver: CodegenDriver = isNode
         preamble: () => '',
         readF64: (off) => `_rF64(b,${off})`,
         readStr: (start, len) => `_rStr(b,${start},${len})`,
-        readU32: (off) => `(b[${off}]|(b[${off}+1]<<8)|(b[${off}+2]<<16)|(b[${off}+3]<<24))>>>0`,
         writeF64: (off, val) => `_wF64(b,${val},${off})`,
         writeStr: (str, off, _len) => `_wUtf8(b,${str},${off})`,
-        writeU32: (off, val) => `b[${off}]=${val}&0xFF;b[${off}+1]=(${val}>>>8)&0xFF;b[${off}+2]=(${val}>>>16)&0xFF;b[${off}+3]=(${val}>>>24)&0xFF`,
     };
 
 
