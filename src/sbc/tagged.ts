@@ -477,14 +477,19 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 }
             }
 
-            let sLen = byteLen(value);
+            let sLen = byteLen(value),
+                needed = pos + 5 + sLen;
 
             buf[pos + 1] = sLen & 0xFF;
             buf[pos + 2] = (sLen >>> 8) & 0xFF;
             buf[pos + 3] = (sLen >>> 16) & 0xFF;
             buf[pos + 4] = (sLen >>> 24) & 0xFF;
-            writeUtf8.call(buf, value, pos + 5, sLen);
-            return pos + 5 + sLen;
+
+            if (needed <= buf.length) {
+                writeUtf8.call(buf, value, pos + 5, sLen);
+            }
+
+            return needed;
         }
 
         case 'object': {
@@ -495,15 +500,20 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
             }
 
             if (value instanceof Uint8Array) {
-                let len = value.length;
+                let len = value.length,
+                    needed = pos + 5 + len;
 
                 buf[pos] = 6;
                 buf[pos + 1] = len & 0xFF;
                 buf[pos + 2] = (len >>> 8) & 0xFF;
                 buf[pos + 3] = (len >>> 16) & 0xFF;
                 buf[pos + 4] = (len >>> 24) & 0xFF;
-                buf.set(value, pos + 5);
-                return pos + 5 + len;
+
+                if (needed <= buf.length) {
+                    buf.set(value, pos + 5);
+                }
+
+                return needed;
             }
 
             if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
@@ -515,7 +525,8 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                     return pos + 1;
                 }
 
-                let bLen = ta.byteLength;
+                let bLen = ta.byteLength,
+                    needed = pos + 6 + bLen;
 
                 buf[pos] = 17;
                 buf[pos + 1] = typeId;
@@ -523,8 +534,12 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 buf[pos + 3] = (bLen >>> 8) & 0xFF;
                 buf[pos + 4] = (bLen >>> 16) & 0xFF;
                 buf[pos + 5] = (bLen >>> 24) & 0xFF;
-                buf.set(new Uint8Array(ta.buffer, ta.byteOffset, bLen), pos + 6);
-                return pos + 6 + bLen;
+
+                if (needed <= buf.length) {
+                    buf.set(new Uint8Array(ta.buffer, ta.byteOffset, bLen), pos + 6);
+                }
+
+                return needed;
             }
 
             if (value instanceof Map) {

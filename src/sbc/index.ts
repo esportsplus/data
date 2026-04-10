@@ -158,6 +158,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         decodeTagEnd: boundDecodeTagEnd,
         encodeObj,
         encodeSbc: boundEncodeSbc,
+        lookupSchema: resolveSchemaFromCacheOrStore,
         registry: registry.schemas,
     };
 
@@ -299,29 +300,62 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
     }
 
 
+    // Retry-on-overflow wrappers — catch RangeError from JIT-compiled encoders
+    // and tagged encoder, grow the buffer, and retry until it fits.
+    function tryEncode(fn: (obj: unknown, buf: Uint8Array, pos: number) => number, obj: unknown, pos: number): number {
+        while (true) {
+            try {
+                let end = fn(obj, encodeBuf, pos);
+
+                if (end <= encodeBuf.length) {
+                    return end;
+                }
+
+                encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+            }
+            catch (e) {
+                if (!(e instanceof RangeError)) {
+                    throw e;
+                }
+
+                encodeBuf = allocBuf(encodeBuf.length * 2);
+            }
+        }
+    }
+
+    function tryEncodeSbc(value: unknown, pos: number): number {
+        while (true) {
+            try {
+                let end = boundEncodeSbc(value, encodeBuf, pos);
+
+                if (end <= encodeBuf.length) {
+                    return end;
+                }
+
+                encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+            }
+            catch (e) {
+                if (!(e instanceof RangeError)) {
+                    throw e;
+                }
+
+                encodeBuf = allocBuf(encodeBuf.length * 2);
+            }
+        }
+    }
+
+
     function encodeObject(schema: Schema, obj: Record<string, unknown>, view: boolean): Uint8Array {
         let end: number,
             h = schema.hash,
             useCompressed = compress && schema.compressible && schema.compressedEncodeFn;
 
         if (useCompressed) {
-            end = schema.compressedEncodeFn!(obj, encodeBuf, 9);
-
-            while (end > encodeBuf.length) {
-                encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
-                end = schema.compressedEncodeFn!(obj, encodeBuf, 9);
-            }
-
+            end = tryEncode(schema.compressedEncodeFn!, obj, 9);
             encodeBuf[0] = 18;
         }
         else {
-            end = schema.encodeFn!(obj, encodeBuf, 9);
-
-            while (end > encodeBuf.length) {
-                encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
-                end = schema.encodeFn!(obj, encodeBuf, 9);
-            }
-
+            end = tryEncode(schema.encodeFn!, obj, 9);
             encodeBuf[0] = 8;
         }
 
@@ -391,12 +425,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         }
 
         // Generic path
-        let end = boundEncodeSbc(value, encodeBuf, 0);
-
-        while (end > encodeBuf.length) {
-            encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
-            end = boundEncodeSbc(value, encodeBuf, 0);
-        }
+        let end = tryEncodeSbc(value, 0);
 
         if (view) {
             return encodeBuf.subarray(0, end);

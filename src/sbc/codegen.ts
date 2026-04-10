@@ -46,6 +46,7 @@ interface SbcHelpers {
     decodeTagEnd: (buf: Uint8Array, offset: number, depth: number) => number;
     encodeObj: (obj: Record<string, unknown>, buf: Uint8Array, pos: number) => number;
     encodeSbc: (value: unknown, buf: Uint8Array, pos: number) => number;
+    lookupSchema: (hash: number) => Schema | null;
     registry: Map<number, Schema>;
 }
 
@@ -507,7 +508,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                             body += `else{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
                             body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                             body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                            body += `_s=_reg.get(_h);`;
+                            body += `_s=_reg.get(_h)||_lk(_h);`;
                             body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){a[i]=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){a[i]=_s.decodeFn(b,p+9,_d+1);}else{a[i]=null;}}else{a[i]=null;}`;
                             body += `p+=9+_dl2;}`;
                             body += `else{let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}}`;
@@ -558,7 +559,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         body += `else{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
                         body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                         body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                        body += `_s=_reg.get(_h);`;
+                        body += `_s=_reg.get(_h)||_lk(_h);`;
                         body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
                         body += `p+=9+_dl2;}`;
                         body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}}\n`;
@@ -568,7 +569,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         body += `{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
                         body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                         body += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                        body += `_s=_reg.get(_h);`;
+                        body += `_s=_reg.get(_h)||_lk(_h);`;
                         body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
                         body += `p+=9+_dl;}`;
                         body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
@@ -579,7 +580,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     body += `{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
                     body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                     body += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                    body += `_s=_reg.get(_h);`;
+                    body += `_s=_reg.get(_h)||_lk(_h);`;
                     body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
                     body += `p+=9+_dl;}`;
                     body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
@@ -624,9 +625,9 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
         refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
 
     try {
-        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_vrs', '_Ctor', ...refDecParamNames, `return function decode(b,pos,_d){${body}}`);
+        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_lk', '_rv', '_vrs', '_Ctor', ...refDecParamNames, `return function decode(b,pos,_d){${body}}`);
 
-        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, _vr, Ctor, ...refDecBindValues);
+        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, helpers.lookupSchema, readVarint, _vr, Ctor, ...refDecBindValues);
     }
     catch (e) {
         throw new Error('Codec2: decoder compilation failed: ' + (e instanceof Error ? e.message : e));
@@ -801,7 +802,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                             body += `else{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
                             body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                             body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                            body += `_s=_reg.get(_h);`;
+                            body += `_s=_reg.get(_h)||_lk(_h);`;
                             body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){a[i]=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){a[i]=_s.decodeFn(b,p+9,_d+1);}else{a[i]=null;}}else{a[i]=null;}`;
                             body += `p+=9+_dl2;}`;
                             body += `else{let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}}`;
@@ -843,20 +844,20 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         body += `else{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
                         body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                         body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                        body += `_s=_reg.get(_h);`;
+                        body += `_s=_reg.get(_h)||_lk(_h);`;
                         body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
                         body += `p+=9+_dl2;}`;
                         body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}}${nc}\n`;
                     }
                     else {
-                        body += `${no}{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h);`;
+                        body += `${no}{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h)||_lk(_h);`;
                         body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
                         body += `p+=9+_dl;}`;
                         body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
                     }
                 }
                 else {
-                    body += `${no}{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h);`;
+                    body += `${no}{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h)||_lk(_h);`;
                     body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
                     body += `p+=9+_dl;}`;
                     body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
@@ -887,8 +888,8 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
         refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
 
     try {
-        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_rv', '_rz', '_vrs', '_Ctor', ...refDecParamNames, `return function decodeC(b,pos,_d){${body}}`)
-        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, readVarint, readZigzag, _vr, Ctor, ...refDecBindValues);
+        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_lk', '_rv', '_rz', '_vrs', '_Ctor', ...refDecParamNames, `return function decodeC(b,pos,_d){${body}}`)
+        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, helpers.lookupSchema, readVarint, readZigzag, _vr, Ctor, ...refDecBindValues);
     }
     catch (e) {
         throw new Error('Codec2: compressed decoder compilation failed: ' + (e instanceof Error ? e.message : e));
