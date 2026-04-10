@@ -264,7 +264,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
             let s = ctx.schemas.get(hash);
 
             if (s && s.decodeFn) {
-                let obj = s.decodeFn(buffer, dataStart, 0) as Record<string, unknown>;
+                let obj = s.decodeFn(buffer, 9, 0) as Record<string, unknown>;
 
                 return obj[fieldName];
             }
@@ -282,7 +282,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
                 let s = ctx.schemas.get(hash);
 
                 if (s && s.decodeFn) {
-                    let obj = s.decodeFn(buffer, dataStart, 0) as Record<string, unknown>;
+                    let obj = s.decodeFn(buffer, 9, 0) as Record<string, unknown>;
 
                     return obj[fieldName];
                 }
