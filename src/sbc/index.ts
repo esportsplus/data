@@ -38,7 +38,16 @@ import cache from './cache';
 // 16 = set (u32 count + elements)
 // 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
-const codec = (options?: CodecOptions): { computeSize(value: unknown): number; decode(buffer: Uint8Array, lengthOrOptions?: number | DecodeOptions): unknown; decodeAt(buffer: Uint8Array, offset: number): unknown; defineSchema(fields: FieldSpec[]): number; deserializeRegistry(data: Uint8Array): void; encode(value: unknown, viewOrOptions?: boolean | EncodeOptions): Uint8Array; extractField(buffer: Uint8Array, fieldName: string): unknown; serializeRegistry(): Uint8Array } => {
+const codec = (options?: CodecOptions): {
+    computeSize(value: unknown): number;
+    decode<T = unknown>(buffer: Uint8Array, lengthOrOptions?: number | DecodeOptions): T;
+    decodeAt<T = unknown>(buffer: Uint8Array, offset: number): T;
+    defineSchema(fields: FieldSpec[]): number;
+    deserializeRegistry(data: Uint8Array): void;
+    encode<T>(value: T, viewOrOptions?: boolean | EncodeOptions): Uint8Array;
+    extractField<T = unknown>(buffer: Uint8Array, fieldName: string): T;
+    serializeRegistry(): Uint8Array
+} => {
     let compress = options?.compress ?? false,
         encodeBuf = allocBuf(65536),
         registry: SchemaRegistry = {
@@ -231,7 +240,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
     }
 
 
-    function decode(buffer: Uint8Array, lengthOrOptions?: number | DecodeOptions): unknown {
+    function decode<T = unknown>(buffer: Uint8Array, lengthOrOptions?: number | DecodeOptions): T {
         let len = buffer.length;
 
         if (typeof lengthOrOptions === 'number') {
@@ -250,13 +259,13 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                     dctx.lastDecodeSchema = hintSchema;
 
                     if (tag === 18 && hintSchema.compressedDecodeFn) {
-                        return hintSchema.compressedDecodeFn(buffer, 9, 0);
+                        return hintSchema.compressedDecodeFn(buffer, 9, 0) as T;
                     }
 
                     if (hintSchema.decodeFn) {
                         dctx.lastDecodeFn = hintSchema.decodeFn;
 
-                        return hintSchema.decodeFn(buffer, 9, 0);
+                        return hintSchema.decodeFn(buffer, 9, 0) as T;
                     }
                 }
             }
@@ -268,7 +277,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
 
             if (hash === dctx.lastDecodeHash && dctx.lastDecodeFn) {
-                return dctx.lastDecodeFn(buffer, 9, 0);
+                return dctx.lastDecodeFn(buffer, 9, 0) as T;
             }
 
             let schema = registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash);
@@ -278,7 +287,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                 dctx.lastDecodeFn = schema.decodeFn;
                 dctx.lastDecodeSchema = schema;
 
-                return schema.decodeFn(buffer, 9, 0);
+                return schema.decodeFn(buffer, 9, 0) as T;
             }
         }
 
@@ -295,16 +304,16 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
                 dctx.lastDecodeSchema = schema;
 
                 if (schema.compressedDecodeFn) {
-                    return schema.compressedDecodeFn(buffer, 9, 0);
+                    return schema.compressedDecodeFn(buffer, 9, 0) as T;
                 }
 
                 if (schema.decodeFn) {
-                    return schema.decodeFn(buffer, 9, 0);
+                    return schema.decodeFn(buffer, 9, 0) as T;
                 }
             }
         }
 
-        return boundDecodeSbc(buffer, 0, len, 0);
+        return boundDecodeSbc(buffer, 0, len, 0) as T;
     }
 
 
@@ -447,7 +456,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
     }
 
 
-    function decodeAt(buffer: Uint8Array, offset: number): unknown {
+    function decodeAt<T = unknown>(buffer: Uint8Array, offset: number): T {
         let tag = buffer[offset]!;
 
         if (tag === 8 || tag === 18) {
@@ -457,12 +466,12 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
 
             let dataLen = (buffer[offset + 5]! | (buffer[offset + 6]! << 8) | (buffer[offset + 7]! << 16) | (buffer[offset + 8]! << 24)) >>> 0;
 
-            return boundDecodeSbc(buffer, offset, 9 + dataLen, 0);
+            return boundDecodeSbc(buffer, offset, 9 + dataLen, 0) as T;
         }
 
         let end = decodeTagEnd(buffer, offset, 0);
 
-        return boundDecodeSbc(buffer, offset, end - offset, 0);
+        return boundDecodeSbc(buffer, offset, end - offset, 0) as T;
     }
 
 
@@ -650,7 +659,7 @@ const codec = (options?: CodecOptions): { computeSize(value: unknown): number; d
         defineSchema,
         deserializeRegistry: (data: Uint8Array) => deserializeRegistry(data, defineSchema, registry.schemas),
         encode,
-        extractField: (buffer: Uint8Array, fieldName: string) => extractField(extractCtx, buffer, fieldName),
+        extractField: <T = unknown>(buffer: Uint8Array, fieldName: string): T => extractField(extractCtx, buffer, fieldName) as T,
         serializeRegistry: () => serializeRegistry(registry.schemas),
     };
 };
