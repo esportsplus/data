@@ -58,8 +58,41 @@ describe('Codec2', () => {
             expect(c.decode(c.encode(3.14))).toBe(3.14);
         });
 
-        it.fails('BUG: -0 classified as uint8 instead of float64', () => {
+        it('negative zero round-trips as -0 (top-level)', () => {
             expect(Object.is(c.decode(c.encode(-0)) as number, -0)).toBe(true);
+        });
+
+        it('negative zero round-trips inside an object field', () => {
+            let decoded = c.decode(c.encode({ a: -0, b: 0 })) as { a: number; b: number };
+
+            expect(Object.is(decoded.a, -0)).toBe(true);
+            expect(Object.is(decoded.b, 0)).toBe(true);
+        });
+
+        it('negative zero round-trips inside a numeric array', () => {
+            let decoded = c.decode(c.encode([-0, 0, -0])) as number[];
+
+            expect(Object.is(decoded[0], -0)).toBe(true);
+            expect(Object.is(decoded[1], 0)).toBe(true);
+            expect(Object.is(decoded[2], -0)).toBe(true);
+        });
+
+        it('negative zero mixed with large ints in array preserves sign', () => {
+            let decoded = c.decode(c.encode([-0, 100000, 0])) as number[];
+
+            expect(Object.is(decoded[0], -0)).toBe(true);
+            expect(decoded[1]).toBe(100000);
+            expect(Object.is(decoded[2], 0)).toBe(true);
+        });
+
+        it('nested structure with -0 at multiple levels', () => {
+            let data = { a: -0, b: [-0, 0], c: { d: -0 } },
+                decoded = c.decode(c.encode(data)) as { a: number; b: number[]; c: { d: number } };
+
+            expect(Object.is(decoded.a, -0)).toBe(true);
+            expect(Object.is(decoded.b[0], -0)).toBe(true);
+            expect(Object.is(decoded.b[1], 0)).toBe(true);
+            expect(Object.is(decoded.c.d, -0)).toBe(true);
         });
 
         it('float64 (Infinity)', () => {

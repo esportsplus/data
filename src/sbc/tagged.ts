@@ -444,7 +444,7 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
         case 'number': {
             let n = value as number;
 
-            if (Number.isInteger(n)) {
+            if (Number.isInteger(n) && !Object.is(n, -0)) {
                 if (n >= 0 && n <= 255) {
                     buf[pos] = 3;
                     buf[pos + 1] = n;
@@ -626,7 +626,7 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                             break;
                         }
 
-                        if (!Number.isInteger(v) || v < 0 || v > 255) {
+                        if (!Number.isInteger(v) || Object.is(v, -0) || v < 0 || v > 255) {
                             allUint8 = false;
                             break;
                         }
@@ -643,7 +643,7 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                                 break;
                             }
 
-                            if (!Number.isInteger(v) || v < -2147483648 || v > 2147483647) {
+                            if (!Number.isInteger(v) || Object.is(v, -0) || v < -2147483648 || v > 2147483647) {
                                 allInt32 = false;
                                 break;
                             }

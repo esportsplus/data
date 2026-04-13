@@ -28,7 +28,7 @@ function computeSize(ctx: SizeContext, value: unknown): number {
         case 'bigint': return 9;
         case 'boolean': return 1;
         case 'number': {
-            if (Number.isInteger(value)) {
+            if (Number.isInteger(value) && !Object.is(value, -0)) {
                 if (value >= 0 && value <= 255) {
                     return 2;
                 }

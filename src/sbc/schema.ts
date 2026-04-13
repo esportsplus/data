@@ -118,7 +118,7 @@ function inferType(value: unknown): string {
         case 'number': {
             let n = value as number;
 
-            if (Number.isInteger(n)) {
+            if (Number.isInteger(n) && !Object.is(n, -0)) {
                 if (n >= 0 && n <= 255) {
                     return 'uint8';
                 }
