@@ -211,7 +211,10 @@ const codec = (options?: CodecOptions): {
             }
         }
 
-        // Last resort: check pre-defined typed schemas by field names only
+        // Last resort: check pre-defined typed schemas — must verify every field's
+        // full type signature (elementType, refHash, container child types), not just names.
+        // Matching by key set alone would bind structurally-similar objects with divergent
+        // nested value types to the wrong encoder.
         if (typedSchemas.size > 0 && typedSchemaFieldCounts.has(keyCount)) {
             let sortedKeys = Object.keys(obj).sort(),
                 nameHash = computeNameHash(sortedKeys),
@@ -224,7 +227,9 @@ const codec = (options?: CodecOptions): {
                 let match = true;
 
                 for (let j = 0, m = typed.fields.length; j < m; j++) {
-                    if (typed.fields[j]!.name !== sortedKeys[j]) {
+                    let f = typed.fields[j]!;
+
+                    if (f.name !== sortedKeys[j] || !matchesTypedField(obj[f.name], f)) {
                         match = false;
                         break;
                     }
@@ -237,6 +242,80 @@ const codec = (options?: CodecOptions): {
         }
 
         return null;
+    }
+
+
+    // Verifies a runtime value matches a pre-defined typed schema field's full type
+    // signature — including elementType for arrays and refHash for nested object refs.
+    // Nullable typed fields accept null/undefined; non-nullable must be present.
+    function matchesTypedField(value: unknown, field: FieldDef): boolean {
+        if (value == null) {
+            return field.nullable;
+        }
+
+        if (field.elementType) {
+            if (!Array.isArray(value)) {
+                return false;
+            }
+
+            let et = field.elementType;
+
+            if (et.hash !== undefined) {
+                // array<object(hash)> — require every element be a non-null object.
+                // Deep shape verification would require recursive match against the
+                // ref schema; we guard against obvious mismatches (primitives, arrays).
+                for (let i = 0, n = value.length; i < n; i++) {
+                    let v = value[i];
+
+                    if (v === null || typeof v !== 'object' || Array.isArray(v)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            // Primitive element type — every element must infer to the same base.
+            // Empty arrays are ambiguous and always accepted (no counter-evidence).
+            for (let i = 0, n = value.length; i < n; i++) {
+                if (!primitiveMatches(value[i], et.base)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        if (field.refHash !== undefined) {
+            return value !== null && typeof value === 'object' && !Array.isArray(value);
+        }
+
+        return primitiveMatches(value, field.type);
+    }
+
+
+    // Determines whether a runtime value is assignable to a pre-defined primitive type.
+    // Numeric subtypes (uint8..int32) accept any integer; float64 accepts any number.
+    // This is intentionally permissive within numeric families — the encoder widens
+    // as needed — but strict across type families (number vs string vs object).
+    function primitiveMatches(value: unknown, type: string): boolean {
+        switch (type) {
+            case 'bigint': return typeof value === 'bigint';
+            case 'boolean': return typeof value === 'boolean';
+            case 'bytes': return value instanceof Uint8Array;
+            case 'date': return value instanceof Date;
+            case 'float64':
+                return typeof value === 'number';
+            case 'int8':
+            case 'int16':
+            case 'int32':
+            case 'uint8':
+            case 'uint16':
+            case 'uint32':
+                return typeof value === 'number' && Number.isInteger(value) && !Object.is(value, -0);
+            case 'string': return typeof value === 'string';
+            default: return inferType(value) === type;
+        }
     }
 
 

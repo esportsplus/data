@@ -4127,4 +4127,105 @@ describe('Codec2', () => {
             expect(decoded).toEqual(data);
         });
     });
+
+
+    // === F-002: matchSchema typed-schema fallback must verify full field signatures ===
+
+    describe('F-002: typed schema fallback type safety', () => {
+        it('does not bind {x: number[]} schema to object with {x: string[]}', () => {
+            let c = codec();
+
+            c.defineSchema([{ name: 'x', type: 'array<int32>' }]);
+
+            // Encoding an object with same key but incompatible element type must NOT
+            // reuse the int32-array schema — it must infer a fresh schema.
+            let obj = { x: ['a', 'b', 'c'] },
+                encoded = c.encode(obj),
+                decoded = c.decode(encoded) as { x: string[] };
+
+            expect(decoded).toEqual(obj);
+        });
+
+        it('does not bind {x: array<int32>} schema to object with {x: array<float64>}', () => {
+            let c = codec();
+
+            c.defineSchema([{ name: 'x', type: 'array<int32>' }]);
+
+            let obj = { x: [1.5, 2.5, 3.5] },
+                decoded = c.decode(c.encode(obj)) as { x: number[] };
+
+            expect(decoded.x[0]).toBe(1.5);
+            expect(decoded.x[1]).toBe(2.5);
+            expect(decoded.x[2]).toBe(3.5);
+        });
+
+        it('does not bind {nested: object(hash)} schema to object with {nested: number}', () => {
+            let c = codec(),
+                inner = c.defineSchema([{ name: 'v', type: 'uint8' }]);
+
+            c.defineSchema([{ name: 'nested', type: 'object(' + inner + ')' }]);
+
+            // Structurally different — nested is a plain number, not an object
+            let obj = { nested: 42 },
+                decoded = c.decode(c.encode(obj)) as { nested: number };
+
+            expect(decoded.nested).toBe(42);
+        });
+
+        it('binds typed array<int32> schema when incoming value is a compatible int array', () => {
+            let c = codec();
+
+            c.defineSchema([{ name: 'x', type: 'array<int32>' }]);
+
+            let obj = { x: [1, 2, 3] },
+                decoded = c.decode(c.encode(obj)) as { x: number[] };
+
+            expect(decoded.x).toEqual([1, 2, 3]);
+        });
+
+        it('distinct typed schemas with same keys but different element types remain isolated', () => {
+            let c = codec();
+
+            // Define first typed schema. A later defineSchema with same keys but
+            // different types causes the typed-schema index to drop the old entry
+            // (collision detection in index.ts). The key invariant: a plain object
+            // with string values must never bind to the uint8-array schema.
+            c.defineSchema([{ name: 'data', type: 'array<uint8>' }]);
+
+            let obj = { data: ['one', 'two'] },
+                decoded = c.decode(c.encode(obj)) as { data: string[] };
+
+            expect(decoded.data).toEqual(['one', 'two']);
+        });
+
+        it('typed schema with multiple container fields verifies every field', () => {
+            let c = codec();
+
+            c.defineSchema([
+                { name: 'ids', type: 'array<int32>' },
+                { name: 'tags', type: 'array<string>' },
+            ]);
+
+            // Swap: ids should be numbers but here it is strings
+            let obj = { ids: ['x', 'y'], tags: ['a', 'b'] },
+                decoded = c.decode(c.encode(obj)) as { ids: string[]; tags: string[] };
+
+            expect(decoded.ids).toEqual(['x', 'y']);
+            expect(decoded.tags).toEqual(['a', 'b']);
+        });
+
+        it('primitive typed schemas still match by names when types align', () => {
+            let c = codec();
+
+            c.defineSchema([
+                { name: 'id', type: 'int32' },
+                { name: 'name', type: 'string' },
+            ]);
+
+            let obj = { id: 42, name: 'alice' },
+                decoded = c.decode(c.encode(obj)) as { id: number; name: string };
+
+            expect(decoded).toEqual(obj);
+        });
+    });
 });
