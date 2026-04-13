@@ -327,23 +327,17 @@ function generateRecordValidation(
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let check = '',
+    let e = uid('e'),
+        indexType = prop.indexType,
         key = uid('key'),
-        type = prop.indexType?.type;
-
-    switch (type) {
-        case 'boolean':
-            check = `typeof ${varname}[${key}] !== 'boolean'`;
-            break;
-        case 'number':
-            check = `typeof ${varname}[${key}] !== 'number'`;
-            break;
-        case 'string':
-            check = `typeof ${varname}[${key}] !== 'string'`;
-            break;
-        default:
-            check = 'false';
-    }
+        body = indexType
+            ? generateTypeValidation(
+                indexType,
+                `${varname}[${key}]`,
+                { key, kind: 'record', path: pathMode.path },
+                context
+            )
+            : '';
 
     return code`
         if (${
@@ -353,21 +347,14 @@ function generateRecordValidation(
         }) {
             ${error.generate('invalid record type', pathMode, context)}
         }
-        ${type && `
-            else {
+        ${body && `
+            else if (${varname} !== null) {
+                let ${e} = ${ERRORS_VARIABLE}?.length ?? 0;
+
                 for (let ${key} in ${varname}) {
-                    if (${check}) {
-                        ${error.generate(
-                            type === 'boolean'
-                                    ? 'must be a boolean'
-                                    : type === 'number'
-                                        ? 'must be a number'
-                                        : type === 'string'
-                                            ? 'must be a string'
-                                            : 'invalid value',
-                            { key, kind: 'record', path: pathMode.path },
-                            context
-                        )}
+                    ${body}
+
+                    if ((${ERRORS_VARIABLE}?.length ?? 0) > ${e}) {
                         break;
                     }
                 }
@@ -463,60 +450,120 @@ function generateTypeValidation(prop: AnalyzedProperty, varname: string, pathMod
 }
 
 function generateUnionValidation(prop: AnalyzedProperty, varname: string, pathMode: PathMode, context: GeneratorContext): string {
-    let checks: string[] = [],
-        literals = prop.literals || [],
+    let literals = prop.literals || [],
         unionTypes = prop.unionTypes || [];
 
-    // Handle nullable first
-    if (prop.nullable) {
-        checks.push(`${varname} !== null`);
-    }
-
-    // Add literal checks
-    for (let i = 0, n = literals.length; i < n; i++) {
-        let lit = literals[i];
-
-        checks.push(`${varname} !== ${lit.type === 'string' ? `'${code.escape(String(lit.value))}'` : String(lit.value)}`);
-    }
-
-    // Add type checks
-    for (let i = 0, n = unionTypes.length; i < n; i++) {
-        switch (unionTypes[i].type) {
-            case 'bigint':
-                checks.push(`typeof ${varname} !== 'bigint'`);
-                break;
-            case 'boolean':
-                checks.push(`typeof ${varname} !== 'boolean'`);
-                break;
-            case 'date':
-                checks.push(`!(${varname} instanceof Date)`);
-                break;
-            case 'number':
-                checks.push(`typeof ${varname} !== 'number'`);
-                break;
-            case 'string':
-                checks.push(`typeof ${varname} !== 'string'`);
-                break;
-            case 'object':
-                checks.push(`(typeof ${varname} !== 'object' || ${varname} === null || Array.isArray(${varname}))`);
-                break;
-            case 'array':
-            case 'tuple':
-                checks.push(`!Array.isArray(${varname})`);
-                break;
-            case 'record':
-                checks.push(`(typeof ${varname} !== 'object' || ${varname} === null || Array.isArray(${varname}))`);
-                break;
-        }
-    }
-
-    if (checks.length === 0) {
+    if (literals.length === 0 && unionTypes.length === 0) {
         return '';
     }
 
-    return `
-        if (${checks.join(' && ')}) {
-            ${error.generate('invalid union type', pathMode, context)}
+    let branchParts: string[] = [],
+        literalHits: string[] = [],
+        ok = uid('ok');
+
+    for (let i = 0, n = literals.length; i < n; i++) {
+        let lit = literals[i];
+
+        literalHits.push(
+            `${varname} === ${lit.type === 'string' ? `'${code.escape(String(lit.value))}'` : String(lit.value)}`
+        );
+    }
+
+    for (let i = 0, n = unionTypes.length; i < n; i++) {
+        let branch = unionTypes[i],
+            branchType = branch.type,
+            guard: string,
+            body = '',
+            start = uid('u');
+
+        switch (branchType) {
+            case 'array':
+            case 'tuple':
+                guard = `Array.isArray(${varname})`;
+                body = generateTypeValidation({ ...branch, nullable: false }, varname, pathMode, context);
+                break;
+
+            case 'bigint':
+                guard = `typeof ${varname} === 'bigint'`;
+                break;
+
+            case 'boolean':
+                guard = `typeof ${varname} === 'boolean'`;
+                break;
+
+            case 'date':
+                guard = `${varname} instanceof Date`;
+                body = generateTypeValidation({ ...branch, nullable: false }, varname, pathMode, context);
+                break;
+
+            case 'number':
+                guard = `typeof ${varname} === 'number'`;
+
+                if (branch.brand) {
+                    body = generateTypeValidation({ ...branch, nullable: false }, varname, pathMode, context);
+                }
+                break;
+
+            case 'object':
+            case 'record':
+                guard = `typeof ${varname} === 'object' && ${varname} !== null && !Array.isArray(${varname})`;
+                body = generateTypeValidation({ ...branch, nullable: false }, varname, pathMode, context);
+                break;
+
+            case 'string':
+                guard = `typeof ${varname} === 'string'`;
+
+                if (branch.brand) {
+                    body = generateTypeValidation({ ...branch, nullable: false }, varname, pathMode, context);
+                }
+                break;
+
+            default:
+                continue;
+        }
+
+        if (body) {
+            branchParts.push(code`
+                if (!${ok} && ${guard}) {
+                    let ${start} = ${ERRORS_VARIABLE}?.length ?? 0;
+
+                    ${body}
+
+                    if ((${ERRORS_VARIABLE}?.length ?? 0) === ${start}) {
+                        ${ok} = true;
+                    }
+                    else {
+                        ${ERRORS_VARIABLE}.length = ${start};
+                    }
+                }
+            `);
+        }
+        else {
+            branchParts.push(code`
+                if (!${ok} && ${guard}) {
+                    ${ok} = true;
+                }
+            `);
+        }
+    }
+
+    if (literalHits.length > 0) {
+        branchParts.unshift(code`
+            if (!${ok} && (${literalHits.join(' || ')})) {
+                ${ok} = true;
+            }
+        `);
+    }
+
+    return code`
+        {
+            let ${ok} = ${prop.nullable ? `${varname} === null` : 'false'};
+
+            ${branchParts.join('\n')}
+
+            if (!${ok}) {
+                ${error.generate('invalid union type', pathMode, context)}
+            }
         }
     `;
 }
@@ -566,7 +613,7 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, custom
 
             ${parts.join('\n')}
 
-            if (${ERRORS_VARIABLE}) {
+            if (${ERRORS_VARIABLE} && ${ERRORS_VARIABLE}.length > 0) {
                 return { ok: false, data: ${INPUT_VARIABLE}, errors: ${ERRORS_VARIABLE} };
             }
 

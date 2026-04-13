@@ -467,6 +467,148 @@ describe('Tuple in Union Validation', () => {
 });
 
 
+describe('Nested Union Branch Validation (F-004/F-006)', () => {
+    describe('array branch in union', () => {
+        let validate = createValidator(`
+            type Data = { value: string[] | number };
+            validator.build<Data>();
+        `);
+
+        it('accepts valid string array', () => {
+            expect(validate({ value: ['a', 'b'] }).ok).toBe(true);
+        });
+
+        it('accepts number', () => {
+            expect(validate({ value: 42 }).ok).toBe(true);
+        });
+
+        it('rejects array with invalid nested element', () => {
+            let result = validate({ value: ['a', 123] });
+
+            expect(result.ok).toBe(false);
+        });
+
+        it('rejects array of non-strings', () => {
+            let result = validate({ value: [1, 2, 3] });
+
+            expect(result.ok).toBe(false);
+        });
+    });
+
+    describe('object branch in union', () => {
+        let validate = createValidator(`
+            type Data = { value: { nested: string } | string };
+            validator.build<Data>();
+        `);
+
+        it('accepts valid object', () => {
+            expect(validate({ value: { nested: 'test' } }).ok).toBe(true);
+        });
+
+        it('accepts string', () => {
+            expect(validate({ value: 'simple' }).ok).toBe(true);
+        });
+
+        it('rejects object with wrong nested type', () => {
+            let result = validate({ value: { nested: 42 } });
+
+            expect(result.ok).toBe(false);
+        });
+
+        it('rejects object missing nested property', () => {
+            let result = validate({ value: {} });
+
+            expect(result.ok).toBe(false);
+        });
+    });
+
+    describe('tuple branch in union', () => {
+        let validate = createValidator(`
+            type Data = { value: [number, string] | boolean };
+            validator.build<Data>();
+        `);
+
+        it('accepts valid tuple', () => {
+            expect(validate({ value: [1, 'a'] }).ok).toBe(true);
+        });
+
+        it('accepts boolean', () => {
+            expect(validate({ value: true }).ok).toBe(true);
+        });
+
+        it('rejects tuple with wrong element type', () => {
+            let result = validate({ value: ['wrong', 'a'] });
+
+            expect(result.ok).toBe(false);
+        });
+
+        it('rejects tuple with wrong length', () => {
+            let result = validate({ value: [1, 'a', 'extra'] });
+
+            expect(result.ok).toBe(false);
+        });
+    });
+
+    describe('record branch in union', () => {
+        let validate = createValidator(`
+            type Data = { value: Record<string, number> | string };
+            validator.build<Data>();
+        `);
+
+        it('accepts valid record', () => {
+            expect(validate({ value: { a: 1, b: 2 } }).ok).toBe(true);
+        });
+
+        it('accepts string', () => {
+            expect(validate({ value: 'hello' }).ok).toBe(true);
+        });
+
+        it('rejects record with wrong value type', () => {
+            let result = validate({ value: { a: 'not a number' } });
+
+            expect(result.ok).toBe(false);
+        });
+    });
+
+    describe('mixed complex branches', () => {
+        let validate = createValidator(`
+            type Data = { value: { kind: 'a'; x: number } | string[] | number };
+            validator.build<Data>();
+        `);
+
+        it('accepts valid object branch', () => {
+            expect(validate({ value: { kind: 'a', x: 1 } }).ok).toBe(true);
+        });
+
+        it('accepts valid array branch', () => {
+            expect(validate({ value: ['x', 'y'] }).ok).toBe(true);
+        });
+
+        it('accepts number branch', () => {
+            expect(validate({ value: 42 }).ok).toBe(true);
+        });
+
+        it('rejects object with invalid nested x', () => {
+            let result = validate({ value: { kind: 'a', x: 'not a number' } });
+
+            expect(result.ok).toBe(false);
+        });
+
+        it('rejects array with invalid element', () => {
+            let result = validate({ value: ['x', 1] });
+
+            expect(result.ok).toBe(false);
+        });
+
+        it('rejects boolean (none of the branches)', () => {
+            let result = validate({ value: true });
+
+            expect(result.ok).toBe(false);
+        });
+    });
+});
+
+
 describe('Nullable Tuple Validation (F-CORR-13)', () => {
     let validate = createValidator(`
         type Data = { value: [number, string] | null };
