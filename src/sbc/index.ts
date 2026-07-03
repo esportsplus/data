@@ -355,6 +355,10 @@ const codec = (options?: CodecOptions): {
         if (buffer[0] === 8 && len >= 9 && len === buffer.length) {
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
 
+            if (9 + ((buffer[5]! | (buffer[6]! << 8) | (buffer[7]! << 16) | (buffer[8]! << 24)) >>> 0) > len) {
+                throw new Error('Codec2: truncated tag-8 object');
+            }
+
             if (hash === dctx.lastDecodeHash && dctx.lastDecodeFn) {
                 return dctx.lastDecodeFn(buffer, 9, 0) as T;
             }
@@ -372,6 +376,10 @@ const codec = (options?: CodecOptions): {
 
         // Tag 18 (compressed object) fast path
         if (buffer[0] === 18 && len >= 9 && len === buffer.length) {
+            if (9 + ((buffer[5]! | (buffer[6]! << 8) | (buffer[7]! << 16) | (buffer[8]! << 24)) >>> 0) > len) {
+                throw new Error('Codec2: truncated tag-18 object');
+            }
+
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
                 schema = hash === dctx.lastDecodeHash && dctx.lastDecodeSchema
                     ? dctx.lastDecodeSchema

@@ -100,6 +100,12 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
                 throw new Error('Codec2: truncated tag-8/18 header');
             }
 
+            let dataLen = (buf[offset + 5]! | (buf[offset + 6]! << 8) | (buf[offset + 7]! << 16) | (buf[offset + 8]! << 24)) >>> 0;
+
+            if (offset + 9 + dataLen > buf.length) {
+                throw new Error('Codec2: truncated tag-8 object at offset ' + offset);
+            }
+
             let hash = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
                 schema = hash === dctx.lastDecodeHash && dctx.lastDecodeSchema
                     ? dctx.lastDecodeSchema
@@ -118,6 +124,12 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
         case 18: {
             if (offset + 9 > buf.length) {
                 throw new Error('Codec2: truncated tag-8/18 header');
+            }
+
+            let dataLen = (buf[offset + 5]! | (buf[offset + 6]! << 8) | (buf[offset + 7]! << 16) | (buf[offset + 8]! << 24)) >>> 0;
+
+            if (offset + 9 + dataLen > buf.length) {
+                throw new Error('Codec2: truncated tag-18 object at offset ' + offset);
             }
 
             let hash = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
@@ -343,6 +355,11 @@ function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
             }
 
             let dataLen = (buf[offset + 5]! | (buf[offset + 6]! << 8) | (buf[offset + 7]! << 16) | (buf[offset + 8]! << 24)) >>> 0;
+
+            if (offset + 9 + dataLen > buf.length) {
+                throw new Error('Codec2: truncated tag-8/18 object at offset ' + offset);
+            }
+
             return offset + 9 + dataLen;
         }
         case 11:

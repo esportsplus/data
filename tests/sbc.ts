@@ -2261,12 +2261,13 @@ describe('Codec2', () => {
 
             c.defineSchema([{ name: 'msg', type: 'string' }]);
 
-            let valid = c.encode({ msg: 'x' }),
-                // 9 bytes header + 1 byte (0x80 — continuation bit set, no following byte)
-                corrupt = new Uint8Array(10);
+            // Keep the header's declared dataLen intact (so the F-004 length check passes)
+            // but fill the payload with continuation bytes so the string-length varint
+            // runs off the end of the buffer.
+            let corrupt = c.encode({ msg: 'x' }).slice();
 
-            corrupt.set(valid.subarray(0, 9));
-            corrupt[9] = 0x80;
+            corrupt[corrupt.length - 2] = 0x80;
+            corrupt[corrupt.length - 1] = 0x80;
 
             expect(() => c.decode(corrupt)).toThrow('varint');
         });
@@ -4334,6 +4335,38 @@ describe('Codec2', () => {
                 decoded = c.decode(c.encode(obj)) as { id: number; name: string };
 
             expect(decoded).toEqual(obj);
+        });
+    });
+
+
+    describe('F-004: declared dataLen validated against buffer length', () => {
+        it('truncated tag-8 object whose header dataLen exceeds remaining bytes throws', () => {
+            let encoded = c.encode({ a: 1, b: 2, c: 3 });
+
+            expect(encoded[0]).toBe(8);
+
+            let truncated = encoded.subarray(0, encoded.length - 1);
+
+            expect(() => c.decode(truncated)).toThrow('truncated');
+        });
+
+        it('nested object with oversized declared dataLen throws via decodeSbc', () => {
+            let encoded = c.encode([{ x: 1, y: 2 }]),
+                inflated = encoded.slice();
+
+            // Locate the inner tag-8 header (element 0 of the array) and inflate its dataLen.
+            let hp = 5;
+
+            expect(inflated[hp]).toBe(8);
+
+            inflated[hp + 5] = 0xFF;
+            inflated[hp + 6] = 0xFF;
+
+            expect(() => c.decode(inflated)).toThrow('truncated');
+        });
+
+        it('valid buffers still decode', () => {
+            expect(c.decode(c.encode({ a: 1, b: 2, c: 3 }))).toEqual({ a: 1, b: 2, c: 3 });
         });
     });
 });
