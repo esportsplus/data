@@ -123,4 +123,35 @@ describe('Branded Strings (Template Literal Types)', () => {
             expect(code).toContain('=>');
         });
     });
+
+    describe('F-009: branded validator body preserves strings and property names', () => {
+        let code = transformCode(`
+            type Brand<T, B extends string> = T & { __brand: B };
+            type Slug = Brand<string, 'slug'>;
+            type ErrorType = { push(message: string): void };
+            type Post = { slug: Slug };
+
+            validator.set((value: Slug, errors: ErrorType) => {
+                let opts = { value: 1 };
+
+                if (opts.value !== value.length) {
+                    errors.push('invalid value length');
+                }
+            });
+
+            validator.build<Post>();
+        `);
+
+        it('preserves the word "value" inside a string literal message', () => {
+            expect(code).toContain('invalid value length');
+        });
+
+        it('preserves a ".value" property access', () => {
+            expect(code).toContain('opts.value');
+        });
+
+        it('preserves a "value:" object literal key', () => {
+            expect(code).toContain('value: 1');
+        });
+    });
 });

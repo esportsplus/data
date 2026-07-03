@@ -14,11 +14,19 @@ interface BrandedValidator {
 
 const ERRORS_PUSH_REGEX = /errors\.push\((['"`])(.+?)\1\)/g;
 
-const VALUE_WORD_REGEX = /\bvalue\b/g;
+const VALUE_SENTINEL = '\0';
 
 
 let cache = new WeakMap<ts.SourceFile, Map<string, BrandedValidator>>();
 
+
+function collectParamRefs(node: ts.Node, paramSymbol: ts.Symbol | undefined, checker: ts.TypeChecker, bodyStart: number, spans: [number, number][]): void {
+    if (paramSymbol && ts.isIdentifier(node) && checker.getSymbolAtLocation(node) === paramSymbol) {
+        spans.push([node.getStart() - bodyStart, node.getEnd() - bodyStart]);
+    }
+
+    ts.forEachChild(node, (child) => collectParamRefs(child, paramSymbol, checker, bodyStart, spans));
+}
 
 function parse(node: ts.CallExpression, checker: ts.TypeChecker): BrandedValidator | null {
     let expr = node.expression;
@@ -56,7 +64,22 @@ function parse(node: ts.CallExpression, checker: ts.TypeChecker): BrandedValidat
         isAsync = ast.test(fn.body, ts.isAwaitExpression);
     }
 
-    return { async: isAsync, body: fn.body.getText(), brand };
+    let bodyStart = fn.body.getStart(),
+        paramSymbol = checker.getSymbolAtLocation(param.name),
+        spans: [number, number][] = [];
+
+    collectParamRefs(fn.body, paramSymbol, checker, bodyStart, spans);
+
+    let body = fn.body.getText();
+
+    // Rename only identifier references bound to the value parameter (AST-resolved),
+    // never textual `value` inside string literals or property names. Splice a sentinel
+    // last-to-first so earlier offsets stay valid; inline() maps the sentinel to varname.
+    for (let i = spans.length - 1; i >= 0; i--) {
+        body = body.slice(0, spans[i]![0]) + VALUE_SENTINEL + body.slice(spans[i]![1]);
+    }
+
+    return { async: isAsync, body, brand };
 }
 
 function visit(node: ts.Node, validators: Map<string, BrandedValidator>, checker: ts.TypeChecker): void {
@@ -111,7 +134,8 @@ const inline = (body: string, path: PathMode, varname: string): string => {
     }
 
     return body
-        .replace(VALUE_WORD_REGEX, varname)
+        .split(VALUE_SENTINEL)
+        .join(varname)
         .replace(ERRORS_PUSH_REGEX, (_match, _quote, msg) => error.generate(msg, path));
 }
 
