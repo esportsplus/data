@@ -634,7 +634,7 @@ const codec = (options?: CodecOptions): {
             compFixedSize,
             compressedDecodeFn: null,
             compressedEncodeFn: null,
-            compressible: boolFields.length > 0 || float64Fields.length > 0 || intFields.length > 0,
+            compressible: (boolFields.length > 0 || float64Fields.length > 0 || intFields.length > 0) && boolFields.length <= 16,
             decodeFn: null,
             encodeFn: null,
             fields: fieldDefs,

@@ -2367,6 +2367,41 @@ describe('Codec2', () => {
             }
         });
 
+        it('defineSchema with 17 boolean fields round-trips (exceeds 2-byte bitmap — uncompressed fallback)', () => {
+            let c = codec({ compress: true }),
+                fields = [];
+
+            for (let i = 0; i < 17; i++) {
+                fields.push({ name: `flag${i}`, type: 'boolean' });
+            }
+
+            c.defineSchema(fields);
+
+            let obj: Record<string, boolean> = {};
+
+            for (let i = 0; i < 17; i++) {
+                obj[`flag${i}`] = i % 2 === 0;
+            }
+
+            let buf = c.encode(obj),
+                decoded = c.decode(buf) as Record<string, boolean>;
+
+            for (let i = 0; i < 17; i++) {
+                expect(decoded[`flag${i}`]).toBe(i % 2 === 0);
+            }
+        });
+
+        it('inferred schema with 20 boolean fields round-trips (uncompressed fallback)', () => {
+            let c = codec({ compress: true }),
+                obj: Record<string, boolean> = {};
+
+            for (let i = 0; i < 20; i++) {
+                obj[`b${i}`] = i % 2 === 0;
+            }
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
         it('mixed compressed and uncompressed in same stream', () => {
             let c = codec({ compress: true }),
                 obj1 = { active: true, id: 1, name: 'Alice' },
