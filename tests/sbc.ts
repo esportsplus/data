@@ -1152,6 +1152,42 @@ describe('Codec2', () => {
     });
 
 
+    describe('F-001: tag-17 typed array bounds check', () => {
+        it('oversized bLen on a subarray view throws instead of reading adjacent memory', () => {
+            let source = new Int16Array([1, 2, 3, 4]),
+                encoded = c.encode(source);
+
+            expect(encoded[0]).toBe(17);
+
+            // Rebuild the tag-17 header into a larger backing buffer whose trailing
+            // bytes hold a "secret" pattern the view must never expose.
+            let backing = new Uint8Array(128).fill(0xAA);
+
+            backing.set(encoded.subarray(0, 6), 0);
+
+            // Inflate the declared byteLength far past the logical view (bpe-aligned).
+            let bLen = 100;
+
+            backing[2] = bLen & 0xFF;
+            backing[3] = (bLen >>> 8) & 0xFF;
+            backing[4] = (bLen >>> 16) & 0xFF;
+            backing[5] = (bLen >>> 24) & 0xFF;
+
+            let view = backing.subarray(0, encoded.length);
+
+            expect(() => c.decode(view)).toThrow('truncated typed array');
+        });
+
+        it('valid typed array still round-trips', () => {
+            let source = new Int16Array([1, 2, 3, 4]),
+                decoded = c.decode(c.encode(source)) as Int16Array;
+
+            expect(decoded).toBeInstanceOf(Int16Array);
+            expect(Array.from(decoded)).toEqual([1, 2, 3, 4]);
+        });
+    });
+
+
     // === MAP ===
 
     describe('Map', () => {

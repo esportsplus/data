@@ -272,6 +272,12 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
                 throw new Error('Codec2: typed array byteLength not aligned');
             }
 
+            if (offset + 6 + bLen > buf.length) {
+                throw new Error('Codec2: truncated typed array at offset ' + offset);
+            }
+
+            // Bounds check above confines [start, start + bLen) to the view window, so
+            // the copy never reaches adjacent bytes sharing the backing ArrayBuffer.
             let start = buf.byteOffset + offset + 6,
                 copied = buf.buffer.slice(start, start + bLen) as ArrayBuffer;
 
