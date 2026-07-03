@@ -2870,6 +2870,40 @@ describe('Codec2', () => {
                 expect(c.decode(c.encode(obj))).toEqual(obj);
             });
 
+            it('round-trips nested typed object whose payload exceeds 128 bytes (F-002)', () => {
+                let c = codec();
+
+                let innerHash = c.defineSchema([
+                    { name: 's', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'inner', type: `object(${innerHash})` },
+                ]);
+
+                let obj = { inner: { s: 'x'.repeat(200) } };
+
+                expect(c.decode(c.encode(obj))).toEqual(obj);
+            });
+
+            it('round-trips typed object at the 127/128-byte payload boundary (F-002)', () => {
+                let c = codec();
+
+                let innerHash = c.defineSchema([
+                    { name: 's', type: 'string' },
+                ]);
+
+                c.defineSchema([
+                    { name: 'inner', type: `object(${innerHash})` },
+                ]);
+
+                for (let len = 120; len <= 140; len++) {
+                    let obj = { inner: { s: 'y'.repeat(len) } };
+
+                    expect(c.decode(c.encode(obj))).toEqual(obj);
+                }
+            });
+
             it('wire size: smaller than generic object', () => {
                 let c = codec();
 
@@ -3868,9 +3902,12 @@ describe('Codec2', () => {
             let obj = { data: innerObj, id: 1 },
                 size = c.computeSize(obj);
 
-            // nestedSize = 16 * 8 = 128 (>= 128), so computeSize uses 9-byte header (not 1-byte varint)
-            // Expected: 9 (outer header) + (9 + 128) (nested with 9-byte header) + 1 (id) = 147
-            expect(size).toBe(147);
+            // nestedSize = 16 * 8 = 128 (>= 128): the fixed format prefixes the payload with a
+            // 2-byte varint length (first byte >= 128, unambiguous vs the 1-byte < 128 case), not the
+            // old 9-byte tag-8 header. Expected: 9 (outer header) + (2 varint + 128 payload) + 1 (id) = 140.
+            // computeSize must exactly equal the real encoded length (no under-allocation).
+            expect(size).toBe(140);
+            expect(size).toBe(c.encode(obj).length);
         });
 
         it('nested typed object < 128 bytes uses 1-byte varint header', () => {

@@ -124,7 +124,7 @@ function computeSize(ctx: SizeContext, value: unknown): number {
                     }
                     case 'object': {
                         if (f.refHash !== undefined) {
-                            // Typed object: 1 byte varint len + nested fields (assumes < 128)
+                            // Typed object: varint payload-length prefix + nested fields
                             let refSchema = ctx.registry.schemas.get(f.refHash);
 
                             if (refSchema) {
@@ -147,7 +147,7 @@ function computeSize(ctx: SizeContext, value: unknown): number {
                                     }
                                 }
 
-                                size += (nestedSize < 128 ? 1 : 9) + nestedSize;
+                                size += varintSize(nestedSize) + nestedSize;
                             }
                             else {
                                 return -1;

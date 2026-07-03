@@ -249,7 +249,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                             body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){`;
                             body += `let _lp=p;p+=1;let _end=${refParam}(a[i],b,p);let _dl=_end-p;`;
                             body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
-                            body += `else{p=_encObj(a[i],b,_lp);}}}\n`;
+                            body += `else{let _vl=_dl<16384?2:_dl<2097152?3:_dl<268435456?4:5;b.copyWithin(_lp+_vl,_lp+1,_end);_wv(b,_lp,_dl);p=_end+_vl-1;}}}\n`;
                         }
                         else {
                             // Referenced schema not compiled — tagged fallback
@@ -287,10 +287,11 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     let rp = refHashes.get(f.refHash);
 
                     if (rp) {
-                        // Direct encode: reserve 1 byte for varint len, call ref encoder
+                        // Reserve 1 byte for the varint payload-length prefix; for payloads
+                        // >=128 the varint needs extra bytes, so shift the payload right first.
                         body += `{let _lp=p;p+=1;let _end=${rp}(${val},b,p);let _dl=_end-p;`;
                         body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
-                        body += `else{p=_encObj(${val},b,_lp);}}\n`;
+                        body += `else{let _vl=_dl<16384?2:_dl<2097152?3:_dl<268435456?4:5;b.copyWithin(_lp+_vl,_lp+1,_end);_wv(b,_lp,_dl);p=_end+_vl-1;}}\n`;
                     }
                     else {
                         body += `p=_encObj(${val},b,p);\n`;
@@ -506,13 +507,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                             body += `let a=new Array(l);`;
                             body += `for(let i=0;i<l;i++){let _dl=b[p];`;
                             body += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
-                            body += `else{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
-                            body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
-                            body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                            body += `_s=_reg.get(_h)||_lk(_h);`;
-                            body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){a[i]=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){a[i]=_s.decodeFn(b,p+9,_d+1);}else{a[i]=null;}}else{a[i]=null;}`;
-                            body += `if(p+9+_dl2>b.length)throw new Error('SBC: truncated');p+=9+_dl2;}`;
-                            body += `else{let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}}`;
+                            body += `else{_rv(b,p);_dl=_vrs.v;p=_vrs.p;if(p+_dl>b.length)throw new Error('SBC: truncated');a[i]=${refParam}(b,p,_d+1);p+=_dl;}}`;
                             body += `f${i}=a;}\n`;
                         }
                         else {
@@ -554,16 +549,10 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     let rp = refHashes.get(f.refHash);
 
                     if (rp) {
-                        // Direct decode: 1-byte varint len fast path, fallback to tag-8 header
+                        // 1-byte length fast path; else a multi-byte varint prefixes the payload.
                         body += `{let _dl=b[p];`;
                         body += `if(_dl<128){p+=1;f${i}=${rp}(b,p,_d+1);p+=_dl;}`;
-                        body += `else{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
-                        body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
-                        body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                        body += `_s=_reg.get(_h)||_lk(_h);`;
-                        body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
-                        body += `if(p+9+_dl2>b.length)throw new Error('SBC: truncated');p+=9+_dl2;}`;
-                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}}\n`;
+                        body += `else{_rv(b,p);_dl=_vrs.v;p=_vrs.p;if(p+_dl>b.length)throw new Error('SBC: truncated');f${i}=${rp}(b,p,_d+1);p+=_dl;}}\n`;
                     }
                     else {
                         // Ref schema not compiled — generic path
@@ -800,13 +789,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                             body += `let a=new Array(l);`;
                             body += `for(let i=0;i<l;i++){let _dl=b[p];`;
                             body += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
-                            body += `else{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
-                            body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
-                            body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                            body += `_s=_reg.get(_h)||_lk(_h);`;
-                            body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){a[i]=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){a[i]=_s.decodeFn(b,p+9,_d+1);}else{a[i]=null;}}else{a[i]=null;}`;
-                            body += `if(p+9+_dl2>b.length)throw new Error('SBC: truncated');p+=9+_dl2;}`;
-                            body += `else{let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}}`;
+                            body += `else{_rv(b,p);_dl=_vrs.v;p=_vrs.p;if(p+_dl>b.length)throw new Error('SBC: truncated');a[i]=${refParam}(b,p,_d+1);p+=_dl;}}`;
                             body += `f${i}=a;}${nc}\n`;
                         }
                         else {
@@ -842,13 +825,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     if (rp) {
                         body += `${no}{let _dl=b[p];`;
                         body += `if(_dl<128){p+=1;f${i}=${rp}(b,p,_d+1);p+=_dl;}`;
-                        body += `else{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
-                        body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
-                        body += `_dl2=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                        body += `_s=_reg.get(_h)||_lk(_h);`;
-                        body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{f${i}=null;}`;
-                        body += `if(p+9+_dl2>b.length)throw new Error('SBC: truncated');p+=9+_dl2;}`;
-                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}}${nc}\n`;
+                        body += `else{_rv(b,p);_dl=_vrs.v;p=_vrs.p;if(p+_dl>b.length)throw new Error('SBC: truncated');f${i}=${rp}(b,p,_d+1);p+=_dl;}}${nc}\n`;
                     }
                     else {
                         body += `${no}{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h)||_lk(_h);`;
@@ -1137,7 +1114,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                             body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){`;
                             body += `let _lp=p;p+=1;let _end=${refParam}(a[i],b,p);let _dl=_end-p;`;
                             body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
-                            body += `else{p=_encObj(a[i],b,_lp);}}}\n`;
+                            body += `else{let _vl=_dl<16384?2:_dl<2097152?3:_dl<268435456?4:5;b.copyWithin(_lp+_vl,_lp+1,_end);_wv(b,_lp,_dl);p=_end+_vl-1;}}}\n`;
                         }
                         else {
                             body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
@@ -1172,7 +1149,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     if (rp) {
                         body += `{let _lp=p;p+=1;let _end=${rp}(${v},b,p);let _dl=_end-p;`;
                         body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
-                        body += `else{p=_encObj(${v},b,_lp);}}\n`;
+                        body += `else{let _vl=_dl<16384?2:_dl<2097152?3:_dl<268435456?4:5;b.copyWithin(_lp+_vl,_lp+1,_end);_wv(b,_lp,_dl);p=_end+_vl-1;}}\n`;
                     }
                     else {
                         body += `p=_encObj(${v},b,p);\n`;

@@ -147,17 +147,9 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
                             if (fb < 128) {
                                 pos += 1 + fb;
                             }
-                            else if (fb === 8 || fb === 18) {
-                                if (pos + 9 > buffer.length) {
-                                    return undefined;
-                                }
-
-                                let dLen = (buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0;
-
-                                pos += 9 + dLen;
-                            }
                             else {
-                                pos = decodeTagEnd(buffer, pos, 0);
+                                readVarint(buffer, pos);
+                                pos = _vr.p + _vr.v;
                             }
                         }
                     }
@@ -195,23 +187,15 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
             case 'mixed':
             case 'object': {
                 if (f.refHash !== undefined) {
-                    // Typed object: varint dataLen or full tag-8 header
+                    // Typed object: varint payload-length prefix
                     let fb = buffer[pos]!;
 
                     if (fb < 128) {
                         pos += 1 + fb;
                     }
-                    else if (fb === 8 || fb === 18) {
-                        if (pos + 9 > buffer.length) {
-                            return undefined;
-                        }
-
-                        let dLen = (buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0;
-
-                        pos += 9 + dLen;
-                    }
                     else {
-                        pos = decodeTagEnd(buffer, pos, 0);
+                        readVarint(buffer, pos);
+                        pos = _vr.p + _vr.v;
                     }
                 }
                 else if (buffer[pos] === 8 || buffer[pos] === 18) {
