@@ -99,6 +99,10 @@ const codec = (options?: CodecOptions): {
     function encodeObj(obj: Record<string, unknown>, buf: Uint8Array, pos: number): number {
         let schema = weakCache.get(obj) ?? null;
 
+        if (schema && !revalidateCached(obj, schema)) {
+            schema = null;
+        }
+
         if (!schema) {
             schema = matchSchema(obj);
 
@@ -154,6 +158,7 @@ const codec = (options?: CodecOptions): {
         lastSortedKeys: null,
         matchSchema,
         registry,
+        revalidateCached,
         setCache,
         store,
         weakCache,
@@ -328,6 +333,32 @@ const codec = (options?: CodecOptions): {
             case 'string': return typeof value === 'string';
             default: return inferType(value) === type;
         }
+    }
+
+
+    // Revalidates a weakCache-hit schema against the object's CURRENT values — the cache
+    // is identity-keyed, so a mutated field (uint8 grown out of range, a type-family change,
+    // an added/removed key) must re-match or fall through to matchSchema/inference.
+    function revalidateCached(obj: Record<string, unknown>, schema: Schema): boolean {
+        let fields = schema.fields,
+            keyCount = 0,
+            n = fields.length;
+
+        for (let _ in obj) { keyCount++; }
+
+        if (keyCount !== n) {
+            return false;
+        }
+
+        for (let j = 0; j < n; j++) {
+            let f = fields[j]!;
+
+            if (!(f.name in obj) || !matchesTypedField(obj[f.name], f)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
 
@@ -526,6 +557,10 @@ const codec = (options?: CodecOptions): {
         if (typeof value === 'object' && value !== null && ((value as object).constructor === Object || (value as object).constructor === undefined)) {
             let obj = value as Record<string, unknown>,
                 schema = weakCache.get(obj) ?? null;
+
+            if (schema && !revalidateCached(obj, schema)) {
+                schema = null;
+            }
 
             if (!schema) {
                 schema = matchSchema(obj);

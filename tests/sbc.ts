@@ -4409,6 +4409,41 @@ describe('Codec2', () => {
         });
     });
 
+    describe('F-007: weakCache hit revalidates mutated objects', () => {
+        it('mutating a cached field out of its inferred range re-matches instead of truncating', () => {
+            let c = codec(),
+                obj = { count: 5 };
+
+            expect(c.decode(c.encode(obj))).toEqual({ count: 5 });
+
+            obj.count = 300;
+
+            expect(c.decode(c.encode(obj))).toEqual({ count: 300 });
+        });
+
+        it('mutating a cached field to a different type family re-matches', () => {
+            let c = codec(),
+                obj: { v: unknown } = { v: 42 };
+
+            expect(c.decode(c.encode(obj))).toEqual({ v: 42 });
+
+            obj.v = 'hello';
+
+            expect(c.decode(c.encode(obj))).toEqual({ v: 'hello' });
+        });
+
+        it('adding a field to a cached object re-matches instead of dropping it', () => {
+            let c = codec(),
+                obj: Record<string, unknown> = { a: 1 };
+
+            expect(c.decode(c.encode(obj))).toEqual({ a: 1 });
+
+            obj.b = 2;
+
+            expect(c.decode(c.encode(obj))).toEqual({ a: 1, b: 2 });
+        });
+    });
+
     describe('F-006: typed-schema matching range-checks fixed-width integers', () => {
         it('out-of-range integer for a uint8 field falls through to inference instead of truncating', () => {
             let c = codec();

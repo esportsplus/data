@@ -25,6 +25,7 @@ type EncodeContext = {
     lastSortedKeys: string[] | null;
     matchSchema: (obj: Record<string, unknown>) => Schema | null;
     registry: SchemaRegistry;
+    revalidateCached: (obj: Record<string, unknown>, schema: Schema) => boolean;
     setCache: (schema: Schema, obj: object) => void;
     store: PersistentStore | null;
     weakCache: WeakMap<object, Schema>;
@@ -757,6 +758,10 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
             // Plain object → schema-compiled path
             let obj = value as Record<string, unknown>,
                 schema = ectx.weakCache.get(obj) ?? null;
+
+            if (schema && !ectx.revalidateCached(obj, schema)) {
+                schema = null;
+            }
 
             if (!schema) {
                 schema = ectx.matchSchema(obj);
