@@ -722,6 +722,7 @@ const codec = (options?: CodecOptions): {
     let extractCtx: ExtractContext = {
         decode,
         decodeSbc: boundDecodeSbc,
+        resolveSchema: resolveSchemaFromCacheOrStore,
         schemas: registry.schemas,
     };
 

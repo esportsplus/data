@@ -112,7 +112,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
                     : (dctx.schemas.get(hash) ?? dctx.resolveSchema(hash));
 
             if (!schema || !schema.decodeFn) {
-                return null;
+                throw new Error('Codec2: unknown schema hash ' + hash);
             }
 
             dctx.lastDecodeHash = hash;
@@ -136,7 +136,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
                 schema = dctx.schemas.get(hash) ?? dctx.resolveSchema(hash);
 
             if (!schema) {
-                return null;
+                throw new Error('Codec2: unknown schema hash ' + hash);
             }
 
             if (schema.compressedDecodeFn) {

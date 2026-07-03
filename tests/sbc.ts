@@ -4408,4 +4408,44 @@ describe('Codec2', () => {
             expect(c.decode(c.encode({ nums: [1, 2, 3] }))).toEqual({ nums: [1, 2, 3] });
         });
     });
+
+    describe('F-010: unknown schema hash throws instead of decoding to null', () => {
+        it('top-level tag-8 with an unregistered schema hash throws', () => {
+            let c = codec();
+
+            // tag 8, hash 0xDEADBEEF (never registered), dataLen 0
+            let buf = new Uint8Array([8, 0xEF, 0xBE, 0xAD, 0xDE, 0, 0, 0, 0]);
+
+            expect(() => c.decode(buf)).toThrow('unknown schema hash');
+        });
+
+        it('nested object with an unregistered schema hash throws during compiled decode', () => {
+            let c = codec();
+
+            c.defineSchema([{ name: 'data', type: 'object' }]);
+
+            let buf = c.encode({ data: { x: 1 } }).slice();
+
+            // Nested object begins at offset 9: [8, innerHash(4), innerLen(4), ...].
+            expect(buf[9]).toBe(8);
+            buf[10] = 0xEF;
+            buf[11] = 0xBE;
+            buf[12] = 0xAD;
+            buf[13] = 0xDE;
+
+            expect(() => c.decode(buf)).toThrow('unknown schema hash');
+        });
+
+        it('extractField resolves a schema via the shared cache like decode does', () => {
+            let a = codec();
+
+            // inferAndRegister populates the shared module cache with this shape
+            let buf = a.encode({ label: 'hello', num: 7 });
+
+            // fresh codec: schema is absent from its registry, present only in the shared cache
+            let b = codec();
+
+            expect(b.extractField(buf, 'label')).toBe('hello');
+        });
+    });
 });

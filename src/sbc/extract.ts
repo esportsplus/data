@@ -12,6 +12,7 @@ import type { Schema } from './codegen';
 type ExtractContext = {
     decode(buffer: Uint8Array): unknown;
     decodeSbc(buf: Uint8Array, offset: number, len: number, depth: number): unknown;
+    resolveSchema(hash: number): Schema | null;
     schemas: Map<number, Schema>;
 };
 
@@ -22,7 +23,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
     }
 
     let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
-        schema = ctx.schemas.get(hash);
+        schema = ctx.schemas.get(hash) ?? ctx.resolveSchema(hash);
 
     if (!schema) {
         return undefined;
