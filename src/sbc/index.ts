@@ -311,8 +311,20 @@ const codec = (options?: CodecOptions): {
             case 'int32':
             case 'uint8':
             case 'uint16':
-            case 'uint32':
-                return typeof value === 'number' && Number.isInteger(value) && !Object.is(value, -0);
+            case 'uint32': {
+                if (typeof value !== 'number' || !Number.isInteger(value) || Object.is(value, -0)) {
+                    return false;
+                }
+
+                switch (type) {
+                    case 'int8': return value >= -128 && value <= 127;
+                    case 'int16': return value >= -32768 && value <= 32767;
+                    case 'int32': return value >= -2147483648 && value <= 2147483647;
+                    case 'uint8': return value >= 0 && value <= 255;
+                    case 'uint16': return value >= 0 && value <= 65535;
+                    default: return value >= 0 && value <= 4294967295;
+                }
+            }
             case 'string': return typeof value === 'string';
             default: return inferType(value) === type;
         }

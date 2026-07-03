@@ -4409,6 +4409,48 @@ describe('Codec2', () => {
         });
     });
 
+    describe('F-006: typed-schema matching range-checks fixed-width integers', () => {
+        it('out-of-range integer for a uint8 field falls through to inference instead of truncating', () => {
+            let c = codec();
+
+            // structural schema (array field) → matchesTypedField/primitiveMatches path
+            c.defineSchema([
+                { name: 'items', type: 'array<string>' },
+                { name: 'n', type: 'uint8' },
+            ]);
+
+            let obj = { items: ['a'], n: 300 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('negative value for a uint8 field falls through instead of wrapping', () => {
+            let c = codec();
+
+            c.defineSchema([
+                { name: 'items', type: 'array<string>' },
+                { name: 'n', type: 'uint8' },
+            ]);
+
+            let obj = { items: ['a'], n: -5 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+
+        it('in-range value still matches the typed schema and round-trips', () => {
+            let c = codec();
+
+            c.defineSchema([
+                { name: 'items', type: 'array<string>' },
+                { name: 'n', type: 'uint8' },
+            ]);
+
+            let obj = { items: ['a'], n: 200 };
+
+            expect(c.decode(c.encode(obj))).toEqual(obj);
+        });
+    });
+
     describe('F-010: unknown schema hash throws instead of decoding to null', () => {
         it('top-level tag-8 with an unregistered schema hash throws', () => {
             let c = codec();
