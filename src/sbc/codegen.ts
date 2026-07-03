@@ -446,6 +446,16 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
 
+                        if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8') {
+                            body += `if(p+l>b.length)throw new Error('Codec2: truncated array');`;
+                        }
+                        else if (et.base === 'uint16' || et.base === 'int16') {
+                            body += `if(p+l*2>b.length)throw new Error('Codec2: truncated array');`;
+                        }
+                        else if (et.base === 'uint32' || et.base === 'int32') {
+                            body += `if(p+l*4>b.length)throw new Error('Codec2: truncated array');`;
+                        }
+
                         switch (et.base) {
                             case 'boolean':
                                 body += `for(let i=0;i<l;i++){a[i]=!!b[p];p+=1;}`;
@@ -534,9 +544,9 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     // flag=0: generic tagged elements
                     body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
                     // flag=1: packed uint8
-                    body += `else if(_f===1){for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
+                    body += `else if(_f===1){if(p+l>b.length)throw new Error('Codec2: truncated array');for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
                     // flag=2: packed int32
-                    body += `else if(_f===2){for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
+                    body += `else if(_f===2){if(p+l*4>b.length)throw new Error('Codec2: truncated array');for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
                     // flag=3: packed float64
                     body += `else{for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}}`;
                     body += `f${i}=a;}\n`;
@@ -731,6 +741,16 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
 
+                        if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8') {
+                            body += `if(p+l>b.length)throw new Error('Codec2: truncated array');`;
+                        }
+                        else if (et.base === 'uint16' || et.base === 'int16') {
+                            body += `if(p+l*2>b.length)throw new Error('Codec2: truncated array');`;
+                        }
+                        else if (et.base === 'uint32' || et.base === 'int32') {
+                            body += `if(p+l*4>b.length)throw new Error('Codec2: truncated array');`;
+                        }
+
                         switch (et.base) {
                             case 'boolean':
                                 body += `for(let i=0;i<l;i++){a[i]=!!b[p];p+=1;}`;
@@ -811,8 +831,8 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                 else {
                     body += `${no}{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
                     body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
-                    body += `else if(_f===1){for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
-                    body += `else if(_f===2){for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
+                    body += `else if(_f===1){if(p+l>b.length)throw new Error('Codec2: truncated array');for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
+                    body += `else if(_f===2){if(p+l*4>b.length)throw new Error('Codec2: truncated array');for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
                     body += `else{for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}}`;
                     body += `f${i}=a;}${nc}\n`;
                 }

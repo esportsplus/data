@@ -4369,4 +4369,43 @@ describe('Codec2', () => {
             expect(c.decode(c.encode({ a: 1, b: 2, c: 3 }))).toEqual({ a: 1, b: 2, c: 3 });
         });
     });
+
+
+    describe('F-005: typed numeric array count bounds-checked before element loop', () => {
+        it('uint8 array count exceeding remaining buffer throws', () => {
+            let c = codec();
+
+            c.defineSchema([{ name: 'nums', type: 'array<uint8>' }]);
+
+            let encoded = c.encode({ nums: [1, 2, 3] }).slice();
+
+            // Inflate the element count (single-byte varint at the payload start) far past
+            // the bytes actually present, without touching the header dataLen.
+            expect(encoded[9]).toBe(3);
+            encoded[9] = 120;
+
+            expect(() => c.decode(encoded)).toThrow('truncated array');
+        });
+
+        it('uint32 array count exceeding remaining buffer throws', () => {
+            let c = codec();
+
+            c.defineSchema([{ name: 'nums', type: 'array<uint32>' }]);
+
+            let encoded = c.encode({ nums: [1, 2, 3] }).slice();
+
+            expect(encoded[9]).toBe(3);
+            encoded[9] = 120;
+
+            expect(() => c.decode(encoded)).toThrow('truncated array');
+        });
+
+        it('valid typed numeric arrays still round-trip', () => {
+            let c = codec();
+
+            c.defineSchema([{ name: 'nums', type: 'array<uint8>' }]);
+
+            expect(c.decode(c.encode({ nums: [1, 2, 3] }))).toEqual({ nums: [1, 2, 3] });
+        });
+    });
 });
