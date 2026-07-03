@@ -205,7 +205,7 @@ const codec = (options?: CodecOptions): {
             for (let j = 0; j < n; j++) {
                 let f = fields[j]!;
 
-                if (!(f.name in obj) || f.elementType || f.refHash !== undefined || inferType(obj[f.name]) !== f.type) {
+                if (!(f.name in obj) || !matchesTypedField(obj[f.name], f)) {
                     match = false;
                     break;
                 }
