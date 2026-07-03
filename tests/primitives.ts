@@ -76,6 +76,27 @@ describe('Primitive Type Validation', () => {
             expect(result.ok).toBe(false);
             expect(result.errors![0].message).toBe('must be a number');
         });
+
+        it('rejects NaN', () => {
+            let result = validate({ value: NaN });
+
+            expect(result.ok).toBe(false);
+            expect(result.errors![0].message).toBe('must be a number');
+        });
+
+        it('rejects Infinity', () => {
+            let result = validate({ value: Infinity });
+
+            expect(result.ok).toBe(false);
+            expect(result.errors![0].message).toBe('must be a number');
+        });
+
+        it('rejects -Infinity', () => {
+            let result = validate({ value: -Infinity });
+
+            expect(result.ok).toBe(false);
+            expect(result.errors![0].message).toBe('must be a number');
+        });
     });
 
     describe('non-nullable number rejects null (F-CORR-12)', () => {

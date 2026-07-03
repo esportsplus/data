@@ -225,8 +225,7 @@ function generateNumberValidation(
         if (
             ${prop.nullable && `${varname} !== null &&`}
             (
-                ${varname} === null || typeof ${varname} !== 'number' &&
-                isNaN(${varname} = +${varname})
+                ${varname} === null || !isFinite(${varname} = +${varname})
                 ${prop.brand === 'integer' && ` || ${varname} % 1 !== 0`}
             )
         ) {
