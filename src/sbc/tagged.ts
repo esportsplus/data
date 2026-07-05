@@ -116,6 +116,10 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
                 throw new Error('Codec2: unknown schema hash ' + hash);
             }
 
+            // lastDecodeFn must move with lastDecodeHash: decode()'s cross-call fast-path dispatches
+            // dctx.lastDecodeFn whenever hash === lastDecodeHash. Leaving it stale here runs a prior
+            // shape's decodeFn on this shape's bytes when decode() and decodeAt() interleave.
+            dctx.lastDecodeFn = schema.decodeFn;
             dctx.lastDecodeHash = hash;
             dctx.lastDecodeSchema = schema;
 
