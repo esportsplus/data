@@ -35,12 +35,14 @@ const TYPE_VALIDATORS: Record<string, TypeValidator> = {
     bigint: generateBigintValidation,
     boolean: generateBooleanValidation,
     date: generateDateValidation,
-    enum: generateEnumValidation,
+    function: generateFunctionValidation,
     literal: generateLiteralValidation,
+    map: generateMapValidation,
     null: generateNullValidation,
     number: generateNumberValidation,
     object: generateObjectValidation,
     record: generateRecordValidation,
+    set: generateSetValidation,
     string: generateStringValidation,
     tuple: generateTupleValidation,
     union: generateUnionValidation
@@ -178,15 +180,15 @@ function generateDateValidation(
     `;
 }
 
-function generateEnumValidation(
+function generateFunctionValidation(
     prop: AnalyzedProperty,
     varname: string,
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    return `
-        if (${buildLiteralChecks(varname, prop.literals || []).join(' && ')}) {
-            ${error.generate('invalid enum type', pathMode, context)}
+    return code`
+        if (${prop.nullable && `${varname} !== null &&`} typeof ${varname} !== 'function') {
+            ${error.generate('must be a function', pathMode, context)}
         }
     `;
 }
@@ -206,6 +208,46 @@ function generateLiteralValidation(
     return `
         if (${checks.join(' && ')}) {
             ${error.generate('invalid literal type', pathMode, context)}
+        }
+    `;
+}
+
+function generateMapValidation(
+    prop: AnalyzedProperty,
+    varname: string,
+    pathMode: PathMode,
+    context: GeneratorContext
+): string {
+    let e = uid('e'),
+        key = uid('k'),
+        value = uid('v');
+
+    return code`
+        if (${prop.nullable && `${varname} !== null &&`} !(${varname} instanceof Map)) {
+            ${error.generate('must be a Map', pathMode, context)}
+        }
+        else if (${varname} !== null) {
+            let ${e} = ${ERRORS_VARIABLE}?.length ?? 0;
+
+            for (let [${key}, ${value}] of ${varname}) {
+                ${generateTypeValidation(
+                    prop.keyType || { name: 'key', optional: false, type: 'unknown' },
+                    key,
+                    { key, kind: 'dynamic', path: pathMode.path },
+                    context
+                )}
+
+                ${generateTypeValidation(
+                    prop.valueType || { name: 'value', optional: false, type: 'unknown' },
+                    value,
+                    { key, kind: 'dynamic', path: pathMode.path },
+                    context
+                )}
+
+                if ((${ERRORS_VARIABLE}?.length ?? 0) > ${e}) {
+                    break;
+                }
+            }
         }
     `;
 }
@@ -381,6 +423,42 @@ function generateRecordValidation(
     `;
 }
 
+function generateSetValidation(
+    prop: AnalyzedProperty,
+    varname: string,
+    pathMode: PathMode,
+    context: GeneratorContext
+): string {
+    let e = uid('e'),
+        i = uid('i'),
+        value = uid('v');
+
+    return code`
+        if (${prop.nullable && `${varname} !== null &&`} !(${varname} instanceof Set)) {
+            ${error.generate('must be a Set', pathMode, context)}
+        }
+        else if (${varname} !== null) {
+            let ${e} = ${ERRORS_VARIABLE}?.length ?? 0,
+                ${i} = 0;
+
+            for (let ${value} of ${varname}) {
+                ${generateTypeValidation(
+                    prop.valueType || { name: 'value', optional: false, type: 'unknown' },
+                    value,
+                    { key: i, kind: 'dynamic', path: pathMode.path },
+                    context
+                )}
+
+                if ((${ERRORS_VARIABLE}?.length ?? 0) > ${e}) {
+                    break;
+                }
+
+                ${i}++;
+            }
+        }
+    `;
+}
+
 function generateStringValidation(
     prop: AnalyzedProperty,
     varname: string,
@@ -389,14 +467,10 @@ function generateStringValidation(
 ): string {
     let parts = '';
 
-    // Template literal types - just validate as string with special error
-    if (prop.brand === 'template') {
-    }
-    // Check for branded validator
-    else if (prop.brand && context.brandValidators.has(prop.brand)) {
+    // Template-literal brand carries no runtime check - validate as plain string
+    if (prop.brand && prop.brand !== 'template' && context.brandValidators.has(prop.brand)) {
         let validator = context.brandValidators.get(prop.brand)!;
 
-        // Track async
         if (validator.async) {
             context.hasAsync = true;
         }
@@ -425,6 +499,7 @@ function generateTupleValidation(
     let parts: string[] = [],
         path = pathMode.path,
         requiredCount = 0,
+        restType = prop.restType,
         tupleTypes = prop.tupleTypes || [];
 
     for (let i = 0, n = tupleTypes.length; i < n; i++) {
@@ -449,9 +524,34 @@ function generateTupleValidation(
         }
     }
 
-    let lengthCheck = requiredCount === tupleTypes.length
-        ? `${varname}.length !== ${tupleTypes.length}`
-        : `${varname}.length < ${requiredCount} || ${varname}.length > ${tupleTypes.length}`;
+    if (restType) {
+        let e = uid('e'),
+            i = uid('i'),
+            n = uid('n');
+
+        parts.push(code`
+            let ${e} = ${ERRORS_VARIABLE}?.length ?? 0;
+
+            for (let ${i} = ${tupleTypes.length}, ${n} = ${varname}.length; ${i} < ${n}; ${i}++) {
+                ${generateTypeValidation(
+                    restType,
+                    `${varname}[${i}]`,
+                    { key: i, kind: 'dynamic', path },
+                    context
+                )}
+
+                if ((${ERRORS_VARIABLE}?.length ?? 0) > ${e}) {
+                    break;
+                }
+            }
+        `);
+    }
+
+    let lengthCheck = restType
+        ? `${varname}.length < ${requiredCount}`
+        : requiredCount === tupleTypes.length
+            ? `${varname}.length !== ${tupleTypes.length}`
+            : `${varname}.length < ${requiredCount} || ${varname}.length > ${tupleTypes.length}`;
 
     return `
         if (${prop.nullable ? `${varname} !== null && ` : ''}(!Array.isArray(${varname}) || ${lengthCheck})) {
@@ -514,6 +614,15 @@ function generateUnionValidation(prop: AnalyzedProperty, varname: string, pathMo
                 body = generateTypeValidation({ ...branch, nullable: false }, varname, pathMode, context);
                 break;
 
+            case 'function':
+                guard = `typeof ${varname} === 'function'`;
+                break;
+
+            case 'map':
+                guard = `${varname} instanceof Map`;
+                body = generateTypeValidation({ ...branch, nullable: false }, varname, pathMode, context);
+                break;
+
             case 'number':
                 guard = `typeof ${varname} === 'number'`;
 
@@ -525,6 +634,11 @@ function generateUnionValidation(prop: AnalyzedProperty, varname: string, pathMo
             case 'object':
             case 'record':
                 guard = `typeof ${varname} === 'object' && ${varname} !== null && !Array.isArray(${varname})`;
+                body = generateTypeValidation({ ...branch, nullable: false }, varname, pathMode, context);
+                break;
+
+            case 'set':
+                guard = `${varname} instanceof Set`;
                 body = generateTypeValidation({ ...branch, nullable: false }, varname, pathMode, context);
                 break;
 
@@ -596,6 +710,25 @@ function propertyAccess(prop: string, varname: string): string {
 
 
 const generateValidator = (type: AnalyzedType, context: GeneratorContext, config?: Map<string, ConfigValidator[]>): string => {
+    let root = type.root;
+
+    // Non-object roots (primitive, array, tuple, record, union, ...) validate `_input` directly
+    if (root.type !== 'object') {
+        return `
+            ${context.hasAsync ? 'async ' : ''}(${INPUT_VARIABLE}) => {
+                let ${ERRORS_VARIABLE};
+
+                ${generateTypeValidation(root, INPUT_VARIABLE, { kind: 'static', path: [] }, context)}
+
+                if (${ERRORS_VARIABLE} && ${ERRORS_VARIABLE}.length > 0) {
+                    return { ok: false, data: ${INPUT_VARIABLE}, errors: ${ERRORS_VARIABLE} };
+                }
+
+                return { ok: true, data: ${INPUT_VARIABLE}, errors: undefined };
+            }
+        `;
+    }
+
     let parts: string[] = [],
         properties = type.properties;
 

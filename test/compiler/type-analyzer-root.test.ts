@@ -104,4 +104,45 @@ describe('Type Analyzer: analyzeRootType', () => {
 
         expect(second).toBe(first);
     });
+
+    it('returns function kind for a bare arrow root', () => {
+        let { checker, typeNode } = getTypeNode('test<() => void>();');
+
+        expect(analyzeRootType(typeNode, checker).type).toBe('function');
+    });
+
+    it('returns function kind for a Function root', () => {
+        let { checker, typeNode } = getTypeNode('test<Function>();');
+
+        expect(analyzeRootType(typeNode, checker).type).toBe('function');
+    });
+
+    it('returns map kind with resolved key and value types', () => {
+        let { checker, typeNode } = getTypeNode('test<Map<string, number>>();');
+
+        let root = analyzeRootType(typeNode, checker);
+
+        expect(root.type).toBe('map');
+        expect(root.keyType?.type).toBe('string');
+        expect(root.valueType?.type).toBe('number');
+    });
+
+    it('returns set kind with resolved value type', () => {
+        let { checker, typeNode } = getTypeNode('test<Set<string>>();');
+
+        let root = analyzeRootType(typeNode, checker);
+
+        expect(root.type).toBe('set');
+        expect(root.valueType?.type).toBe('string');
+    });
+
+    it('returns tuple kind with a fixed prefix and a rest type', () => {
+        let { checker, typeNode } = getTypeNode('test<[number, ...string[]]>();');
+
+        let root = analyzeRootType(typeNode, checker);
+
+        expect(root.type).toBe('tuple');
+        expect(root.tupleTypes?.map((t) => t.type)).toEqual(['number']);
+        expect(root.restType?.type).toBe('string');
+    });
 });

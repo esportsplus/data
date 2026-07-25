@@ -19,13 +19,15 @@ type PropertyType =
     | 'bigint'
     | 'boolean'
     | 'date'
-    | 'enum'
+    | 'function'
     | 'literal'
+    | 'map'
     | 'never'
     | 'null'
     | 'number'
     | 'object'
     | 'record'
+    | 'set'
     | 'string'
     | 'tuple'
     | 'union'
@@ -35,20 +37,23 @@ interface AnalyzedProperty {
     brand?: string;
     indexType?: AnalyzedProperty;
     itemType?: AnalyzedProperty;
+    keyType?: AnalyzedProperty;
     literals?: LiteralValue[];
     name: string;
     nullable?: boolean;
     optional: boolean;
-    pattern?: string;
     properties?: AnalyzedProperty[];
+    restType?: AnalyzedProperty;
     tupleTypes?: AnalyzedProperty[];
     type: PropertyType;
     unionTypes?: AnalyzedProperty[];
+    valueType?: AnalyzedProperty;
 }
 
 interface AnalyzedType {
     name: string;
     properties: AnalyzedProperty[];
+    root: AnalyzedProperty;
 }
 
 
@@ -79,6 +84,28 @@ function analyzeArrayType(
         name,
         optional,
         type: 'array'
+    };
+}
+
+function analyzeMapType(
+    type: ts.Type,
+    name: string,
+    optional: boolean,
+    checker: ts.TypeChecker,
+    visited: Set<ts.Type>
+): AnalyzedProperty {
+    let typeArgs = checker.getTypeArguments(type as ts.TypeReference);
+
+    return {
+        keyType: typeArgs[0]
+            ? analyzePropertyType(typeArgs[0], 'key', false, checker, visited)
+            : { name: 'key', optional: false, type: 'unknown' },
+        name,
+        optional,
+        type: 'map',
+        valueType: typeArgs[1]
+            ? analyzePropertyType(typeArgs[1], 'value', false, checker, visited)
+            : { name: 'value', optional: false, type: 'unknown' }
     };
 }
 
@@ -188,7 +215,6 @@ function analyzePropertyType(
             return { name, optional, type: 'date' };
         }
 
-        // Skip built-in types like Function, Promise
         if (symbol) {
             let symbolName = symbol.getName();
 
@@ -196,9 +222,27 @@ function analyzePropertyType(
                 return analyzeArrayType(type, name, optional, checker, visited);
             }
 
-            if (symbolName === 'Function' || symbolName === 'Promise') {
+            if (symbolName === 'Function') {
+                return { name, optional, type: 'function' };
+            }
+
+            if (symbolName === 'Map') {
+                return analyzeMapType(type, name, optional, checker, visited);
+            }
+
+            // Promise carries no runtime-checkable shape - accept any value
+            if (symbolName === 'Promise') {
                 return { name, optional, type: 'unknown' };
             }
+
+            if (symbolName === 'Set') {
+                return analyzeSetType(type, name, optional, checker, visited);
+            }
+        }
+
+        // Anonymous callable (e.g. `() => void` has symbol name `__type`)
+        if (type.getCallSignatures().length > 0) {
+            return { name, optional, type: 'function' };
         }
 
         // Check for Record/index signature
@@ -236,6 +280,25 @@ function analyzePropertyType(
     return { name, optional, type: 'unknown' };
 }
 
+function analyzeSetType(
+    type: ts.Type,
+    name: string,
+    optional: boolean,
+    checker: ts.TypeChecker,
+    visited: Set<ts.Type>
+): AnalyzedProperty {
+    let typeArgs = checker.getTypeArguments(type as ts.TypeReference);
+
+    return {
+        name,
+        optional,
+        type: 'set',
+        valueType: typeArgs[0]
+            ? analyzePropertyType(typeArgs[0], 'value', false, checker, visited)
+            : { name: 'value', optional: false, type: 'unknown' }
+    };
+}
+
 function analyzeTupleType(
     type: ts.TupleType,
     name: string,
@@ -243,19 +306,32 @@ function analyzeTupleType(
     checker: ts.TypeChecker,
     visited: Set<ts.Type>
 ): AnalyzedProperty {
-    let elementFlags = type.elementFlags,
-        elements = checker.getTypeArguments(type as ts.TypeReference),
+    let elements = checker.getTypeArguments(type as ts.TypeReference),
+        elementFlags = ((type as ts.TypeReference).target as ts.TupleType).elementFlags,
+        restType: AnalyzedProperty | undefined,
         tupleTypes: AnalyzedProperty[] = [];
 
     for (let i = 0, n = elements.length; i < n; i++) {
-        let isOptional = !!(elementFlags && elementFlags[i]! & ts.ElementFlags.Optional);
+        let flags = elementFlags?.[i] ?? 0;
+
+        if (flags & (ts.ElementFlags.Rest | ts.ElementFlags.Variadic)) {
+            restType = analyzePropertyType(elements[i], 'rest', false, checker, visited);
+
+            continue;
+        }
 
         tupleTypes.push(
-            analyzePropertyType(elements[i], `${i}`, isOptional, checker, visited)
+            analyzePropertyType(elements[i], `${i}`, !!(flags & ts.ElementFlags.Optional), checker, visited)
         );
     }
 
-    return { name, optional, tupleTypes, type: 'tuple' };
+    let result: AnalyzedProperty = { name, optional, tupleTypes, type: 'tuple' };
+
+    if (restType) {
+        result.restType = restType;
+    }
+
+    return result;
 }
 
 function analyzeUnionType(
@@ -370,10 +446,11 @@ const analyzeType = (typeNode: ts.TypeNode, checker: ts.TypeChecker): AnalyzedTy
         return cached;
     }
 
-    let type = checker.getTypeAtLocation(typeNode),
+    let root = analyzeRootType(typeNode, checker),
         result: AnalyzedType = {
-            name: checker.typeToString(type),
-            properties: extractProperties(type, checker, new Set<ts.Type>())
+            name: root.name,
+            properties: root.type === 'object' ? (root.properties ?? []) : [],
+            root
         };
 
     cache.set(typeNode, result);
