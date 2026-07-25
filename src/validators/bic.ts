@@ -1,7 +1,7 @@
 import type { ErrorType } from '~/types';
 
 
-let REGEX = /^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$/;
+let REGEX = /^[A-Z]{4}[A-Z]{2}[2-9A-Z][A-Z0-9]([A-Z0-9]{3})?$/;
 
 
 export default (error?: string): (value: unknown, errors: ErrorType) => void => {

@@ -32,6 +32,7 @@ import {
     ulid,
     url,
     uuid,
+    words,
 } from '../../src/validators';
 
 
@@ -124,6 +125,14 @@ describe('bic', () => {
 
     it('fails for lowercase', () => {
         expectFail(bic(), 'deutdeff');
+    });
+
+    it('fails for location code starting with 0', () => {
+        expectFail(bic(), 'DEUTDE0F');
+    });
+
+    it('fails for location code starting with 1', () => {
+        expectFail(bic(), 'DEUTDE1F');
     });
 
     it('fails for non-string', () => {
@@ -242,6 +251,18 @@ describe('dateString', () => {
         expectPass(dateString(), '2024-01-15T10:30:00Z');
     });
 
+    it('fails for impossible calendar day', () => {
+        expectFail(dateString(), '2024-02-30');
+    });
+
+    it('fails for bare number', () => {
+        expectFail(dateString(), '5');
+    });
+
+    it('fails for year-only', () => {
+        expectFail(dateString(), '2024');
+    });
+
     it('fails for invalid date', () => {
         expectFail(dateString(), 'not-a-date');
     });
@@ -275,6 +296,10 @@ describe('domain', () => {
 
     it('fails for domain with spaces', () => {
         expectFail(domain(), 'exam ple.com');
+    });
+
+    it('fails for label over 63 octets', () => {
+        expectFail(domain(), `${'a'.repeat(64)}.com`);
     });
 
     it('fails for non-string', () => {
@@ -323,16 +348,32 @@ describe('epoch', () => {
         expectPass(epoch(), '1704067200');
     });
 
-    it('fails for decimal', () => {
+    it('passes for integer number (millisecond epoch)', () => {
+        expectPass(epoch(), 1721930000000);
+    });
+
+    it('fails for decimal string', () => {
         expectFail(epoch(), '1704067200.5');
     });
 
-    it('fails for negative', () => {
+    it('fails for negative string', () => {
         expectFail(epoch(), '-1704067200');
     });
 
-    it('fails for non-string', () => {
-        expectFail(epoch(), 1704067200);
+    it('fails for over 13-digit string', () => {
+        expectFail(epoch(), '12345678901234');
+    });
+
+    it('fails for fractional number', () => {
+        expectFail(epoch(), 1704.5);
+    });
+
+    it('fails for negative number', () => {
+        expectFail(epoch(), -1);
+    });
+
+    it('fails for non-numeric type', () => {
+        expectFail(epoch(), true);
     });
 
     it('uses custom error message', () => {
@@ -360,6 +401,10 @@ describe('hostname', () => {
 
     it('fails for hostname starting with dash', () => {
         expectFail(hostname(), '-invalid.com');
+    });
+
+    it('fails for label over 63 octets', () => {
+        expectFail(hostname(), 'a'.repeat(64));
     });
 
     it('fails for non-string', () => {
@@ -420,6 +465,14 @@ describe('isbn', () => {
         expectPass(isbn(), '978-0-306-40615-7');
     });
 
+    it('passes for ISBN-10 with lowercase x', () => {
+        expectPass(isbn(), '097522980x');
+    });
+
+    it('fails for 13-digit without 978/979 prefix', () => {
+        expectFail(isbn(), '1234567890123');
+    });
+
     it('fails for invalid ISBN', () => {
         expectFail(isbn(), '1234567890');
     });
@@ -476,6 +529,10 @@ describe('jsonString', () => {
 describe('jwt', () => {
     it('passes for valid JWT', () => {
         expectPass(jwt(), 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U');
+    });
+
+    it('passes for unsecured JWT (empty signature)', () => {
+        expectPass(jwt(), 'eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMjM0NTY3ODkwIn0.');
     });
 
     it('fails for two segments', () => {
@@ -698,8 +755,12 @@ describe('ulid', () => {
         expectPass(ulid(), '01ARZ3NDEKTSV4RRFFQ69G5FAV');
     });
 
-    it('fails for lowercase', () => {
-        expectFail(ulid(), '01arz3ndektsv4rrffq69g5fav');
+    it('passes for lowercase (case-insensitive)', () => {
+        expectPass(ulid(), '01arz3ndektsv4rrffq69g5fav');
+    });
+
+    it('fails for overflowed timestamp (first char > 7)', () => {
+        expectFail(ulid(), '81ARZ3NDEKTSV4RRFFQ69G5FAV');
     });
 
     it('fails for wrong length', () => {
@@ -724,6 +785,57 @@ describe('ulid', () => {
 });
 
 
+describe('words', () => {
+    it('passes for exact space-separated count', () => {
+        expectPass(words(3), 'one two three');
+    });
+
+    it('counts word-like segments across a non-breaking space', () => {
+        expectPass(words(2), 'hello world');
+    });
+
+    it('counts space-free CJK script as multiple words', () => {
+        expectPass(words(2), '你好世界');
+    });
+
+    it('does not count space-free CJK script as one word', () => {
+        expectFail(words(1), '你好世界');
+    });
+
+    it('passes min for at-least count', () => {
+        expectPass(words.min(2), 'one two three');
+    });
+
+    it('passes max for at-most count', () => {
+        expectPass(words.max(3), 'one two');
+    });
+
+    it('fails for wrong count', () => {
+        expectFail(words(5), 'only two');
+    });
+
+    it('fails for non-string', () => {
+        expectFail(words(1), 123);
+    });
+
+    it('throws for negative count at factory time', () => {
+        expect(() => words(-1)).toThrow();
+    });
+
+    it('throws for NaN count at factory time', () => {
+        expect(() => words(NaN)).toThrow();
+    });
+
+    it('uses custom error message', () => {
+        let errors: string[] = [];
+
+        words(2, 'Custom error')('one', { push: (m) => errors.push(m) });
+
+        expect(errors[0]).toBe('Custom error');
+    });
+});
+
+
 // ─── Namespaced Validators ──────────────────────────────────────────────────
 
 
@@ -739,6 +851,26 @@ describe('email', () => {
 
         it('fails for missing domain', () => {
             expectFail(email(), 'user@');
+        });
+
+        it('fails for consecutive dots in domain', () => {
+            expectFail(email(), 'a@b..com');
+        });
+
+        it('fails for leading dot in local', () => {
+            expectFail(email(), '.a@b.com');
+        });
+
+        it('fails for consecutive dots in local', () => {
+            expectFail(email(), 'a..b@b.com');
+        });
+
+        it('fails for trailing root dot', () => {
+            expectFail(email(), 'a@b.com.');
+        });
+
+        it('fails for leading hyphen in domain label', () => {
+            expectFail(email(), 'a@-b.com');
         });
 
         it('fails for non-string', () => {
@@ -765,6 +897,10 @@ describe('email', () => {
 
         it('fails for double dots in local', () => {
             expectFail(email.rfc5322(), 'user..name@example.com');
+        });
+
+        it('passes for quoted local part with space', () => {
+            expectPass(email.rfc5322(), '"john doe"@example.com');
         });
 
         it('fails for non-string', () => {
@@ -815,6 +951,10 @@ describe('email', () => {
             expectPass(email.unicode(), '\u00fc@example.com');
         });
 
+        it('passes for IDN local part', () => {
+            expectPass(email.unicode(), 'Jos\u00e9@example.com');
+        });
+
         it('fails for spaces', () => {
             expectFail(email.unicode(), 'user @example.com');
         });
@@ -842,6 +982,10 @@ describe('url', () => {
 
         it('passes for ftp URL', () => {
             expectPass(url(), 'ftp://files.example.com');
+        });
+
+        it('passes for mailto (purely syntactic)', () => {
+            expectPass(url(), 'mailto:x@y.z');
         });
 
         it('fails for no protocol', () => {
@@ -1020,6 +1164,14 @@ describe('ip', () => {
 
         it('fails for octet > 255', () => {
             expectFail(ip.v4(), '256.0.0.1');
+        });
+
+        it('fails for leading-zero octet', () => {
+            expectFail(ip.v4(), '010.1.1.1');
+        });
+
+        it('fails for zero-padded octets', () => {
+            expectFail(ip.v4(), '127.000.000.001');
         });
 
         it('fails for IPv6', () => {
@@ -1271,6 +1423,18 @@ describe('iso', () => {
             expectPass(iso.date(), '2024-01-15');
         });
 
+        it('passes for leap-year Feb 29', () => {
+            expectPass(iso.date(), '2024-02-29');
+        });
+
+        it('fails for non-leap Feb 29', () => {
+            expectFail(iso.date(), '2023-02-29');
+        });
+
+        it('fails for April 31', () => {
+            expectFail(iso.date(), '2024-04-31');
+        });
+
         it('fails for invalid month', () => {
             expectFail(iso.date(), '2024-13-01');
         });
@@ -1303,6 +1467,10 @@ describe('iso', () => {
 
         it('passes for time with milliseconds', () => {
             expectPass(iso.time(), '14:30:00.123');
+        });
+
+        it('passes for leap second', () => {
+            expectPass(iso.time(), '23:59:60');
         });
 
         it('fails for invalid hour', () => {
@@ -1365,6 +1533,10 @@ describe('iso', () => {
             expectPass(iso.duration(), 'PT1H');
         });
 
+        it('passes for week form', () => {
+            expectPass(iso.duration(), 'P1W');
+        });
+
         it('passes for fractional seconds', () => {
             expectPass(iso.duration(), 'PT1.5S');
         });
@@ -1405,6 +1577,14 @@ describe('iso', () => {
 
         it('passes for timestamp with ms', () => {
             expectPass(iso.timestamp(), '2024-01-15T14:30:00.123Z');
+        });
+
+        it('passes for leap second', () => {
+            expectPass(iso.timestamp(), '1990-12-31T23:59:60Z');
+        });
+
+        it('passes for lowercase t and z', () => {
+            expectPass(iso.timestamp(), '2024-01-15t14:30:00z');
         });
 
         it('fails for no timezone', () => {
@@ -1464,6 +1644,10 @@ describe('mac', () => {
 
         it('passes for MAC-64 with colons', () => {
             expectPass(mac(), '00:1A:2B:3C:4D:5E:6F:70');
+        });
+
+        it('fails for mixed separators', () => {
+            expectFail(mac(), '00:1A-2B:3C-4D:5E');
         });
 
         it('fails for invalid format', () => {

@@ -1,7 +1,7 @@
 import type { ErrorType } from '~/types';
 
 
-let REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+let REGEX = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i;
 
 
 export default (error?: string): (value: unknown, errors: ErrorType) => void => {

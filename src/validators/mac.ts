@@ -3,8 +3,8 @@ import type { ValidatorFunction } from '~/types';
 
 type F = (error?: string) => ValidatorFunction<unknown>;
 
-let V48_REGEX = /^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$/,
-    V64_REGEX = /^([0-9a-fA-F]{2}[:-]){7}[0-9a-fA-F]{2}$/;
+let V48_REGEX = /^[0-9a-fA-F]{2}(?:([:-])[0-9a-fA-F]{2})(?:\1[0-9a-fA-F]{2}){4}$/,
+    V64_REGEX = /^[0-9a-fA-F]{2}(?:([:-])[0-9a-fA-F]{2})(?:\1[0-9a-fA-F]{2}){6}$/;
 
 
 const mac: F & { v48: F; v64: F } = Object.assign(

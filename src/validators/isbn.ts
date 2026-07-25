@@ -2,7 +2,7 @@ import type { ErrorType } from '~/types';
 
 
 let ISBN10_REGEX = /^\d{9}[\dX]$/,
-    ISBN13_REGEX = /^\d{13}$/,
+    ISBN13_REGEX = /^97[89]\d{10}$/,
     STRIP_REGEX = /[-\s]/g;
 
 
@@ -38,7 +38,7 @@ export default (error?: string): (value: unknown, errors: ErrorType) => void => 
             return;
         }
 
-        let stripped = value.replace(STRIP_REGEX, '');
+        let stripped = value.replace(STRIP_REGEX, '').toUpperCase();
 
         if (
             (ISBN10_REGEX.test(stripped) && isbn10(stripped)) ||

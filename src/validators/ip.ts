@@ -3,41 +3,17 @@ import type { ValidatorFunction } from '~/types';
 
 type F = (error?: string) => ValidatorFunction<unknown>;
 
-let V4_REGEX = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/,
-    V4_CIDR_REGEX = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/,
+let V4_REGEX = /^(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(?:\.(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$/,
+    V4_CIDR_REGEX = /^(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(?:\.(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}\/(?:3[0-2]|[12]?[0-9])$/,
     V6_REGEX = /^(([0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|([0-9a-f]{1,4}:){1,7}:|([0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}|([0-9a-f]{1,4}:){1,5}(:[0-9a-f]{1,4}){1,2}|([0-9a-f]{1,4}:){1,4}(:[0-9a-f]{1,4}){1,3}|([0-9a-f]{1,4}:){1,3}(:[0-9a-f]{1,4}){1,4}|([0-9a-f]{1,4}:){1,2}(:[0-9a-f]{1,4}){1,5}|[0-9a-f]{1,4}:((:[0-9a-f]{1,4}){1,6})|:((:[0-9a-f]{1,4}){1,7}|:)|fe80:(:[0-9a-f]{0,4}){0,4}%[0-9a-zA-Z]+|::(ffff(:0{1,4})?:)?((25[0-5]|(2[0-4]|1?\d)?\d)\.){3}(25[0-5]|(2[0-4]|1?\d)?\d)|([0-9a-f]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1?\d)?\d)\.){3}(25[0-5]|(2[0-4]|1?\d)?\d))$/i;
 
 
 function isValidV4(value: string): boolean {
-    let match = V4_REGEX.exec(value);
-
-    if (!match) {
-        return false;
-    }
-
-    for (let i = 1; i <= 4; i++) {
-        if (+match[i] > 255) {
-            return false;
-        }
-    }
-
-    return true;
+    return V4_REGEX.test(value);
 }
 
 function isValidV4Cidr(value: string): boolean {
-    let match = V4_CIDR_REGEX.exec(value);
-
-    if (!match) {
-        return false;
-    }
-
-    for (let i = 1; i <= 4; i++) {
-        if (+match[i] > 255) {
-            return false;
-        }
-    }
-
-    return +match[5] >= 0 && +match[5] <= 32;
+    return V4_CIDR_REGEX.test(value);
 }
 
 function isValidV6(value: string): boolean {

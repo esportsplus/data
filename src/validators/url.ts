@@ -3,8 +3,7 @@ import type { ValidatorFunction } from '~/types';
 
 type F = (error?: string) => ValidatorFunction<unknown>;
 
-let GENERAL_REGEX = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s]+$/,
-    HTTP_REGEX = /^https?:\/\/[^\s]+$/,
+let HTTP_REGEX = /^https?:\/\/[^\s]+$/,
     HTTPS_REGEX = /^https:\/\/[^\s]+$/;
 
 
@@ -14,12 +13,27 @@ function check(value: unknown, errors: { push(message: string): void }, re: RegE
     }
 }
 
+function isValidUrl(value: string): boolean {
+    try {
+        new URL(value);
+
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+
 
 const url: F & { http: F; https: F } = Object.assign(
     (error?: string): ValidatorFunction<unknown> => {
         let msg = error || 'must be a valid URL';
 
-        return (value, errors) => check(value, errors, GENERAL_REGEX, msg);
+        return (value, errors) => {
+            if (typeof value !== 'string' || !isValidUrl(value)) {
+                errors.push(msg);
+            }
+        };
     },
     {
         http: (error?: string): ValidatorFunction<unknown> => {
