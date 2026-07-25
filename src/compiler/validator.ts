@@ -15,6 +15,11 @@ type LiteralValue = {
     value: boolean | number | string;
 };
 
+type PropertyDefault = {
+    fresh: boolean;
+    name: string;
+};
+
 type TypeValidator = (prop: AnalyzedProperty, varname: string, pathMode: PathMode, context: GeneratorContext) => string;
 
 
@@ -709,7 +714,7 @@ function propertyAccess(prop: string, varname: string): string {
 }
 
 
-const generateValidator = (type: AnalyzedType, context: GeneratorContext, config?: Map<string, ConfigValidator[]>): string => {
+const generateValidator = (type: AnalyzedType, context: GeneratorContext, config?: Map<string, ConfigValidator[]>, defaults?: Map<string, PropertyDefault>): string => {
     let root = type.root;
 
     // Non-object roots (primitive, array, tuple, record, union, ...) validate `_input` directly
@@ -740,34 +745,51 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
         }
 
         let configValidators = config?.get(property.name),
-            varname = propertyAccess(property.name, INPUT_VARIABLE);
+            def = defaults?.get(property.name),
+            varname = propertyAccess(property.name, INPUT_VARIABLE),
+            core: string;
 
         if (configValidators !== undefined && configValidators.length > 0) {
             let count = uid('c');
 
+            core = code`
+                let ${count} = ${ERRORS_VARIABLE}?.length ?? 0;
+
+                ${generateTypeValidation(property, varname, { kind: 'static', path: [property.name] }, context)}
+
+                if ((${ERRORS_VARIABLE}?.length ?? 0) === ${count}) {
+                    ${CONFIG_VARIABLE}.path = '${code.escape(property.name)}';
+                    ${configInvocations(configValidators, varname)}
+                }
+            `;
+        }
+        else {
+            core = generateTypeValidation(property, varname, { kind: 'static', path: [property.name] }, context);
+        }
+
+        if (def !== undefined) {
             parts.push(
                 code`
-                    ${property.optional && `if (${varname} !== undefined) {`}
-                        let ${count} = ${ERRORS_VARIABLE}?.length ?? 0;
-
-                        ${generateTypeValidation(property, varname, { kind: 'static', path: [property.name] }, context)}
-
-                        if ((${ERRORS_VARIABLE}?.length ?? 0) === ${count}) {
-                            ${CONFIG_VARIABLE}.path = '${code.escape(property.name)}';
-                            ${configInvocations(configValidators, varname)}
-                        }
-                    ${property.optional && `}`}
+                    if (${varname} === undefined) {
+                        ${varname} = ${def.fresh ? `${def.name}()` : def.name};
+                    }
+                    else {
+                        ${core}
+                    }
+                `
+            );
+        }
+        else if (property.optional) {
+            parts.push(
+                code`
+                    if (${varname} !== undefined) {
+                        ${core}
+                    }
                 `
             );
         }
         else {
-            parts.push(
-                code`
-                    ${property.optional && `if (${varname} !== undefined) {`}
-                        ${generateTypeValidation(property, varname, { kind: 'static', path: [property.name] }, context)}
-                    ${property.optional && `}`}
-                `
-            );
+            parts.push(core);
         }
     }
 
@@ -791,4 +813,4 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
 
 
 export { generateValidator };
-export type { ConfigValidator };
+export type { ConfigValidator, PropertyDefault };

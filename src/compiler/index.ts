@@ -3,10 +3,11 @@ import { ts } from '@esportsplus/typescript';
 import { ast, imports, uid } from '@esportsplus/typescript/compiler';
 import { PACKAGE_NAME } from '../constants';
 import { analyzeRootType, analyzeType, type AnalyzedType } from './type-analyzer';
-import { extractConstraints } from './json-schema-constraints';
+import { NON_STATIC, extractConfig, peelAnnotations } from './json-schema-constraints';
 import { default as validators, type BrandedValidator } from './validators';
 import { generateJsonSchema } from './json-schema';
-import { generateValidator, type ConfigValidator } from './validator';
+import { generateValidator, type ConfigValidator, type PropertyDefault } from './validator';
+import type { Annotations, JsonSchema } from '../types';
 
 
 type DetectedCall = {
@@ -127,10 +128,11 @@ function parseConfig(configArg: ts.Expression, analyzed: AnalyzedType, sourceFil
                 continue;
             }
 
-            let async = isAsyncFunction(expression),
+            let base = peelAnnotations(expression, sourceFile).base,
+                async = isAsyncFunction(base),
                 variable = uid('v');
 
-            hoisted.push(`const ${variable} = ${expression.getText(sourceFile)};`);
+            hoisted.push(`const ${variable} = ${base.getText(sourceFile)};`);
             configValidators.push({ async, name: variable });
 
             if (async) {
@@ -146,17 +148,75 @@ function parseConfig(configArg: ts.Expression, analyzed: AnalyzedType, sourceFil
     return { hasAsync, hoisted, map };
 }
 
-function transform(call: DetectedCall, ctx: TransformContext, validators: Map<string, BrandedValidator>): { code: string; hoisted: string[] } {
+function foldAnnotations(annotations: Map<string, Annotations>, constraints: Map<string, JsonSchema>): Map<string, JsonSchema> {
+    let folded = new Map<string, JsonSchema>(),
+        names = new Set<string>();
+
+    for (let name of constraints.keys()) {
+        names.add(name);
+    }
+
+    for (let name of annotations.keys()) {
+        names.add(name);
+    }
+
+    for (let name of names) {
+        let annotation = annotations.get(name),
+            constraint = constraints.get(name),
+            fragment: Record<string, unknown> = {};
+
+        if (annotation?.meta !== undefined) {
+            Object.assign(fragment, annotation.meta);
+        }
+
+        if (constraint !== undefined) {
+            Object.assign(fragment, constraint);
+        }
+
+        if (annotation?.description !== undefined) {
+            fragment.description = annotation.description;
+        }
+
+        if (annotation?.default !== undefined && annotation.default.schema !== NON_STATIC) {
+            fragment.default = annotation.default.schema;
+        }
+
+        if (Object.keys(fragment).length > 0) {
+            folded.set(name, fragment as JsonSchema);
+        }
+    }
+
+    return folded;
+}
+
+function transform(call: DetectedCall, ctx: TransformContext, validators: Map<string, BrandedValidator>): { code: string; hoisted: string[]; schema: string } {
     let analyzed = analyzeType(call.typeArg, ctx.checker),
-        messages = new Map<string, string>();
+        messages = new Map<string, string>(),
+        root = analyzeRootType(call.typeArg, ctx.checker);
 
     if (call.errorMessagesType) {
         extractMessages(ctx.checker.getTypeAtLocation(call.errorMessagesType), [], messages, ctx.checker);
     }
 
     let config = call.configArg
-        ? parseConfig(call.configArg, analyzed, ctx.sourceFile)
-        : undefined;
+            ? parseConfig(call.configArg, analyzed, ctx.sourceFile)
+            : undefined,
+        defaults = new Map<string, PropertyDefault>(),
+        extracted = call.configArg
+            ? extractConfig(call.configArg, root, ctx.sourceFile, ctx.checker)
+            : { annotations: new Map<string, Annotations>(), constraints: new Map<string, JsonSchema>() },
+        folded = foldAnnotations(extracted.annotations, extracted.constraints),
+        hoisted: string[] = config?.hoisted ? [...config.hoisted] : [];
+
+    for (let [name, annotation] of extracted.annotations) {
+        if (annotation.default !== undefined) {
+            let source = annotation.default.source,
+                variable = uid('default');
+
+            hoisted.push(`const ${variable} = ${annotation.default.fresh ? `() => (${source})` : source};`);
+            defaults.set(name, { fresh: annotation.default.fresh, name: variable });
+        }
+    }
 
     return {
         code: generateValidator(
@@ -166,9 +226,11 @@ function transform(call: DetectedCall, ctx: TransformContext, validators: Map<st
                 customMessages: messages,
                 hasAsync: config?.hasAsync ?? false
             },
-            config?.map
+            config?.map,
+            defaults
         ),
-        hoisted: config?.hoisted ?? []
+        hoisted,
+        schema: generateJsonSchema(root, folded.size > 0 ? folded : undefined)
     };
 }
 
@@ -248,7 +310,8 @@ export default {
             return {};
         }
 
-        let hoisted = new Map<string, string>(),
+        let builds = new Map<string, string>(),
+            hoisted = new Map<string, string>(),
             intents: ImportIntent[] = [],
             prepend: string[] = [],
             remove: string[] = [],
@@ -257,10 +320,13 @@ export default {
         for (let [, call] of detected) {
             if (call.method === 'toJsonSchema') {
                 let root = analyzeRootType(call.typeArg, ctx.checker),
-                    fragments = call.configArg
-                        ? extractConstraints(call.configArg, root, ctx.sourceFile, ctx.checker)
+                    extracted = call.configArg
+                        ? extractConfig(call.configArg, root, ctx.sourceFile, ctx.checker)
                         : undefined,
-                    text = generateJsonSchema(root, fragments),
+                    folded = extracted
+                        ? foldAnnotations(extracted.annotations, extracted.constraints)
+                        : undefined,
+                    text = generateJsonSchema(root, folded && folded.size > 0 ? folded : undefined),
                     name = hoisted.get(text);
 
                 if (name === undefined) {
@@ -278,16 +344,32 @@ export default {
             }
             else {
                 let cache = validators.get(call.importSource, ctx.program),
-                    generated = transform(call, ctx, cache);
+                    generated = transform(call, ctx, cache),
+                    schemaName = hoisted.get(generated.schema);
+
+                if (schemaName === undefined) {
+                    schemaName = uid('schema');
+                    hoisted.set(generated.schema, schemaName);
+                    prepend.push(`const ${schemaName} = ${generated.schema};`);
+                }
 
                 for (let i = 0, n = generated.hoisted.length; i < n; i++) {
                     prepend.push(generated.hoisted[i]);
                 }
 
-                let generatedCode = generated.code;
+                let pojo = `{ toJsonSchema: () => ${schemaName}, validate: ${generated.code} }`,
+                    buildName = builds.get(pojo);
+
+                if (buildName === undefined) {
+                    buildName = uid('build');
+                    builds.set(pojo, buildName);
+                    prepend.push(`const ${buildName} = ${pojo};`);
+                }
+
+                let identifier = buildName;
 
                 replacements.push({
-                    generate: () => generatedCode,
+                    generate: () => identifier,
                     node: call.node
                 });
             }
