@@ -5,6 +5,10 @@ export default (error?: string): (value: unknown, errors: ErrorType) => void => 
     let msg = error || 'must be finite';
 
     return (value, errors) => {
+        if (typeof value === 'bigint') {
+            return;
+        }
+
         if (typeof value !== 'number' || !Number.isFinite(value)) {
             errors.push(msg);
         }

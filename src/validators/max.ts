@@ -3,19 +3,24 @@ import type { ErrorType } from '~/types';
 
 
 export default (number: number, error?: string): (value: unknown, errors: ErrorType) => void => {
+    if (!Number.isFinite(number)) {
+        throw new Error(`${PACKAGE_NAME}: max bound must be a finite number`);
+    }
+
     let arr = error || `must be at most ${number} items`,
         big = error || `must be at most ${number}`,
         num = error || `must be at most ${number}`,
-        str = error || `must be at most ${number} characters`;
+        str = error || `must be at most ${number} characters`,
+        type = error || 'must be a number, bigint, string, or array';
 
     return (value, errors) => {
         if (typeof value === 'number') {
-            if (value > number) {
+            if (Number.isNaN(value) || value > number) {
                 errors.push(num);
             }
         }
         else if (typeof value === 'bigint') {
-            if (value > BigInt(number)) {
+            if (value > number) {
                 errors.push(big);
             }
         }
@@ -30,7 +35,7 @@ export default (number: number, error?: string): (value: unknown, errors: ErrorT
             }
         }
         else {
-            throw new Error(`${PACKAGE_NAME}: max validator can only be applied to number, bigint, string, or array types`);
+            errors.push(type);
         }
     };
 };

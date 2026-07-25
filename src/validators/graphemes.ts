@@ -1,3 +1,4 @@
+import { PACKAGE_NAME } from '~/constants';
 import type { ErrorType } from '~/types';
 
 
@@ -5,6 +6,12 @@ type V = (n: number, error?: string) => (value: unknown, errors: ErrorType) => v
 
 let segmenter = new Intl.Segmenter();
 
+
+function assertCount(n: number): void {
+    if (Number.isNaN(n) || n < 0) {
+        throw new Error(`${PACKAGE_NAME}: graphemes count must be a non-negative number`);
+    }
+}
 
 function graphemeCount(value: string): number {
     let count = 0;
@@ -19,6 +26,8 @@ function graphemeCount(value: string): number {
 
 const graphemes: V & { max: V; min: V } = Object.assign(
     (n: number, error?: string): (value: unknown, errors: ErrorType) => void => {
+        assertCount(n);
+
         let msg = error || `must be exactly ${n} graphemes`;
 
         return (value, errors) => {
@@ -29,6 +38,8 @@ const graphemes: V & { max: V; min: V } = Object.assign(
     },
     {
         max: (n: number, error?: string): (value: unknown, errors: ErrorType) => void => {
+            assertCount(n);
+
             let msg = error || `must be at most ${n} graphemes`;
 
             return (value, errors) => {
@@ -38,6 +49,8 @@ const graphemes: V & { max: V; min: V } = Object.assign(
             };
         },
         min: (n: number, error?: string): (value: unknown, errors: ErrorType) => void => {
+            assertCount(n);
+
             let msg = error || `must be at least ${n} graphemes`;
 
             return (value, errors) => {

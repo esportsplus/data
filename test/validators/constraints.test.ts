@@ -56,6 +56,16 @@ describe('bytes', () => {
             expectPass(bytes(0), '');
         });
 
+        it('fails for a lone surrogate (cannot UTF-8 encode)', () => {
+            expectFail(bytes(3), '\uD800');
+            expectFail(bytes(3), 'a\uDC00b');
+        });
+
+        it('throws at factory for negative or NaN count', () => {
+            expect(() => bytes(-1)).toThrow();
+            expect(() => bytes(NaN)).toThrow();
+        });
+
         it('uses custom error message', () => {
             let errors: string[] = [];
 
@@ -221,6 +231,11 @@ describe('graphemes', () => {
             expectFail(graphemes(1), 123);
         });
 
+        it('throws at factory for negative or NaN count', () => {
+            expect(() => graphemes(-1)).toThrow();
+            expect(() => graphemes(NaN)).toThrow();
+        });
+
         it('uses custom error message', () => {
             let errors: string[] = [];
 
@@ -293,8 +308,26 @@ describe('length', () => {
         expectPass(length(2), '\u{1F600}');
     });
 
-    it('fails for non-string', () => {
+    it('default message says code units', () => {
+        let errors: string[] = [];
+
+        length(5)('hi', { push: (m) => errors.push(m) });
+
+        expect(errors).toEqual(['must be exactly 5 code units']);
+    });
+
+    it('accepts arrays by element count', () => {
+        expectPass(length(2), ['a', 'b']);
+        expectFail(length(2), ['a']);
+    });
+
+    it('fails for non-string, non-array', () => {
         expectFail(length(1), 123);
+    });
+
+    it('throws at factory for negative or NaN count', () => {
+        expect(() => length(-1)).toThrow();
+        expect(() => length(NaN)).toThrow();
     });
 
     it('uses custom error message', () => {

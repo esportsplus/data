@@ -5,7 +5,12 @@ export default (error?: string): (value: unknown, errors: ErrorType) => void => 
     let msg = error || 'must be non-negative';
 
     return (value, errors) => {
-        if (typeof value !== 'number' || value < 0) {
+        if (typeof value === 'bigint') {
+            if (value < 0n) {
+                errors.push(msg);
+            }
+        }
+        else if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
             errors.push(msg);
         }
     };

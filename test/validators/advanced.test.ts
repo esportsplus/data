@@ -116,20 +116,20 @@ describe('Validators: min (direct)', () => {
     });
 
     describe('unsupported types', () => {
-        it('throws for boolean', () => {
-            expect(() => validate(min(1), true)).toThrow();
+        it('pushes error for boolean without throwing', () => {
+            expect(validate(min(1), true)).toHaveLength(1);
         });
 
-        it('throws for object', () => {
-            expect(() => validate(min(1), {})).toThrow();
+        it('pushes error for object without throwing', () => {
+            expect(validate(min(1), {})).toHaveLength(1);
         });
 
-        it('throws for null', () => {
-            expect(() => validate(min(1), null)).toThrow();
+        it('pushes error for null without throwing', () => {
+            expect(validate(min(1), null)).toHaveLength(1);
         });
 
-        it('throws for undefined', () => {
-            expect(() => validate(min(1), undefined)).toThrow();
+        it('pushes error for undefined without throwing', () => {
+            expect(validate(min(1), undefined)).toHaveLength(1);
         });
     });
 });
@@ -205,12 +205,12 @@ describe('Validators: max (direct)', () => {
     });
 
     describe('unsupported types', () => {
-        it('throws for boolean', () => {
-            expect(() => validate(max(1), true)).toThrow();
+        it('pushes error for boolean without throwing', () => {
+            expect(validate(max(1), true)).toHaveLength(1);
         });
 
-        it('throws for object', () => {
-            expect(() => validate(max(1), {})).toThrow();
+        it('pushes error for object without throwing', () => {
+            expect(validate(max(1), {})).toHaveLength(1);
         });
     });
 });
@@ -300,16 +300,75 @@ describe('Validators: range (direct)', () => {
     });
 
     describe('unsupported types', () => {
-        it('throws for boolean', () => {
-            expect(() => validate(range(1, 10), true)).toThrow();
+        it('pushes error for boolean without throwing', () => {
+            expect(validate(range(1, 10), true)).toHaveLength(1);
         });
 
-        it('throws for object', () => {
-            expect(() => validate(range(1, 10), {})).toThrow();
+        it('pushes error for object without throwing', () => {
+            expect(validate(range(1, 10), {})).toHaveLength(1);
         });
 
-        it('throws for null', () => {
-            expect(() => validate(range(1, 10), null)).toThrow();
+        it('pushes error for null without throwing', () => {
+            expect(validate(range(1, 10), null)).toHaveLength(1);
+        });
+    });
+});
+
+
+// --- NaN, bigint, and factory-arg conventions ---
+
+describe('Validators: min/max/range conventions', () => {
+    describe('NaN fails (never silently passes)', () => {
+        it('min pushes error for NaN', () => {
+            expect(validate(min(5), NaN)).toHaveLength(1);
+        });
+
+        it('max pushes error for NaN', () => {
+            expect(validate(max(5), NaN)).toHaveLength(1);
+        });
+
+        it('range pushes error for NaN', () => {
+            expect(validate(range(1, 10), NaN)).toHaveLength(1);
+        });
+    });
+
+    describe('bigint compares against number bounds without throwing', () => {
+        it('min(5.5) accepts 6n', () => {
+            expect(validate(min(5.5), 6n)).toEqual([]);
+        });
+
+        it('min(5.5) rejects 5n', () => {
+            expect(validate(min(5.5), 5n)).toHaveLength(1);
+        });
+
+        it('max(5.5) accepts 5n', () => {
+            expect(validate(max(5.5), 5n)).toEqual([]);
+        });
+
+        it('max(5.5) rejects 6n', () => {
+            expect(validate(max(5.5), 6n)).toHaveLength(1);
+        });
+
+        it('range(5.5, 10.5) accepts 6n', () => {
+            expect(validate(range(5.5, 10.5), 6n)).toEqual([]);
+        });
+    });
+
+    describe('factory-arg validation throws at build time', () => {
+        it('min(NaN) throws', () => {
+            expect(() => min(NaN)).toThrow();
+        });
+
+        it('max(NaN) throws', () => {
+            expect(() => max(NaN)).toThrow();
+        });
+
+        it('range(5, 1) throws for inverted bounds', () => {
+            expect(() => range(5, 1)).toThrow();
+        });
+
+        it('range(NaN, 10) throws', () => {
+            expect(() => range(NaN, 10)).toThrow();
         });
     });
 });

@@ -62,12 +62,21 @@ describe('positive', () => {
         expectFail(positive(), true);
     });
 
-    it('does not reject NaN (typeof check passes, comparison yields false)', () => {
-        expectPass(positive(), NaN);
+    it('fails for NaN', () => {
+        expectFail(positive(), NaN);
     });
 
     it('passes for Infinity', () => {
         expectPass(positive(), Infinity);
+    });
+
+    it('passes for positive bigint', () => {
+        expectPass(positive(), 5n);
+    });
+
+    it('fails for zero and negative bigint', () => {
+        expectFail(positive(), 0n);
+        expectFail(positive(), -5n);
     });
 
     it('fails for -Infinity', () => {
@@ -104,12 +113,21 @@ describe('negative', () => {
         expectFail(negative(), null);
     });
 
-    it('does not reject NaN (typeof check passes, comparison yields false)', () => {
-        expectPass(negative(), NaN);
+    it('fails for NaN', () => {
+        expectFail(negative(), NaN);
     });
 
     it('passes for -Infinity', () => {
         expectPass(negative(), -Infinity);
+    });
+
+    it('passes for negative bigint', () => {
+        expectPass(negative(), -5n);
+    });
+
+    it('fails for zero and positive bigint', () => {
+        expectFail(negative(), 0n);
+        expectFail(negative(), 5n);
     });
 
     it('fails for Infinity', () => {
@@ -145,12 +163,18 @@ describe('nonNegative', () => {
         expectFail(nonNegative(), null);
     });
 
-    it('does not reject NaN (typeof check passes, comparison yields false)', () => {
-        expectPass(nonNegative(), NaN);
+    it('fails for NaN', () => {
+        expectFail(nonNegative(), NaN);
     });
 
     it('handles -0 as zero (passes)', () => {
         expectPass(nonNegative(), -0);
+    });
+
+    it('passes for zero and positive bigint, fails for negative bigint', () => {
+        expectPass(nonNegative(), 0n);
+        expectPass(nonNegative(), 5n);
+        expectFail(nonNegative(), -5n);
     });
 
     it('uses custom error message', () => {
@@ -182,12 +206,18 @@ describe('nonPositive', () => {
         expectFail(nonPositive(), null);
     });
 
-    it('does not reject NaN (typeof check passes, comparison yields false)', () => {
-        expectPass(nonPositive(), NaN);
+    it('fails for NaN', () => {
+        expectFail(nonPositive(), NaN);
     });
 
     it('handles -0 as zero (passes)', () => {
         expectPass(nonPositive(), -0);
+    });
+
+    it('passes for zero and negative bigint, fails for positive bigint', () => {
+        expectPass(nonPositive(), 0n);
+        expectPass(nonPositive(), -5n);
+        expectFail(nonPositive(), 5n);
     });
 
     it('uses custom error message', () => {
@@ -229,6 +259,12 @@ describe('integer', () => {
         expectFail(integer(), true);
     });
 
+    it('passes for bigint', () => {
+        expectPass(integer(), 5n);
+        expectPass(integer(), 0n);
+        expectPass(integer(), -5n);
+    });
+
     it('uses custom error message', () => {
         expectFail(integer('Custom error'), 1.5, 'Custom error');
     });
@@ -266,6 +302,17 @@ describe('safeInteger', () => {
         expectFail(safeInteger(), null);
     });
 
+    it('passes for bigint within safe range', () => {
+        expectPass(safeInteger(), 5n);
+        expectPass(safeInteger(), BigInt(Number.MAX_SAFE_INTEGER));
+        expectPass(safeInteger(), -BigInt(Number.MAX_SAFE_INTEGER));
+    });
+
+    it('fails for bigint beyond safe range', () => {
+        expectFail(safeInteger(), 2n ** 60n);
+        expectFail(safeInteger(), -(2n ** 60n));
+    });
+
     it('uses custom error message', () => {
         expectFail(safeInteger('Custom error'), 1.5, 'Custom error');
     });
@@ -299,6 +346,11 @@ describe('finite', () => {
         expectFail(finite(), true);
     });
 
+    it('passes for bigint', () => {
+        expectPass(finite(), 5n);
+        expectPass(finite(), 0n);
+    });
+
     it('uses custom error message', () => {
         expectFail(finite('Custom error'), Infinity, 'Custom error');
     });
@@ -324,6 +376,23 @@ describe('multipleOf', () => {
     it('works with decimal multiples', () => {
         expectPass(multipleOf(0.5), 1.5);
         expectPass(multipleOf(0.5), 2);
+    });
+
+    it('accepts decimal steps that binary float would reject', () => {
+        expectPass(multipleOf(0.1), 0.3);
+        expectPass(multipleOf(0.1), 0.7);
+        expectFail(multipleOf(0.1), 0.35);
+    });
+
+    it('accepts bigint multiples', () => {
+        expectPass(multipleOf(2n), 4n);
+        expectFail(multipleOf(2n), 5n);
+    });
+
+    it('throws at factory for zero or NaN step', () => {
+        expect(() => multipleOf(0)).toThrow();
+        expect(() => multipleOf(NaN)).toThrow();
+        expect(() => multipleOf(0n)).toThrow();
     });
 
     it('fails for non-number types', () => {
@@ -524,6 +593,13 @@ describe('date.valid', () => {
     it('uses custom error message', () => {
         expectFail(date.valid('Custom error'), new Date('invalid'), 'Custom error');
     });
+
+    it('does not throw on a Proxy-wrapped Date (pushes instead of TypeError)', () => {
+        let errors: string[] = [],
+            proxy = new Proxy(new Date('2024-01-15'), {});
+
+        expect(() => date.valid()(proxy, { push: (m) => errors.push(m) })).not.toThrow();
+    });
 });
 
 
@@ -546,6 +622,10 @@ describe('date.min', () => {
 
     it('fails for non-date', () => {
         expectFail(date.min(boundary), '2024-06-01');
+    });
+
+    it('throws at factory for an invalid bound Date', () => {
+        expect(() => date.min(new Date('bad'))).toThrow();
     });
 
     it('uses custom error message', () => {
@@ -573,6 +653,10 @@ describe('date.max', () => {
 
     it('fails for non-date', () => {
         expectFail(date.max(boundary), '2024-01-01');
+    });
+
+    it('throws at factory for an invalid bound Date', () => {
+        expect(() => date.max(new Date('bad'))).toThrow();
     });
 
     it('uses custom error message', () => {
