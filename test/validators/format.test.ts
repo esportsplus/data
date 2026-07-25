@@ -22,6 +22,7 @@ import {
     jsonString,
     jwt,
     mac,
+    matches,
     mime,
     nanoid,
     numeric,
@@ -212,8 +213,12 @@ describe('cuid', () => {
 
 
 describe('cuid2', () => {
-    it('passes for valid CUID2', () => {
-        expectPass(cuid2(), 'abc1234567890abcdefghijklm');
+    it('passes for a default-length (24-char) CUID2', () => {
+        expectPass(cuid2(), 'tz4a98xxat96iws9zmbrgj3a');
+    });
+
+    it('passes for the minimum length (2 chars)', () => {
+        expectPass(cuid2(), 'a1');
     });
 
     it('fails if starts with number', () => {
@@ -224,8 +229,8 @@ describe('cuid2', () => {
         expectFail(cuid2(), 'Abc1234567890abcdefghijklm');
     });
 
-    it('fails for too short', () => {
-        expectFail(cuid2(), 'a123');
+    it('fails for too short (single char)', () => {
+        expectFail(cuid2(), 'a');
     });
 
     it('fails for non-string', () => {
@@ -235,7 +240,7 @@ describe('cuid2', () => {
     it('uses custom error message', () => {
         let errors: string[] = [];
 
-        cuid2('Custom error')('bad', { push: (m) => errors.push(m) });
+        cuid2('Custom error')('BAD', { push: (m) => errors.push(m) });
 
         expect(errors[0]).toBe('Custom error');
     });
@@ -323,6 +328,18 @@ describe('emoji', () => {
 
     it('passes for complex emoji', () => {
         expectPass(emoji(), '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}');
+    });
+
+    it('passes for a regional-indicator flag sequence', () => {
+        expectPass(emoji(), '\u{1F1FA}\u{1F1F8}');
+    });
+
+    it('passes for a keycap sequence', () => {
+        expectPass(emoji(), '1\u{FE0F}\u{20E3}');
+    });
+
+    it('passes for a skin-tone-modified emoji', () => {
+        expectPass(emoji(), '\u{1F44D}\u{1F3FB}');
     });
 
     it('fails for text', () => {
@@ -557,6 +574,61 @@ describe('jwt', () => {
 });
 
 
+describe('matches', () => {
+    it('passes for a value that matches the pattern', () => {
+        expectPass(matches(/^[a-z]+$/), 'alice');
+    });
+
+    it('fails for a value that does not match the pattern', () => {
+        expectFail(matches(/^[a-z]+$/), 'Alice1');
+    });
+
+    it('fails for non-string', () => {
+        expectFail(matches(/^[a-z]+$/), 123);
+    });
+
+    it('uses custom error message', () => {
+        let errors: string[] = [];
+
+        matches(/^[a-z]+$/, 'Custom error')('123', { push: (m) => errors.push(m) });
+
+        expect(errors[0]).toBe('Custom error');
+    });
+
+    it('returns true for every record when the supplied regex has the global flag', () => {
+        // A shared /g RegExp mutates its own lastIndex on each .test() call; without
+        // rebuilding it flagless at factory time, results alternate true/false/true/false
+        let fn = matches(/^[a-z]+$/g),
+            names = ['alice', 'bob', 'carol', 'dan'],
+            results: boolean[] = [];
+
+        for (let name of names) {
+            let errors: string[] = [];
+
+            fn(name, { push: (m) => errors.push(m) });
+            results.push(errors.length === 0);
+        }
+
+        expect(results).toEqual([true, true, true, true]);
+    });
+
+    it('returns true for every record when the supplied regex has the sticky flag', () => {
+        let fn = matches(/^[a-z]+$/y),
+            names = ['alice', 'bob', 'carol', 'dan'],
+            results: boolean[] = [];
+
+        for (let name of names) {
+            let errors: string[] = [];
+
+            fn(name, { push: (m) => errors.push(m) });
+            results.push(errors.length === 0);
+        }
+
+        expect(results).toEqual([true, true, true, true]);
+    });
+});
+
+
 describe('mime', () => {
     it('passes for application/json', () => {
         expectPass(mime(), 'application/json');
@@ -699,6 +771,14 @@ describe('semver', () => {
 
     it('passes for semver with build', () => {
         expectPass(semver(), '1.0.0+build.123');
+    });
+
+    it('passes for a hyphenated prerelease identifier', () => {
+        expectPass(semver(), '1.0.0-alpha-beta');
+    });
+
+    it('passes for the semver.org build-metadata example', () => {
+        expectPass(semver(), '1.0.0+21AF26D3----117B344092BD');
     });
 
     it('fails for two segments', () => {
@@ -1307,6 +1387,46 @@ describe('base64', () => {
 
         it('fails for invalid chars', () => {
             expectFail(base64(), 'SGVsbG8@V29ybGQ=');
+        });
+
+        it('fails for a single char (undecodable, length % 4 !== 0)', () => {
+            expectFail(base64(), 'A');
+        });
+
+        it('fails for two chars (undecodable, length % 4 !== 0)', () => {
+            expectFail(base64(), 'AB');
+        });
+
+        it('fails for three chars (undecodable, length % 4 !== 0)', () => {
+            expectFail(base64(), 'ABC');
+        });
+
+        it('fails for a lone padding char', () => {
+            expectFail(base64(), '=');
+        });
+
+        it('passes for the RFC 4648 "f" vector', () => {
+            expectPass(base64(), 'Zg==');
+        });
+
+        it('passes for the RFC 4648 "fo" vector', () => {
+            expectPass(base64(), 'Zm8=');
+        });
+
+        it('passes for the RFC 4648 "foo" vector', () => {
+            expectPass(base64(), 'Zm9v');
+        });
+
+        it('passes for the RFC 4648 "foob" vector', () => {
+            expectPass(base64(), 'Zm9vYg==');
+        });
+
+        it('passes for the RFC 4648 "fooba" vector', () => {
+            expectPass(base64(), 'Zm9vYmE=');
+        });
+
+        it('passes for the RFC 4648 "foobar" vector', () => {
+            expectPass(base64(), 'Zm9vYmFy');
         });
 
         it('fails for non-string', () => {

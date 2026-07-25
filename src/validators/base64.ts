@@ -8,7 +8,7 @@ let STANDARD_REGEX = /^[A-Za-z0-9+/]*={0,2}$/,
 
 
 function check(value: unknown, errors: { push(message: string): void }, re: RegExp, msg: string): void {
-    if (typeof value !== 'string' || value.length === 0 || !re.test(value)) {
+    if (typeof value !== 'string' || value.length === 0 || value.length % 4 !== 0 || !re.test(value)) {
         errors.push(msg);
     }
 }

@@ -1,7 +1,7 @@
 import type { ErrorType } from '~/types';
 
 
-let REGEX = /^(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F)(?:\u200D(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F))*$/u;
+let REGEX = /^[\p{RGI_Emoji}]+$/v;
 
 
 export default (error?: string): (value: unknown, errors: ErrorType) => void => {

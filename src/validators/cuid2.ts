@@ -1,7 +1,7 @@
 import type { ErrorType } from '~/types';
 
 
-let REGEX = /^[a-z][a-z0-9]{24,}$/;
+let REGEX = /^[a-z][0-9a-z]{1,31}$/;
 
 
 export default (error?: string): (value: unknown, errors: ErrorType) => void => {
