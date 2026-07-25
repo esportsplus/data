@@ -55,6 +55,7 @@
         "prepare": "pnpm build",
         "prepublishOnly": "pnpm build",
         "--": "--",
+        "agent:test": "vitest run",
         "bench": "vitest bench",
         "test": "vitest run"
     },
