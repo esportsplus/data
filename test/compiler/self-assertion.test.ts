@@ -80,7 +80,7 @@ describe('Plugin self-assertion', () => {
             'const built = v.build();\n'
         );
 
-        let survivors = findUntransformed(sourceFile, checker, 'v', new Set());
+        let survivors = findUntransformed(sourceFile, checker, 'v', undefined, new Set());
 
         expect(survivors).toHaveLength(1);
         expect(survivors[0].method).toBe('build');
@@ -102,7 +102,7 @@ describe('Plugin self-assertion', () => {
             }
         });
 
-        expect(findUntransformed(sourceFile, checker, 'validator', consumed)).toHaveLength(0);
+        expect(findUntransformed(sourceFile, checker, 'validator', undefined, consumed)).toHaveLength(0);
     });
 });
 

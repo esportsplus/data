@@ -115,22 +115,23 @@ describe('Namespace Imports', () => {
     });
 
     describe('namespace-only import resolution', () => {
-        it('namespace-only import is not transformed for validator', () => {
-            // imports.includes requires named imports to populate its cache;
-            // namespace-only imports produce empty specifier sets
+        it('namespace-only import IS transformed for validator', () => {
+            // A namespace-qualified call carries its type argument, so it is compile-time
+            // resolvable and must transform; the base identifier is matched against the
+            // package's own namespace binding, resolved from the import declaration
             let code = transformRaw(
                 "import * as data from '@esportsplus/data';\n" +
                 'type User = { name: string };\n' +
                 'data.validator.build<User>();\n'
             );
 
-            expect(code).toContain('data.validator.build');
+            expect(code).not.toContain('data.validator.build');
         });
 
-        it('namespace import alongside named import does not falsely transform namespace access', () => {
-            // The named import of `validator` must not leak into detection of the unrelated
-            // `data.validator` member access - matching is keyed off the base identifier's own
-            // import binding, never off text coincidence with another import's local name
+        it('namespace import alongside named import transforms via the namespace binding, not text coincidence', () => {
+            // Matching is keyed off the base identifier's own import binding, never off text
+            // coincidence with another import's local name - `data` matches because it IS the
+            // package's namespace binding, not because `validator` is separately imported
             let code = transformRaw(
                 "import { validator } from '@esportsplus/data';\n" +
                 "import * as data from '@esportsplus/data';\n" +
@@ -138,7 +139,7 @@ describe('Namespace Imports', () => {
                 'data.validator.build<User>();\n'
             );
 
-            expect(code).toContain('data.validator.build');
+            expect(code).not.toContain('data.validator.build');
         });
     });
 
