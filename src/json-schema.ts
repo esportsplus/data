@@ -1,5 +1,5 @@
-import type { AnalyzedProperty } from './type-analyzer';
-import type { JsonSchema } from '../types';
+import type { AnalyzedProperty } from './compiler/type-analyzer';
+import type { JsonSchema } from './types';
 
 
 type LiteralValue = {

@@ -25,6 +25,10 @@
             "types": "./build/compiler/plugins/vite.d.ts",
             "default": "./build/compiler/plugins/vite.js"
         },
+        "./runtime": {
+            "types": "./build/runtime/index.d.ts",
+            "default": "./build/runtime/index.js"
+        },
         "./validators": {
             "types": "./build/validators/index.d.ts",
             "default": "./build/validators/index.js"

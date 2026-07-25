@@ -5,7 +5,7 @@ import { PACKAGE_NAME } from '../constants';
 import { analyzeRootType, analyzeType, type AnalyzedType } from './type-analyzer';
 import { NON_STATIC, extractConfig, peelAnnotations } from './json-schema-constraints';
 import { default as validators, type BrandedValidator } from './validators';
-import { generateJsonSchema } from './json-schema';
+import { generateJsonSchema } from '../json-schema';
 import { generateValidator, type ConfigValidator, type PropertyDefault } from './validator';
 import type { Annotations, JsonSchema } from '../types';
 
