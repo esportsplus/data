@@ -6,3 +6,10 @@ node_modules
 
 # Claude batch state (ephemeral, session-specific)
 .claude/storage/batch-state*
+
+# Claude snapshot artifacts (machine-generated, local only)
+.claude/CONTEXT-INDEX.md
+.claude/CONTEXT.json
+.claude/CONTEXT.md
+.claude/context-cache.json
+.claude/context-prose.json
