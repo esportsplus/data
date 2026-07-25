@@ -14,6 +14,12 @@ const validator: Validator = {
             `${PACKAGE_NAME}: validator.set() must be transformed at compile-time. ` +
             'Ensure the validation plugin is configured in your build tool.'
         );
+    },
+    toJsonSchema: () => {
+        throw new Error(
+            `${PACKAGE_NAME}: validator.toJsonSchema<T>() must be transformed at compile-time. ` +
+            'Ensure the validation plugin is configured in your build tool.'
+        );
     }
 };
 
