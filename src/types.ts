@@ -49,7 +49,7 @@ interface ErrorType {
 interface Validator {
     build: <T, _TErrors extends ErrorMessages<T> = {}>(
         _config?: ValidatorConfig<T>
-    ) => ValidatorFn<T>;
+    ) => Schema<T>;
 
     set: <T extends { __brand: string }>(
         fn: (value: T, errors: ErrorType) => void | Promise<void>
@@ -79,6 +79,23 @@ type Annotated<T> = ValidatorFunction<T> & {
     meta(values: Record<string, unknown>): Annotated<T>;
 };
 
+type AnnotationDefault = {
+    fresh: boolean;
+    schema: unknown;
+    source: string;
+};
+
+type Annotations = {
+    default?: AnnotationDefault;
+    description?: string;
+    meta?: Record<string, unknown>;
+};
+
+type Schema<T> = {
+    toJsonSchema(): JsonSchema;
+    validate: ValidatorFn<T>;
+};
+
 type ValidationResult<T> =
     | { data: T; errors: undefined; ok: true }
     | { data: unknown; errors: ValidationError[]; ok: false };
@@ -86,11 +103,14 @@ type ValidationResult<T> =
 
 export type {
     Annotated,
+    AnnotationDefault,
+    Annotations,
     ErrorMessages,
     ErrorType,
     float,
     integer,
     JsonSchema,
+    Schema,
     ValidationError,
     ValidationResult,
     Validator,
