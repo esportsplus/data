@@ -1,13 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: BLOCKED
+status: PENDING
 priority: P1
 source: findings C5, C6, C7, C15, C16 + the validator.ts:559 nullable gate (audit sections C, E)
 depends-on: relocate-tests-and-benches
 files-own: [src/compiler/validator.ts, test/compiler/validator.test.ts]
 tests: [test/compiler/validator.test.ts]
-blocked-reason: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [output-construction-safety] commits to recover
 ---
 
 # Emitted validators build output instead of mutating input

@@ -1,13 +1,12 @@
 ---
 type: test
 recommended-model: opus
-status: BLOCKED
+status: PENDING
 priority: P1
 source: audit section A (the three coverage mechanisms)
 depends-on: [relocate-tests-and-benches, repair-validator-config-compilation, compiler-annotation-extraction, repair-brand-registration, compiler-import-detection, analyzer-structural-types, output-construction-safety, error-path-fidelity]
 files-own: [test/compiler/e2e-build.test.ts, test/compiler/compile-validators.ts, test/utils.ts]
 tests: [test/compiler/e2e-build.test.ts]
-blocked-reason: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [build-pipeline-e2e-tests] commits to recover
 ---
 
 # End-to-end coverage through validator.build

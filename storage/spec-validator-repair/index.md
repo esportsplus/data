@@ -73,13 +73,13 @@
 - repair-brand-registration
 - compiler-import-detection
 - emitted-code-escaping
-- output-construction-safety — BLOCKED: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [output-construction-safety] commits to recover
-- error-path-fidelity — BLOCKED: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [error-path-fidelity] commits to recover
+- output-construction-safety
+- error-path-fidelity
 - analyzer-structural-types
 - analyzer-schema-gaps
 - format-validators-p0
 - format-validators-correctness
-- numeric-constraint-validators — BLOCKED: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [numeric-constraint-validators] commits to recover
+- numeric-constraint-validators
 - sbc-compile-time-parity
 - sbc-schema-preregistration
 - sbc-encode-safety
@@ -91,7 +91,7 @@
 - compiler-annotation-extraction
 - plugin-self-assertion
 - runtime-tojsonschema
-- build-pipeline-e2e-tests — BLOCKED: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [build-pipeline-e2e-tests] commits to recover
+- build-pipeline-e2e-tests
 - readme-accuracy
 
 ## Feed
@@ -127,3 +127,7 @@ aa871fa6,run,,,,run-end,RUN END,"applied: 0 completed, 17 rejected, 34 status-ac
 ,item,mutator,,compiler-annotation-extraction,requeued,REQUEUED,,,2026-07-25T16:07:06-07:00
 ,item,mutator,,plugin-self-assertion,requeued,REQUEUED,,,2026-07-25T16:07:06-07:00
 ,item,mutator,,runtime-tojsonschema,requeued,REQUEUED,,,2026-07-25T16:07:06-07:00
+,item,mutator,,output-construction-safety,requeued,REQUEUED,,,2026-07-25T16:19:24-07:00
+,item,mutator,,numeric-constraint-validators,requeued,REQUEUED,,,2026-07-25T16:19:25-07:00
+,item,mutator,,error-path-fidelity,requeued,REQUEUED,,,2026-07-25T16:19:25-07:00
+,item,mutator,,build-pipeline-e2e-tests,requeued,REQUEUED,,,2026-07-25T16:19:25-07:00
