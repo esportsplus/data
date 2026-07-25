@@ -3,7 +3,7 @@ import { ts } from '@esportsplus/typescript';
 import type { JsonSchema } from '../../src/types';
 import { analyzeRootType } from '../../src/compiler/type-analyzer';
 import { generateJsonSchema } from '../../src/compiler/json-schema';
-import { createProgram } from '../utils';
+import { createProgram, createValidator } from '../utils';
 
 
 const DRAFT = 'https://json-schema.org/draft/2020-12/schema';
@@ -197,14 +197,14 @@ describe('JSON Schema emitter: object row', () => {
         });
     });
 
-    it('emits bare { type: object } for a circular-reference fallback', () => {
+    it('emits a root $ref for a self-referential property', () => {
         expect(schemaOf(`
             type Node = { next: Node; value: number };
             test<Node>();
         `)).toEqual({
             $schema: DRAFT,
             additionalProperties: false,
-            properties: { next: { type: 'object' }, value: { type: 'number' } },
+            properties: { next: { $ref: '#' }, value: { type: 'number' } },
             required: ['next', 'value'],
             type: 'object'
         });
@@ -297,5 +297,165 @@ describe('JSON Schema emitter: determinism', () => {
 
         expect(text.indexOf('"a"')).toBeLessThan(text.indexOf('"b"'));
         expect(text.indexOf('"additionalProperties"')).toBeLessThan(text.indexOf('"properties"'));
+    });
+});
+
+describe('JSON Schema emitter: intersection flattening', () => {
+    it('flattens a nested all-object intersection into one merged property set', () => {
+        expect(schemaOf(`
+            type A = { a: string };
+            type B = { b: number };
+            type T = { both: A & B };
+            test<T>();
+        `)).toEqual({
+            $schema: DRAFT,
+            additionalProperties: false,
+            properties: {
+                both: {
+                    additionalProperties: false,
+                    properties: { a: { type: 'string' }, b: { type: 'number' } },
+                    required: ['a', 'b'],
+                    type: 'object'
+                }
+            },
+            required: ['both'],
+            type: 'object'
+        });
+    });
+
+    it('flattens a root all-object intersection into a full object schema', () => {
+        expect(schemaOf(`
+            type A = { a: string };
+            type B = { b: number };
+            type T = A & B;
+            test<T>();
+        `)).toEqual({
+            $schema: DRAFT,
+            additionalProperties: false,
+            properties: { a: { type: 'string' }, b: { type: 'number' } },
+            required: ['a', 'b'],
+            type: 'object'
+        });
+    });
+
+    it('reserves allOf for an intersection whose constituents are not all objects', () => {
+        let schema = schemaOf('type T = string & { tag: number }; test<T>();');
+
+        expect(schema.$schema).toBe(DRAFT);
+        expect(schema.allOf).toHaveLength(2);
+        expect(schema.allOf).toEqual(
+            expect.arrayContaining([
+                { type: 'string' },
+                {
+                    additionalProperties: false,
+                    properties: { tag: { type: 'number' } },
+                    required: ['tag'],
+                    type: 'object'
+                }
+            ])
+        );
+    });
+
+    it('validates both constituents of a flattened intersection at runtime', () => {
+        let validate = createValidator(`
+            type A = { a: string };
+            type B = { b: number };
+            type Data = { both: A & B };
+            validator.build<Data>();
+        `);
+
+        expect(validate({ both: { a: 'x', b: 1 } }).ok).toBe(true);
+        expect(validate({ both: { a: 'x' } }).ok).toBe(false);
+        expect(validate({ both: { a: 1, b: 1 } }).ok).toBe(false);
+    });
+});
+
+describe('JSON Schema emitter: recursion refs', () => {
+    it('emits a root $ref at a self-referential recursion point', () => {
+        expect(schemaOf(`
+            type Cat = { kids: Cat[]; name: string };
+            test<Cat>();
+        `)).toEqual({
+            $schema: DRAFT,
+            additionalProperties: false,
+            properties: {
+                kids: { items: { $ref: '#' }, type: 'array' },
+                name: { type: 'string' }
+            },
+            required: ['kids', 'name'],
+            type: 'object'
+        });
+    });
+
+    it('emits a $defs entry and #/$defs ref for a non-root named cycle', () => {
+        let branch = {
+            additionalProperties: false,
+            properties: {
+                children: { items: { $ref: '#/$defs/Branch' }, type: 'array' },
+                label: { type: 'string' }
+            },
+            required: ['children', 'label'],
+            type: 'object'
+        };
+
+        expect(schemaOf(`
+            type Tree = { root: Branch };
+            type Branch = { children: Branch[]; label: string };
+            test<Tree>();
+        `)).toEqual({
+            $defs: { Branch: branch },
+            $schema: DRAFT,
+            additionalProperties: false,
+            properties: { root: branch },
+            required: ['root'],
+            type: 'object'
+        });
+    });
+});
+
+describe('JSON Schema emitter: readonly annotation', () => {
+    it('emits readOnly: true for a readonly property', () => {
+        expect(schemaOf('type T = { readonly id: string }; test<T>();')).toEqual({
+            $schema: DRAFT,
+            additionalProperties: false,
+            properties: { id: { readOnly: true, type: 'string' } },
+            required: ['id'],
+            type: 'object'
+        });
+    });
+
+    it('lands the readonly flag only on readonly properties in the IR', () => {
+        let root = getRoot('type T = { readonly id: string; name: string }; test<T>();');
+
+        expect(root.properties?.find((p) => p.name === 'id')?.readonly).toBe(true);
+        expect(root.properties?.find((p) => p.name === 'name')?.readonly).toBeUndefined();
+    });
+});
+
+describe('JSON Schema emitter: confirmed-correct emissions stay stable', () => {
+    it('emits a discriminated union as anyOf of const-tagged object branches', () => {
+        let schema = schemaOf(`
+            type T = { kind: 'a'; x: number } | { kind: 'b'; y: string };
+            test<T>();
+        `);
+
+        expect(schema.$schema).toBe(DRAFT);
+        expect(schema.anyOf).toHaveLength(2);
+        expect(schema.anyOf).toEqual(
+            expect.arrayContaining([
+                {
+                    additionalProperties: false,
+                    properties: { kind: { const: 'a' }, x: { type: 'number' } },
+                    required: ['kind', 'x'],
+                    type: 'object'
+                },
+                {
+                    additionalProperties: false,
+                    properties: { kind: { const: 'b' }, y: { type: 'string' } },
+                    required: ['kind', 'y'],
+                    type: 'object'
+                }
+            ])
+        );
     });
 });

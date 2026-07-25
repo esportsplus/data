@@ -7,6 +7,14 @@ type LiteralValue = {
     value: boolean | number | string;
 };
 
+// Draft 2020-12 keywords the shared JsonSchema shape does not carry: recursion refs
+// and the readonly annotation.
+interface EmittedSchema extends JsonSchema {
+    $defs?: Record<string, JsonSchema>;
+    $ref?: string;
+    readOnly?: boolean;
+}
+
 
 const DRAFT = 'https://json-schema.org/draft/2020-12/schema';
 
@@ -33,6 +41,17 @@ function emitDate(): JsonSchema {
 
 function emitEmpty(): JsonSchema {
     return {};
+}
+
+function emitIntersection(prop: AnalyzedProperty): JsonSchema {
+    let allOf: JsonSchema[] = [],
+        types = prop.intersectionTypes || [];
+
+    for (let i = 0, n = types.length; i < n; i++) {
+        allOf.push(emit(types[i]));
+    }
+
+    return { allOf };
 }
 
 function emitLiteral(prop: AnalyzedProperty): JsonSchema {
@@ -89,7 +108,13 @@ function emitObject(prop: AnalyzedProperty, constraints?: Map<string, JsonSchema
             mergeConstraint(structural, constraints.get(property.name)!);
         }
 
-        props[property.name] = wrapNullable(property, structural);
+        let emitted = wrapNullable(property, structural) as EmittedSchema;
+
+        if (property.readonly) {
+            emitted.readOnly = true;
+        }
+
+        props[property.name] = emitted;
 
         if (!property.optional) {
             required.push(property.name);
@@ -114,6 +139,12 @@ function emitRecord(prop: AnalyzedProperty): JsonSchema {
 }
 
 function emitStructural(prop: AnalyzedProperty): JsonSchema {
+    if (prop.ref !== undefined) {
+        let ref: EmittedSchema = { $ref: prop.ref };
+
+        return ref;
+    }
+
     let fn = EMITTERS[prop.type];
 
     return fn ? fn(prop) : {};
@@ -249,6 +280,7 @@ const EMITTERS: Record<string, (prop: AnalyzedProperty) => JsonSchema> = {
     boolean: emitBoolean,
     date: emitDate,
     enum: emitLiteral,
+    intersection: emitIntersection,
     literal: emitLiteral,
     never: emitNever,
     null: emitNull,
@@ -266,7 +298,17 @@ const generateJsonSchema = (root: AnalyzedProperty, constraints?: Map<string, Js
     let structural = root.type === 'object'
             ? emitObject(root, constraints)
             : emitStructural(root),
-        schema = wrapNullable(root, structural);
+        schema = wrapNullable(root, structural) as EmittedSchema;
+
+    if (root.defs !== undefined && root.defs.size > 0) {
+        let defs: Record<string, JsonSchema> = {};
+
+        for (let [name, ir] of root.defs) {
+            defs[name] = emitObject(ir);
+        }
+
+        schema.$defs = defs;
+    }
 
     schema.$schema = DRAFT;
 
