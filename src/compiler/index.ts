@@ -1,9 +1,11 @@
 import type { ImportIntent, ReplacementIntent, TransformContext } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
-import { imports } from '@esportsplus/typescript/compiler';
+import { imports, uid } from '@esportsplus/typescript/compiler';
 import { PACKAGE_NAME } from '../constants';
-import { analyzeType } from './type-analyzer';
+import { analyzeRootType, analyzeType } from './type-analyzer';
+import { extractConstraints } from './json-schema-constraints';
 import { default as validators, type BrandedValidator } from './validators';
+import { generateJsonSchema } from './json-schema';
 import { generateValidator } from './validator';
 
 
@@ -11,6 +13,7 @@ type DetectedCall = {
     configArg?: ts.Expression;
     errorMessagesType?: ts.TypeNode;
     importSource?: string;
+    method: 'build' | 'toJsonSchema';
     node: ts.CallExpression;
     typeArg: ts.TypeNode;
 };
@@ -80,27 +83,32 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
     if (ts.isCallExpression(node) && node.typeArguments && node.typeArguments.length > 0) {
         let expr = node.expression,
             matched = false,
+            method: 'build' | 'toJsonSchema' = 'build',
             traceNode: ts.Node | undefined;
 
-        // Property access: validator.build<T>() or ns.validator.build<T>()
+        // Property access: validator.<m><T>() or ns.validator.<m><T>()
         if (ts.isPropertyAccessExpression(expr)) {
             let methodName = expr.name.text;
 
-            // validator.build<T>() or aliasedValidator.build<T>()
-            if (methodName === 'build' && ts.isIdentifier(expr.expression)) {
-                if (imports.includes(checker, expr.expression, PACKAGE_NAME, 'validator')) {
-                    matched = true;
-                    traceNode = expr.expression;
-                }
-            }
-            // ns.validator.build<T>() - namespace import with validator
-            else if (methodName === 'build' && ts.isPropertyAccessExpression(expr.expression)) {
-                let inner = expr.expression;
-
-                if (inner.name.text === 'validator' && ts.isIdentifier(inner.expression)) {
-                    if (imports.includes(checker, inner.name, PACKAGE_NAME, 'validator')) {
+            if (methodName === 'build' || methodName === 'toJsonSchema') {
+                // validator.<m><T>() or aliasedValidator.<m><T>()
+                if (ts.isIdentifier(expr.expression)) {
+                    if (imports.includes(checker, expr.expression, PACKAGE_NAME, 'validator')) {
                         matched = true;
-                        traceNode = inner.name;
+                        method = methodName;
+                        traceNode = expr.expression;
+                    }
+                }
+                // ns.validator.<m><T>() - namespace import with validator
+                else if (ts.isPropertyAccessExpression(expr.expression)) {
+                    let inner = expr.expression;
+
+                    if (inner.name.text === 'validator' && ts.isIdentifier(inner.expression)) {
+                        if (imports.includes(checker, inner.name, PACKAGE_NAME, 'validator')) {
+                            matched = true;
+                            method = methodName;
+                            traceNode = inner.name;
+                        }
                     }
                 }
             }
@@ -109,6 +117,7 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
         if (matched && traceNode) {
             let detected: DetectedCall = {
                     importSource: trace(traceNode as ts.Identifier, checker) ?? undefined,
+                    method,
                     node,
                     typeArg: node.typeArguments[0]
                 };
@@ -130,7 +139,7 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
 
 
 export default {
-    patterns: ['validator.build', 'validator', '.build'],
+    patterns: ['validator.build', 'validator', '.build', '.toJsonSchema'],
     transform: (ctx: TransformContext) => {
         let found = imports.all(ctx.sourceFile, PACKAGE_NAME);
 
@@ -146,17 +155,42 @@ export default {
             return {};
         }
 
-        let intents: ImportIntent[] = [],
+        let hoisted = new Map<string, string>(),
+            intents: ImportIntent[] = [],
+            prepend: string[] = [],
             remove: string[] = [],
             replacements: ReplacementIntent[] = [];
 
         for (let [, call] of detected) {
-            let cache = validators.get(call.importSource, ctx.program);
+            if (call.method === 'toJsonSchema') {
+                let root = analyzeRootType(call.typeArg, ctx.checker),
+                    fragments = call.configArg
+                        ? extractConstraints(call.configArg, root, ctx.sourceFile, ctx.checker)
+                        : undefined,
+                    text = generateJsonSchema(root, fragments),
+                    name = hoisted.get(text);
 
-            replacements.push({
-                generate: () => transform(call, ctx, cache),
-                node: call.node
-            });
+                if (name === undefined) {
+                    name = uid('schema');
+                    hoisted.set(text, name);
+                    prepend.push(`const ${name} = ${text};`);
+                }
+
+                let identifier = name;
+
+                replacements.push({
+                    generate: () => identifier,
+                    node: call.node
+                });
+            }
+            else {
+                let cache = validators.get(call.importSource, ctx.program);
+
+                replacements.push({
+                    generate: () => transform(call, ctx, cache),
+                    node: call.node
+                });
+            }
 
             if (remove.indexOf('validator') === -1) {
                 remove.push('validator');
@@ -168,6 +202,10 @@ export default {
                 package: PACKAGE_NAME,
                 remove
             });
+        }
+
+        if (prepend.length > 0) {
+            return { imports: intents, prepend, replacements };
         }
 
         return { imports: intents, replacements };
