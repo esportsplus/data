@@ -17,6 +17,10 @@
             "types": "./build/index.d.ts",
             "default": "./build/index.js"
         },
+        "./compiler/residue": {
+            "types": "./build/compiler/residue.d.ts",
+            "default": "./build/compiler/residue.js"
+        },
         "./compiler/tsc": {
             "types": "./build/compiler/plugins/tsc.d.ts",
             "default": "./build/compiler/plugins/tsc.js"

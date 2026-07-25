@@ -26,6 +26,14 @@ type ParsedConfig = {
 };
 
 
+type Survivor = {
+    column: number;
+    line: number;
+    method: 'build' | 'set' | 'toJsonSchema';
+    node: ts.CallExpression;
+};
+
+
 const VALIDATOR_ALIASES = 'compiler/validator-aliases';
 
 
@@ -270,6 +278,57 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
     ts.forEachChild(node, n => visit(calls, checker, n, validatorLocalName));
 }
 
+// Self-assertion scanner: a "survivor" is a consumable call site - validator.<build|set|toJsonSchema>()
+// reached through the package's own binding (plain, aliased, or namespace form) - that the transform
+// did NOT consume (e.g. a build/toJsonSchema call missing its type argument, or an unregistered set).
+// The base-binding check mirrors visit()/validators.collect() exactly, so anything those intentionally
+// leave (namespace-only access, non-package look-alikes) is never flagged; only genuinely-missed sites
+// that would otherwise ship dead config and throw from the runtime stub at call time.
+function collectSurvivors(node: ts.Node, sourceFile: ts.SourceFile, checker: ts.TypeChecker, validatorLocalName: string | undefined, consumed: Set<ts.Node>, survivors: Survivor[]): void {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+        let expr = node.expression,
+            matched = false,
+            method = expr.name.text;
+
+        if (method === 'build' || method === 'set' || method === 'toJsonSchema') {
+            if (ts.isIdentifier(expr.expression)) {
+                if (validatorLocalName !== undefined && imports.includes(checker, expr.expression, PACKAGE_NAME, validatorLocalName)) {
+                    matched = true;
+                }
+            }
+            else if (ts.isPropertyAccessExpression(expr.expression)) {
+                let inner = expr.expression;
+
+                if (inner.name.text === 'validator' && ts.isIdentifier(inner.expression) && imports.includes(checker, inner.expression, PACKAGE_NAME)) {
+                    matched = true;
+                }
+            }
+
+            if (matched && !consumed.has(node)) {
+                let position = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+
+                survivors.push({
+                    column: position.character + 1,
+                    line: position.line + 1,
+                    method,
+                    node
+                });
+            }
+        }
+    }
+
+    ts.forEachChild(node, child => collectSurvivors(child, sourceFile, checker, validatorLocalName, consumed, survivors));
+}
+
+
+const findUntransformed = (sourceFile: ts.SourceFile, checker: ts.TypeChecker, validatorLocalName: string | undefined, consumed: Set<ts.Node>): Survivor[] => {
+    let survivors: Survivor[] = [];
+
+    collectSurvivors(sourceFile, sourceFile, checker, validatorLocalName, consumed, survivors);
+
+    return survivors;
+};
+
 
 export default {
     patterns: ['.build', '.set', '.toJsonSchema'],
@@ -297,6 +356,26 @@ export default {
             registrations = validators.collect(ctx.sourceFile, ctx.checker);
 
         visit(detected, ctx.checker, ctx.sourceFile, aliases.get('validator'));
+
+        // Self-assertion: every consumable call site reached through the package binding must have been
+        // consumed above. A survivor means visit()/collect() silently missed it - fail the BUILD naming
+        // file:line:col instead of shipping a call the runtime stub throws on (C9-class hardening).
+        let consumed = new Set<ts.Node>(detected.keys());
+
+        for (let i = 0, n = registrations.nodes.length; i < n; i++) {
+            consumed.add(registrations.nodes[i].expression);
+        }
+
+        let survivors = findUntransformed(ctx.sourceFile, ctx.checker, aliases.get('validator'), consumed);
+
+        if (survivors.length > 0) {
+            let survivor = survivors[0];
+
+            throw new Error(
+                `${PACKAGE_NAME}: untransformed ${survivor.method} call at ${ctx.sourceFile.fileName}:${survivor.line}:${survivor.column} ` +
+                `— the validation plugin did not consume this validator.${survivor.method}() call site`
+            );
+        }
 
         if (detected.size === 0 && registrations.nodes.length === 0) {
             return {};
@@ -393,3 +472,5 @@ export default {
         return { imports: intents, replacements };
     }
 };
+export { findUntransformed };
+export type { Survivor };
