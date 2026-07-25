@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { codec } from '../src/sbc';
+import { codec } from '../../src/sbc';
 
 
 // Regression: decode()'s cross-call fast-path dispatches dctx.lastDecodeFn whenever

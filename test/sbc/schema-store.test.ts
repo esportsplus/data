@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { codec } from '../src/sbc';
+import { codec } from '../../src/sbc';
 
-import type { StoredSchema } from '../src/sbc/cache';
+import type { StoredSchema } from '../../src/sbc/cache';
 
-import cache from '../src/sbc/cache';
+import cache from '../../src/sbc/cache';
 
 
 function makeSchema(hash: number, fields?: string[]): StoredSchema {

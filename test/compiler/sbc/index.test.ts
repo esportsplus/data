@@ -2,8 +2,8 @@ import { coordinator } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
 import { describe, expect, test } from 'vitest';
 
-import { codec } from '../src/sbc';
-import sbcPlugin from '../src/compiler/sbc';
+import { codec } from '../../../src/sbc';
+import sbcPlugin from '../../../src/compiler/sbc';
 
 
 let compilerOptions: ts.CompilerOptions = {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { CodecOptions } from '../src/sbc';
-import { codec } from '../src/sbc';
+import type { CodecOptions } from '../../src/sbc';
+import { codec } from '../../src/sbc';
 
 
 describe('Codec2', () => {
