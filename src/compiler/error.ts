@@ -9,24 +9,24 @@ function resolvePath(mode: PathMode): string {
     let parts = mode.path;
 
     if (mode.kind === 'static') {
-        return parts.length === 0
-            ? "''"
-            : `'${parts.join('.')}'`;
+        return emitString(parts.join('.'));
     }
 
     let key = mode.key;
 
     if (mode.kind === 'record') {
         return parts.length
-            ? `'${parts.join('.')}.' + ${key}`
+            ? `${emitString(`${parts.join('.')}.`)} + ${key}`
             : key;
     }
 
     return parts.length
-        ? `'${parts.join('.')}[' + ${key} + ']'`
-        : `'[' + ${key} + ']'`;
+        ? `${emitString(`${parts.join('.')}[`)} + ${key} + ${emitString(']')}`
+        : `${emitString('[')} + ${key} + ${emitString(']')}`;
 }
 
+
+const emitString = (value: string): string => JSON.stringify(value);
 
 const generate = (message: string, pathMode: PathMode, context?: GeneratorContext): string => {
     if (context) {
@@ -37,7 +37,7 @@ const generate = (message: string, pathMode: PathMode, context?: GeneratorContex
 
     return code`
         (${ERRORS_VARIABLE} ??= []).push({
-            message: '${code.escape(message)}',
+            message: ${emitString(message)},
             path: ${resolvePath(pathMode)}
         });
     `;
@@ -45,4 +45,4 @@ const generate = (message: string, pathMode: PathMode, context?: GeneratorContex
 
 
 export default { generate };
-export { ERRORS_VARIABLE };
+export { emitString, ERRORS_VARIABLE };

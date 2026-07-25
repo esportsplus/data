@@ -1,7 +1,7 @@
 import { code, uid } from '@esportsplus/typescript/compiler';
 import type { AnalyzedProperty, AnalyzedType } from './type-analyzer';
 import { GeneratorContext, PathMode } from './types';
-import error, { ERRORS_VARIABLE } from './error';
+import error, { ERRORS_VARIABLE, emitString } from './error';
 import validators from './validators';
 
 
@@ -90,7 +90,7 @@ function buildLiteralChecks(varname: string, literals: LiteralValue[]): string[]
             value = String(lit.value);
 
         checks.push(
-            code`${varname} !== ${lit.type === 'string' ? `'${code.escape(value)}'` : value}`
+            code`${varname} !== ${lit.type === 'string' ? emitString(value) : value}`
         );
     }
 
@@ -363,7 +363,7 @@ function generatePropertyExtraction(properties: AnalyzedProperty[], varname: str
         let access = propertyAccess(prop.name, varname),
             key = VALID_IDENTIFIER.test(prop.name) && !RESERVED_WORDS.has(prop.name)
                 ? prop.name
-                : `'${code.escape(prop.name)}'`;
+                : emitString(prop.name);
 
         if (prop.optional) {
             parts.push(`...(${access} !== undefined && { ${key}: ${access} })`);
@@ -588,7 +588,7 @@ function generateUnionValidation(prop: AnalyzedProperty, varname: string, pathMo
         let lit = literals[i];
 
         literalHits.push(
-            `${varname} === ${lit.type === 'string' ? `'${code.escape(String(lit.value))}'` : String(lit.value)}`
+            `${varname} === ${lit.type === 'string' ? emitString(String(lit.value)) : String(lit.value)}`
         );
     }
 
@@ -710,7 +710,7 @@ function propertyAccess(prop: string, varname: string): string {
         return `${varname}.${prop}`;
     }
 
-    return `${varname}['${code.escape(prop)}']`;
+    return `${varname}[${emitString(prop)}]`;
 }
 
 
@@ -758,7 +758,7 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
                 ${generateTypeValidation(property, varname, { kind: 'static', path: [property.name] }, context)}
 
                 if ((${ERRORS_VARIABLE}?.length ?? 0) === ${count}) {
-                    ${CONFIG_VARIABLE}.path = '${code.escape(property.name)}';
+                    ${CONFIG_VARIABLE}.path = ${emitString(property.name)};
                     ${configInvocations(configValidators, varname)}
                 }
             `;
