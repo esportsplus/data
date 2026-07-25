@@ -20,7 +20,7 @@ function build(source: string, injected: Record<string, unknown> = {}): Validato
         keys = Object.keys(injected);
 
     // eslint-disable-next-line no-new-func
-    return new Function(...keys, `${body}\nreturn validate;`)(...keys.map((key) => injected[key])) as Validator;
+    return new Function(...keys, `${body}\nreturn validate.validate;`)(...keys.map((key) => injected[key])) as Validator;
 }
 
 function messages(result: Result): string[] {
