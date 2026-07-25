@@ -2,7 +2,7 @@ import { ts } from '@esportsplus/typescript';
 import { imports } from '@esportsplus/typescript/compiler';
 import { PACKAGE_NAME } from '../constants';
 import type { AnalyzedProperty } from './type-analyzer';
-import type { JsonSchema } from '../types';
+import type { Annotations, JsonSchema } from '../types';
 
 
 /**
@@ -41,10 +41,20 @@ type StaticArg =
 type UpperKey = 'exclusiveMaximum' | 'maxItems' | 'maxLength' | 'maximum';
 
 
+const ANNOTATION_METHODS = new Set(['default', 'describe', 'meta']);
+
+const NON_STATIC = Symbol('JsonSchemaConstraints: non-static default');
+
 const REGEX_ESCAPE = /[.*+?^${}()|[\]\\]/g;
 
 const VALIDATORS_MODULE = PACKAGE_NAME + '/validators';
 
+
+function annotationLocation(sourceFile: ts.SourceFile, node: ts.Node): string {
+    let { character, line } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+
+    return `${sourceFile.fileName}:${line + 1}:${character + 1}`;
+}
 
 function buildNamedTable(sourceFile: ts.SourceFile): Map<string, string> {
     let table = new Map<string, string>();
@@ -369,10 +379,52 @@ function mapBuiltin(name: string, variant: string | undefined, ir: IRType, args:
     }
 }
 
+function mergeAnnotations(target: Annotations, source: Annotations): void {
+    if (source.default !== undefined && target.default === undefined) {
+        target.default = source.default;
+    }
+
+    if (source.description !== undefined && target.description === undefined) {
+        target.description = source.description;
+    }
+
+    if (source.meta !== undefined) {
+        target.meta = { ...source.meta, ...target.meta };
+    }
+}
+
 function numberArg(args: StaticArg[], index: number): number | null {
     let arg = args[index];
 
     return arg && arg.kind === 'number' ? arg.value : null;
+}
+
+function objectLiteralValue(node: ts.ObjectLiteralExpression): Record<string, unknown> | null {
+    let result: Record<string, unknown> = {};
+
+    for (let i = 0, n = node.properties.length; i < n; i++) {
+        let property = node.properties[i];
+
+        if (!ts.isPropertyAssignment(property)) {
+            return null;
+        }
+
+        let name = propertyName(property.name);
+
+        if (name === null) {
+            return null;
+        }
+
+        let value = staticValue(property.initializer);
+
+        if (value === NON_STATIC) {
+            return null;
+        }
+
+        result[name] = value;
+    }
+
+    return result;
 }
 
 function propertyName(name: ts.PropertyName): string | null {
@@ -490,6 +542,64 @@ function stringArg(args: StaticArg[], index: number): string | null {
     return arg && arg.kind === 'string' ? arg.value : null;
 }
 
+function staticValue(node: ts.Expression): unknown {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+        return node.text;
+    }
+
+    if (ts.isNumericLiteral(node)) {
+        return Number(node.text);
+    }
+
+    if (
+        ts.isPrefixUnaryExpression(node)
+        && node.operator === ts.SyntaxKind.MinusToken
+        && ts.isNumericLiteral(node.operand)
+    ) {
+        return -Number(node.operand.text);
+    }
+
+    if (node.kind === ts.SyntaxKind.TrueKeyword) {
+        return true;
+    }
+
+    if (node.kind === ts.SyntaxKind.FalseKeyword) {
+        return false;
+    }
+
+    if (node.kind === ts.SyntaxKind.NullKeyword) {
+        return null;
+    }
+
+    if (ts.isArrayLiteralExpression(node)) {
+        let result: unknown[] = [];
+
+        for (let i = 0, n = node.elements.length; i < n; i++) {
+            let element = node.elements[i];
+
+            if (ts.isSpreadElement(element) || ts.isOmittedExpression(element)) {
+                return NON_STATIC;
+            }
+
+            let value = staticValue(element);
+
+            if (value === NON_STATIC) {
+                return NON_STATIC;
+            }
+
+            result.push(value);
+        }
+
+        return result;
+    }
+
+    if (ts.isObjectLiteralExpression(node)) {
+        return objectLiteralValue(node) ?? NON_STATIC;
+    }
+
+    return NON_STATIC;
+}
+
 function toIR(type: AnalyzedProperty['type']): IRType | null {
     if (type === 'array' || type === 'bigint' || type === 'number' || type === 'string') {
         return type;
@@ -499,16 +609,17 @@ function toIR(type: AnalyzedProperty['type']): IRType | null {
 }
 
 
-const extractConstraints = (
+const extractConfig = (
     configArg: ts.Expression,
     root: AnalyzedProperty,
     sourceFile: ts.SourceFile,
     checker: ts.TypeChecker
-): Map<string, JsonSchema> => {
-    let result = new Map<string, JsonSchema>();
+): { annotations: Map<string, Annotations>; constraints: Map<string, JsonSchema> } => {
+    let annotations = new Map<string, Annotations>(),
+        constraints = new Map<string, JsonSchema>();
 
     if (!ts.isObjectLiteralExpression(configArg) || root.type !== 'object' || !root.properties) {
-        return result;
+        return { annotations, constraints };
     }
 
     let irByName = new Map<string, IRType>();
@@ -538,6 +649,25 @@ const extractConstraints = (
             continue;
         }
 
+        let elements = ts.isArrayLiteralExpression(property.initializer)
+                ? property.initializer.elements
+                : [property.initializer],
+            merged: Annotations = {};
+
+        for (let j = 0, m = elements.length; j < m; j++) {
+            let element = elements[j];
+
+            if (ts.isSpreadElement(element) || ts.isOmittedExpression(element)) {
+                continue;
+            }
+
+            mergeAnnotations(merged, peelAnnotations(element, sourceFile).annotations);
+        }
+
+        if (merged.default !== undefined || merged.description !== undefined || merged.meta !== undefined) {
+            annotations.set(name, merged);
+        }
+
         let ir = irByName.get(name);
 
         if (!ir) {
@@ -553,13 +683,19 @@ const extractConstraints = (
         let contributions: Contribution[] = [];
 
         for (let j = 0, m = calls.length; j < m; j++) {
-            let recognized = recognizeCallee(calls[j], namedTable, checker);
+            let base = peelAnnotations(calls[j], sourceFile).base;
+
+            if (!ts.isCallExpression(base)) {
+                continue;
+            }
+
+            let recognized = recognizeCallee(base, namedTable, checker);
 
             if (!recognized) {
                 continue;
             }
 
-            let args = extractArgs(calls[j].arguments);
+            let args = extractArgs(base.arguments);
 
             if (args === null) {
                 continue;
@@ -581,12 +717,71 @@ const extractConstraints = (
         let fragment = resolveConflicts(contributions);
 
         if (fragment) {
-            result.set(name, fragment);
+            constraints.set(name, fragment);
         }
     }
 
-    return result;
+    return { annotations, constraints };
+};
+
+const extractConstraints = (
+    configArg: ts.Expression,
+    root: AnalyzedProperty,
+    sourceFile: ts.SourceFile,
+    checker: ts.TypeChecker
+): Map<string, JsonSchema> => {
+    return extractConfig(configArg, root, sourceFile, checker).constraints;
+};
+
+const peelAnnotations = (
+    expr: ts.Expression,
+    sourceFile: ts.SourceFile
+): { annotations: Annotations; base: ts.Expression } => {
+    let annotations: Annotations = {},
+        current: ts.Expression = expr;
+
+    while (
+        ts.isCallExpression(current)
+        && ts.isPropertyAccessExpression(current.expression)
+        && ANNOTATION_METHODS.has(current.expression.name.text)
+    ) {
+        let arg = current.arguments[0],
+            method = current.expression.name.text;
+
+        if (arg !== undefined) {
+            if (method === 'default') {
+                if (annotations.default === undefined) {
+                    annotations.default = {
+                        fresh: ts.isArrayLiteralExpression(arg) || ts.isObjectLiteralExpression(arg),
+                        schema: staticValue(arg),
+                        source: arg.getText(sourceFile)
+                    };
+                }
+            }
+            else if (method === 'describe') {
+                if (
+                    annotations.description === undefined
+                    && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg))
+                ) {
+                    annotations.description = arg.text;
+                }
+            }
+            else {
+                let values = ts.isObjectLiteralExpression(arg) ? objectLiteralValue(arg) : null;
+
+                if (values === null) {
+                    throw new Error(`JsonSchemaConstraints: .meta() requires a static object literal (${annotationLocation(sourceFile, arg)})`);
+                }
+
+                annotations.meta = { ...values, ...annotations.meta };
+            }
+        }
+
+        current = current.expression.expression;
+    }
+
+    return { annotations, base: current };
 };
 
 
-export { extractConstraints };
+export { NON_STATIC, extractConfig, extractConstraints, peelAnnotations };
