@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import bytes from '../src/validators/bytes';
-import endsWith from '../src/validators/ends-with';
-import excludes from '../src/validators/excludes';
-import graphemes from '../src/validators/graphemes';
-import includesStr from '../src/validators/includes-str';
-import length from '../src/validators/length';
-import matches from '../src/validators/matches';
-import normalize from '../src/validators/normalize';
-import startsWith from '../src/validators/starts-with';
-import trim from '../src/validators/trim';
-import words from '../src/validators/words';
+import bytes from '../../src/validators/bytes';
+import endsWith from '../../src/validators/ends-with';
+import excludes from '../../src/validators/excludes';
+import graphemes from '../../src/validators/graphemes';
+import includesStr from '../../src/validators/includes-str';
+import length from '../../src/validators/length';
+import matches from '../../src/validators/matches';
+import normalize from '../../src/validators/normalize';
+import startsWith from '../../src/validators/starts-with';
+import trim from '../../src/validators/trim';
+import words from '../../src/validators/words';
 
 
 function expectPass(fn: (value: unknown, errors: { push(msg: string): void }) => void, value: unknown) {

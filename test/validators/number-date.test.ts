@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import date from '../src/validators/date-constraint';
-import finite from '../src/validators/finite';
-import integer from '../src/validators/integer';
-import max from '../src/validators/max';
-import min from '../src/validators/min';
-import multipleOf from '../src/validators/multiple-of';
-import negative from '../src/validators/negative';
-import nonNegative from '../src/validators/non-negative';
-import nonPositive from '../src/validators/non-positive';
-import positive from '../src/validators/positive';
-import range from '../src/validators/range';
-import safeInteger from '../src/validators/safe-integer';
-import unique from '../src/validators/unique';
+import date from '../../src/validators/date-constraint';
+import finite from '../../src/validators/finite';
+import integer from '../../src/validators/integer';
+import max from '../../src/validators/max';
+import min from '../../src/validators/min';
+import multipleOf from '../../src/validators/multiple-of';
+import negative from '../../src/validators/negative';
+import nonNegative from '../../src/validators/non-negative';
+import nonPositive from '../../src/validators/non-positive';
+import positive from '../../src/validators/positive';
+import range from '../../src/validators/range';
+import safeInteger from '../../src/validators/safe-integer';
+import unique from '../../src/validators/unique';
 
 
 function expectPass(fn: (value: unknown, errors: { push(msg: string): void }) => void, value: unknown) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { max, min, range } from '../src/validators';
+import { max, min, range } from '../../src/validators';
 
 
 describe('min Validator', () => {

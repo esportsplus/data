@@ -32,7 +32,7 @@ import {
     ulid,
     url,
     uuid,
-} from '../src/validators';
+} from '../../src/validators';
 
 
 function expectPass(fn: (value: unknown, errors: { push(msg: string): void }) => void, value: unknown) {

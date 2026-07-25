@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import min from '../src/validators/min';
-import max from '../src/validators/max';
-import range from '../src/validators/range';
+import min from '../../src/validators/min';
+import max from '../../src/validators/max';
+import range from '../../src/validators/range';
 
 
 // --- Helper to collect errors ---
