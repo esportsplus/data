@@ -6,6 +6,33 @@ type float = Brand<number, 'float'>;
 type integer = Brand<number, 'integer'>;
 
 
+interface JsonSchema {
+    $schema?: string;
+    additionalProperties?: JsonSchema | boolean;
+    allOf?: JsonSchema[];
+    anyOf?: JsonSchema[];
+    const?: boolean | number | string | null;
+    enum?: (boolean | number | string)[];
+    exclusiveMaximum?: number;
+    exclusiveMinimum?: number;
+    format?: string;
+    items?: JsonSchema | false;
+    maximum?: number;
+    maxItems?: number;
+    maxLength?: number;
+    minimum?: number;
+    minItems?: number;
+    minLength?: number;
+    multipleOf?: number;
+    not?: JsonSchema;
+    pattern?: string;
+    prefixItems?: JsonSchema[];
+    properties?: Record<string, JsonSchema>;
+    required?: string[];
+    type?: string | string[];
+}
+
+
 type ErrorMessages<T> = {
     [K in keyof T]?:
         T[K] extends (infer U)[]
@@ -27,6 +54,8 @@ interface Validator {
     set: <T extends { __brand: string }>(
         fn: (value: T, errors: ErrorType) => void | Promise<void>
     ) => void;
+
+    toJsonSchema: <T>(_config?: ValidatorConfig<T>) => JsonSchema;
 }
 
 interface ValidationError {
@@ -54,6 +83,7 @@ export type {
     ErrorType,
     float,
     integer,
+    JsonSchema,
     ValidationError,
     ValidationResult,
     Validator,
