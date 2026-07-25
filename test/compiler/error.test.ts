@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import error from '../src/compiler/error';
+import error from '../../src/compiler/error';
 
 
 describe('Error: generate', () => {

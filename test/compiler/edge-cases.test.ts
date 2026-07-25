@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createValidator, mightNeedTransform, transformCode } from './utils';
-import { min } from '../src/validators';
+import { createValidator, mightNeedTransform, transformCode } from '../utils';
+import { min } from '../../src/validators';
 
 
 describe('Edge Cases', () => {

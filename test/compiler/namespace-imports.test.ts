@@ -2,7 +2,7 @@ import { ts } from '@esportsplus/typescript';
 import { coordinator } from '@esportsplus/typescript/compiler';
 import { describe, expect, it } from 'vitest';
 
-import plugin from '../src/compiler/index';
+import plugin from '../../src/compiler/index';
 
 
 let compilerOptions: ts.CompilerOptions = {

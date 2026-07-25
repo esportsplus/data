@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createValidator } from './utils';
+import { createValidator } from '../utils';
 
 
 describe('Array Validation', () => {

@@ -1,7 +1,7 @@
 import { writeFileSync } from 'fs';
 import { coordinator } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
-import plugin from '../src/compiler/index';
+import plugin from '../../src/compiler/index';
 
 
 const VALIDATORS_CODE = `

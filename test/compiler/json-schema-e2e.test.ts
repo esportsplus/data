@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { transformCode } from './utils';
-import { validator } from '../src/index';
+import { transformCode } from '../utils';
+import { validator } from '../../src/index';
 
 
 const DRAFT = 'https://json-schema.org/draft/2020-12/schema';

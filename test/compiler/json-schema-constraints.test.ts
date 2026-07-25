@@ -1,11 +1,11 @@
 import { ts } from '@esportsplus/typescript';
 import { describe, expect, it } from 'vitest';
 
-import { analyzeType } from '../src/compiler/type-analyzer';
-import { extractConstraints } from '../src/compiler/json-schema-constraints';
-import type { AnalyzedProperty } from '../src/compiler/type-analyzer';
-import type { JsonSchema } from '../src/types';
-import { createProgram } from './utils';
+import { analyzeType } from '../../src/compiler/type-analyzer';
+import { extractConstraints } from '../../src/compiler/json-schema-constraints';
+import type { AnalyzedProperty } from '../../src/compiler/type-analyzer';
+import type { JsonSchema } from '../../src/types';
+import { createProgram } from '../utils';
 
 
 type Setup = {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ts } from '@esportsplus/typescript';
-import { analyzeRootType, analyzeType } from '../src/compiler/type-analyzer';
-import { createProgram } from './utils';
+import { analyzeRootType, analyzeType } from '../../src/compiler/type-analyzer';
+import { createProgram } from '../utils';
 
 
 function findTypeArgument(node: ts.Node): ts.TypeNode | undefined {

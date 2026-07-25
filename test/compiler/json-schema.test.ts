@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { ts } from '@esportsplus/typescript';
-import type { JsonSchema } from '../src/types';
-import { analyzeRootType } from '../src/compiler/type-analyzer';
-import { generateJsonSchema } from '../src/compiler/json-schema';
-import { createProgram } from './utils';
+import type { JsonSchema } from '../../src/types';
+import { analyzeRootType } from '../../src/compiler/type-analyzer';
+import { generateJsonSchema } from '../../src/compiler/json-schema';
+import { createProgram } from '../utils';
 
 
 const DRAFT = 'https://json-schema.org/draft/2020-12/schema';
