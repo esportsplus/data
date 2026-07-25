@@ -13,3 +13,4 @@ node_modules
 .claude/CONTEXT.md
 .claude/context-cache.json
 .claude/context-prose.json
+.claude/worktrees/
