@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "noEmit": true,
+        "rootDir": "${configDir}"
+    },
+    "extends": "./tsconfig.json",
+    "include": [
+        "${configDir}/src/**/*",
+        "${configDir}/test/validators/annotations.test.ts"
+    ]
+}

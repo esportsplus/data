@@ -73,12 +73,19 @@ type ValidatorFn<T> = (input: unknown) => ValidationResult<T> | Promise<Validati
 
 type ValidatorFunction<T> = (value: T, errors: ErrorType) => void | Promise<void>;
 
+type Annotated<T> = ValidatorFunction<T> & {
+    default(value: T): Annotated<T>;
+    describe(text: string): Annotated<T>;
+    meta(values: Record<string, unknown>): Annotated<T>;
+};
+
 type ValidationResult<T> =
     | { data: T; errors: undefined; ok: true }
     | { data: unknown; errors: ValidationError[]; ok: false };
 
 
 export type {
+    Annotated,
     ErrorMessages,
     ErrorType,
     float,
