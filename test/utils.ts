@@ -68,67 +68,56 @@ function transformCode(code: string): string {
     return result.code;
 }
 
+// build<T>() now compiles to a hoisted plain object `{ toJsonSchema, validate }`, so unwrap
+// the `.validate` member here — every pre-existing suite keeps its `v(input)` call shape. The
+// hoisted validator body references sibling module-level consts (schema, config factories,
+// default factories), so execute the emitted PRELUDE (imports dropped) up to and including the
+// build POJO literal, then return that object's `validate`; user type declarations and the
+// replaced call statement follow the POJO and are never evaluated.
 function createValidator<T>(code: string): (input: unknown) => { ok: boolean; data: unknown; errors?: Array<{ message: string; path: string }> } {
-    let transformed = transformCode(code);
+    let transformed = transformCode(code),
+        match = transformed.match(/const\s+(\w+)\s*=\s*\{\s*toJsonSchema:/);
 
-    // Extract the validator function from the transformed code
-    let match = transformed.match(/validator\.build<[^>]+>\([^)]*\)/);
+    if (!match || match.index === undefined) {
+        throw new Error('Utils: could not locate build POJO in transformed code:\n' + transformed);
+    }
 
-    if (!match) {
-        // Find the IIFE that replaced the call
-        let iifeMatch = transformed.match(/(\([^)]*\)\s*=>\s*\{[\s\S]*?\})\s*$/);
+    let depth = 0,
+        end = 0,
+        inString = false,
+        name = match[1],
+        open = transformed.indexOf('{', match.index),
+        stringChar = '';
 
-        if (iifeMatch) {
-            // eslint-disable-next-line no-new-func
-            return new Function('return ' + iifeMatch[1])();
+    for (let i = open, n = transformed.length; i < n; i++) {
+        let char = transformed[i];
+
+        if (inString) {
+            if (char === stringChar && transformed[i - 1] !== '\\') {
+                inString = false;
+            }
+        }
+        else if (char === '"' || char === "'" || char === '`') {
+            inString = true;
+            stringChar = char;
+        }
+        else if (char === '{') {
+            depth++;
+        }
+        else if (char === '}') {
+            depth--;
+
+            if (depth === 0) {
+                end = i + 1;
+                break;
+            }
         }
     }
 
-    // Find and extract the generated function
-    let funcStart = transformed.indexOf('(_input) =>');
+    let prelude = transformed.slice(0, end).replace(/^\s*import\b.*$/gm, '');
 
-    if (funcStart === -1) {
-        funcStart = transformed.indexOf('async (_input) =>');
-    }
-
-    if (funcStart !== -1) {
-        let depth = 0,
-            end = funcStart,
-            inString = false,
-            stringChar = '';
-
-        for (let i = funcStart; i < transformed.length; i++) {
-            let char = transformed[i];
-
-            if (inString) {
-                if (char === stringChar && transformed[i - 1] !== '\\') {
-                    inString = false;
-                }
-            }
-            else if (char === '"' || char === "'" || char === '`') {
-                inString = true;
-                stringChar = char;
-            }
-            else if (char === '{') {
-                depth++;
-            }
-            else if (char === '}') {
-                depth--;
-
-                if (depth === 0) {
-                    end = i + 1;
-                    break;
-                }
-            }
-        }
-
-        let funcCode = transformed.substring(funcStart, end);
-
-        // eslint-disable-next-line no-new-func
-        return new Function('return ' + funcCode)();
-    }
-
-    throw new Error('Could not extract validator function from transformed code:\n' + transformed);
+    // eslint-disable-next-line no-new-func
+    return new Function(`${prelude}\nreturn ${name}.validate;`)();
 }
 
 export { createProgram, createValidator, mightNeedTransform, transformCode };
