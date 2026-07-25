@@ -52,7 +52,8 @@ interface AnalyzedType {
 }
 
 
-let cache = new WeakMap<ts.TypeNode, AnalyzedType>();
+let cache = new WeakMap<ts.TypeNode, AnalyzedType>(),
+    rootCache = new WeakMap<ts.TypeNode, AnalyzedProperty>();
 
 
 function analyzeArrayType(
@@ -347,6 +348,21 @@ function extractProperties(type: ts.Type, checker: ts.TypeChecker, visited: Set<
 }
 
 
+const analyzeRootType = (typeNode: ts.TypeNode, checker: ts.TypeChecker): AnalyzedProperty => {
+    let cached = rootCache.get(typeNode);
+
+    if (cached) {
+        return cached;
+    }
+
+    let type = checker.getTypeAtLocation(typeNode),
+        result = analyzePropertyType(type, checker.typeToString(type), false, checker, new Set<ts.Type>());
+
+    rootCache.set(typeNode, result);
+
+    return result;
+};
+
 const analyzeType = (typeNode: ts.TypeNode, checker: ts.TypeChecker): AnalyzedType => {
     let cached = cache.get(typeNode);
 
@@ -412,5 +428,5 @@ const resolveBrandedType = (type: ts.Type, checker: ts.TypeChecker): BrandedType
 };
 
 
-export { analyzeType, resolveBrandedType };
+export { analyzeRootType, analyzeType, resolveBrandedType };
 export type { AnalyzedProperty, AnalyzedType };
