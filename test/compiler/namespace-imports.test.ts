@@ -47,7 +47,7 @@ function transformRaw(code: string): string {
         shared = new Map(),
         sourceFile = program.getSourceFile(filename)!;
 
-    return coordinator.transform([plugin], code, sourceFile, program, shared).code;
+    return coordinator.transform([plugin], code, sourceFile, program, process.cwd(), shared).code;
 }
 
 
@@ -127,9 +127,10 @@ describe('Namespace Imports', () => {
             expect(code).toContain('data.validator.build');
         });
 
-        it('namespace import alongside named import does not transform namespace access', () => {
-            // Even with both import styles, the namespace-qualified access
-            // is not resolved by imports.includes
+        it('namespace import alongside named import does not falsely transform namespace access', () => {
+            // The named import of `validator` must not leak into detection of the unrelated
+            // `data.validator` member access - matching is keyed off the base identifier's own
+            // import binding, never off text coincidence with another import's local name
             let code = transformRaw(
                 "import { validator } from '@esportsplus/data';\n" +
                 "import * as data from '@esportsplus/data';\n" +

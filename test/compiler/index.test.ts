@@ -2,6 +2,78 @@ import { describe, expect, it } from 'vitest';
 import { createValidator, transformCode } from '../utils';
 
 
+describe('Aliased Imports', () => {
+    it('transforms aliased named import identically to the plain import', () => {
+        let plain = createValidator(`
+            type User = { id: number; name: string };
+            validator.build<User>();
+        `);
+
+        let aliased = createValidator(`
+            import { validator as v } from '@esportsplus/data';
+            type User = { id: number; name: string };
+            v.build<User>();
+        `);
+
+        expect(aliased({ id: 1, name: 'John' })).toEqual(plain({ id: 1, name: 'John' }));
+        expect(aliased({ id: 'bad', name: 'John' }).ok).toBe(false);
+    });
+
+    it('output no longer identical to input for an aliased import call', () => {
+        let fed = "import { codec, validator } from '@esportsplus/data';\n" +
+            "import { validator as v } from '@esportsplus/data';\n" +
+            'type User = { name: string };\n' +
+            'v.build<User>();\n';
+
+        let transformed = transformCode(
+            "import { validator as v } from '@esportsplus/data';\n" +
+            'type User = { name: string };\n' +
+            'v.build<User>();\n'
+        );
+
+        expect(transformed).not.toBe(fed);
+        expect(transformed).not.toContain('v.build');
+        expect(transformed).toContain('=>');
+    });
+});
+
+
+describe('Build Deduplication', () => {
+    it('emits exactly one validator body for two identical build<T>() calls', () => {
+        let transformed = transformCode(`
+            type User = { id: number; name: string };
+            validator.build<User>();
+            validator.build<User>();
+        `);
+
+        expect((transformed.match(/validate:/g) || []).length).toBe(1);
+    });
+
+    it('a deduplicated build still validates correctly at runtime', () => {
+        // Both call sites collapse onto the single hoisted const createValidator locates,
+        // so extracting and invoking it once proves the shared body works for either reference
+        let validate = createValidator(`
+            type User = { id: number; name: string };
+            let a = validator.build<User>();
+            let b = validator.build<User>();
+        `);
+
+        expect(validate({ id: 1, name: 'John' }).ok).toBe(true);
+        expect(validate({ id: 'bad', name: 'John' }).ok).toBe(false);
+    });
+
+    it('keeps builds of the same type with different configs distinct', () => {
+        let transformed = transformCode(`
+            type User = { name: string };
+            validator.build<User>({ name: min(5, 'too short') });
+            validator.build<User>({ name: min(10, 'too short') });
+        `);
+
+        expect((transformed.match(/validate:/g) || []).length).toBe(2);
+    });
+});
+
+
 describe('Transformer Integration', () => {
     describe('type inference', () => {
         it('handles interface types', () => {

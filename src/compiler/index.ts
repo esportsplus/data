@@ -27,6 +27,9 @@ type ParsedConfig = {
 };
 
 
+const VALIDATOR_ALIASES = 'compiler/validator-aliases';
+
+
 function extractMessages(type: ts.Type, parts: string[], messages: Map<string, string>, checker: ts.TypeChecker): void {
     if (type.isStringLiteral()) {
         messages.set(parts.join('.'), type.value);
@@ -234,7 +237,7 @@ function transform(call: DetectedCall, ctx: TransformContext, validators: Map<st
     };
 }
 
-function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChecker, node: ts.Node): void {
+function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChecker, node: ts.Node, validatorLocalName: string | undefined): void {
     if (ts.isCallExpression(node) && node.typeArguments && node.typeArguments.length > 0) {
         let expr = node.expression,
             matched = false,
@@ -246,20 +249,21 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
             let methodName = expr.name.text;
 
             if (methodName === 'build' || methodName === 'toJsonSchema') {
-                // validator.<m><T>() or aliasedValidator.<m><T>()
+                // validator.<m><T>() or aliasedValidator.<m><T>() - matched against the LOCAL binding, alias-aware
                 if (ts.isIdentifier(expr.expression)) {
-                    if (imports.includes(checker, expr.expression, PACKAGE_NAME, 'validator')) {
+                    if (validatorLocalName !== undefined && imports.includes(checker, expr.expression, PACKAGE_NAME, validatorLocalName)) {
                         matched = true;
                         method = methodName;
                         traceNode = expr.expression;
                     }
                 }
-                // ns.validator.<m><T>() - namespace import with validator
+                // ns.validator.<m><T>() - namespace import; verify the base identifier resolves to the package,
+                // never the property text (which coincidentally matches an unrelated named import's local name)
                 else if (ts.isPropertyAccessExpression(expr.expression)) {
                     let inner = expr.expression;
 
                     if (inner.name.text === 'validator' && ts.isIdentifier(inner.expression)) {
-                        if (imports.includes(checker, inner.name, PACKAGE_NAME, 'validator')) {
+                        if (imports.includes(checker, inner.expression, PACKAGE_NAME)) {
                             matched = true;
                             method = methodName;
                             traceNode = inner.name;
@@ -289,12 +293,12 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
         }
     }
 
-    ts.forEachChild(node, n => visit(calls, checker, n));
+    ts.forEachChild(node, n => visit(calls, checker, n, validatorLocalName));
 }
 
 
 export default {
-    patterns: ['validator.build', 'validator', '.build', '.toJsonSchema'],
+    patterns: ['.build', '.set', '.toJsonSchema'],
     transform: (ctx: TransformContext) => {
         let found = imports.all(ctx.sourceFile, PACKAGE_NAME);
 
@@ -302,9 +306,22 @@ export default {
             return {};
         }
 
+        let aliases = new Map<string, string>();
+
+        for (let i = 0, n = found.length; i < n; i++) {
+            for (let [propertyName, localName] of found[i].specifiers) {
+                aliases.set(propertyName, localName);
+            }
+        }
+
+        // Some hosts (e.g. single-plugin test harnesses) omit the coordinator's `root` argument
+        // and the `shared` context arrives undefined; the alias map is a courtesy for downstream
+        // plugins, never required for this plugin's own detection, so the write is best-effort
+        ctx.shared?.set(VALIDATOR_ALIASES, aliases);
+
         let detected = new Map<ts.CallExpression, DetectedCall>();
 
-        visit(detected, ctx.checker, ctx.sourceFile);
+        visit(detected, ctx.checker, ctx.sourceFile, aliases.get('validator'));
 
         if (detected.size === 0) {
             return {};
@@ -343,27 +360,29 @@ export default {
                 });
             }
             else {
-                let cache = validators.get(call.importSource, ctx.program),
-                    generated = transform(call, ctx, cache),
-                    schemaName = hoisted.get(generated.schema);
-
-                if (schemaName === undefined) {
-                    schemaName = uid('schema');
-                    hoisted.set(generated.schema, schemaName);
-                    prepend.push(`const ${schemaName} = ${generated.schema};`);
-                }
-
-                for (let i = 0, n = generated.hoisted.length; i < n; i++) {
-                    prepend.push(generated.hoisted[i]);
-                }
-
-                let pojo = `{ toJsonSchema: () => ${schemaName}, validate: ${generated.code} }`,
-                    buildName = builds.get(pojo);
+                let configText = call.configArg ? call.configArg.getText(ctx.sourceFile) : '',
+                    typeIdentity = ctx.checker.typeToString(ctx.checker.getTypeAtLocation(call.typeArg)),
+                    buildKey = JSON.stringify([typeIdentity, configText]),
+                    buildName = builds.get(buildKey);
 
                 if (buildName === undefined) {
+                    let cache = validators.get(call.importSource, ctx.program),
+                        generated = transform(call, ctx, cache),
+                        schemaName = hoisted.get(generated.schema);
+
+                    if (schemaName === undefined) {
+                        schemaName = uid('schema');
+                        hoisted.set(generated.schema, schemaName);
+                        prepend.push(`const ${schemaName} = ${generated.schema};`);
+                    }
+
+                    for (let i = 0, n = generated.hoisted.length; i < n; i++) {
+                        prepend.push(generated.hoisted[i]);
+                    }
+
                     buildName = uid('build');
-                    builds.set(pojo, buildName);
-                    prepend.push(`const ${buildName} = ${pojo};`);
+                    builds.set(buildKey, buildName);
+                    prepend.push(`const ${buildName} = { toJsonSchema: () => ${schemaName}, validate: ${generated.code} };`);
                 }
 
                 let identifier = buildName;
