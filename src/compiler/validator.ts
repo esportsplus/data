@@ -5,6 +5,11 @@ import error, { ERRORS_VARIABLE } from './error';
 import validators from './validators';
 
 
+type ConfigValidator = {
+    async: boolean;
+    name: string;
+};
+
 type LiteralValue = {
     type: 'boolean' | 'number' | 'string';
     value: boolean | number | string;
@@ -12,6 +17,8 @@ type LiteralValue = {
 
 type TypeValidator = (prop: AnalyzedProperty, varname: string, pathMode: PathMode, context: GeneratorContext) => string;
 
+
+const CONFIG_VARIABLE = '_config';
 
 const INPUT_VARIABLE = '_input';
 
@@ -81,6 +88,18 @@ function buildLiteralChecks(varname: string, literals: LiteralValue[]): string[]
     }
 
     return checks;
+}
+
+function configInvocations(validators: ConfigValidator[], varname: string): string {
+    let parts: string[] = [];
+
+    for (let i = 0, n = validators.length; i < n; i++) {
+        let validator = validators[i];
+
+        parts.push(`${validator.async ? 'await ' : ''}${validator.name}(${varname}, ${CONFIG_VARIABLE});`);
+    }
+
+    return parts.join('\n');
 }
 
 function generateArrayValidation(
@@ -576,7 +595,7 @@ function propertyAccess(prop: string, varname: string): string {
 }
 
 
-const generateValidator = (type: AnalyzedType, context: GeneratorContext, customValidatorCode?: string): string => {
+const generateValidator = (type: AnalyzedType, context: GeneratorContext, config?: Map<string, ConfigValidator[]>): string => {
     let parts: string[] = [],
         properties = type.properties;
 
@@ -587,28 +606,44 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, custom
             continue;
         }
 
-        let varname = propertyAccess(property.name, INPUT_VARIABLE);
+        let configValidators = config?.get(property.name),
+            varname = propertyAccess(property.name, INPUT_VARIABLE);
 
-        parts.push(
-            code`
-                ${property.optional && `if (${varname} !== undefined) {`}
-                    ${generateTypeValidation(property, varname, { kind: 'static', path: [property.name] }, context)}
-                ${property.optional && `}`}
-            `
-        );
+        if (configValidators !== undefined && configValidators.length > 0) {
+            let count = uid('c');
+
+            parts.push(
+                code`
+                    ${property.optional && `if (${varname} !== undefined) {`}
+                        let ${count} = ${ERRORS_VARIABLE}?.length ?? 0;
+
+                        ${generateTypeValidation(property, varname, { kind: 'static', path: [property.name] }, context)}
+
+                        if ((${ERRORS_VARIABLE}?.length ?? 0) === ${count}) {
+                            ${CONFIG_VARIABLE}.path = '${code.escape(property.name)}';
+                            ${configInvocations(configValidators, varname)}
+                        }
+                    ${property.optional && `}`}
+                `
+            );
+        }
+        else {
+            parts.push(
+                code`
+                    ${property.optional && `if (${varname} !== undefined) {`}
+                        ${generateTypeValidation(property, varname, { kind: 'static', path: [property.name] }, context)}
+                    ${property.optional && `}`}
+                `
+            );
+        }
     }
 
-    if (customValidatorCode) {
-        parts.push(`
-            if (!${ERRORS_VARIABLE}) {
-                ${customValidatorCode}
-            }
-        `);
-    }
+    let hasConfig = config !== undefined && config.size > 0;
 
     return `
         ${context.hasAsync ? 'async ' : ''}(${INPUT_VARIABLE}) => {
             let ${ERRORS_VARIABLE};
+            ${hasConfig ? `let ${CONFIG_VARIABLE} = { path: '', push(_message) { (${ERRORS_VARIABLE} ??= []).push({ message: _message, path: this.path }); } };` : ''}
 
             ${parts.join('\n')}
 
@@ -623,3 +658,4 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, custom
 
 
 export { generateValidator };
+export type { ConfigValidator };

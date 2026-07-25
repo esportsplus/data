@@ -1,12 +1,12 @@
 import type { ImportIntent, ReplacementIntent, TransformContext } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
-import { imports, uid } from '@esportsplus/typescript/compiler';
+import { ast, imports, uid } from '@esportsplus/typescript/compiler';
 import { PACKAGE_NAME } from '../constants';
-import { analyzeRootType, analyzeType } from './type-analyzer';
+import { analyzeRootType, analyzeType, type AnalyzedType } from './type-analyzer';
 import { extractConstraints } from './json-schema-constraints';
 import { default as validators, type BrandedValidator } from './validators';
 import { generateJsonSchema } from './json-schema';
-import { generateValidator } from './validator';
+import { generateValidator, type ConfigValidator } from './validator';
 
 
 type DetectedCall = {
@@ -19,7 +19,11 @@ type DetectedCall = {
 };
 
 
-const ASYNC_PATTERN = /^\s*\(?async\s|\bawait\b/;
+type ParsedConfig = {
+    hasAsync: boolean;
+    hoisted: string[];
+    map?: Map<string, ConfigValidator[]>;
+};
 
 
 function extractMessages(type: ts.Type, parts: string[], messages: Map<string, string>, checker: ts.TypeChecker): void {
@@ -60,23 +64,112 @@ const trace = (node: ts.Identifier, checker: ts.TypeChecker): string | null => {
     return declarations[0].getSourceFile().fileName;
 };
 
-function transform(call: DetectedCall, ctx: TransformContext, validators: Map<string, BrandedValidator>): string {
-    let source = call.configArg?.getText(ctx.sourceFile),
+function isAsyncFunction(node: ts.Expression): boolean {
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+        if (node.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword)) {
+            return true;
+        }
+
+        return node.body ? ast.test(node.body, ts.isAwaitExpression) : false;
+    }
+
+    return false;
+}
+
+// Per-property config: parse the ValidatorConfig object literal, hoist each validator
+// expression to a module-level const (factory calls run once at module eval), and record
+// the hoisted name + AST-derived asyncness so the generator can invoke it per property.
+// A raw-function config is the legacy (never-invoked) form kept only for async detection.
+function parseConfig(configArg: ts.Expression, analyzed: AnalyzedType, sourceFile: ts.SourceFile): ParsedConfig {
+    if (ts.isArrowFunction(configArg) || ts.isFunctionExpression(configArg)) {
+        return { hasAsync: isAsyncFunction(configArg), hoisted: [] };
+    }
+
+    if (!ts.isObjectLiteralExpression(configArg)) {
+        return { hasAsync: false, hoisted: [] };
+    }
+
+    let entries = configArg.properties,
+        hasAsync = false,
+        hoisted: string[] = [],
+        map = new Map<string, ConfigValidator[]>(),
+        propertyNames = new Set<string>();
+
+    for (let i = 0, n = analyzed.properties.length; i < n; i++) {
+        propertyNames.add(analyzed.properties[i].name);
+    }
+
+    for (let i = 0, n = entries.length; i < n; i++) {
+        let entry = entries[i];
+
+        if (!ts.isPropertyAssignment(entry) || ts.isComputedPropertyName(entry.name)) {
+            continue;
+        }
+
+        let name = entry.name,
+            key = ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)
+                ? name.text
+                : null;
+
+        if (key === null || !propertyNames.has(key)) {
+            continue;
+        }
+
+        let expressions = ts.isArrayLiteralExpression(entry.initializer)
+                ? entry.initializer.elements
+                : [entry.initializer],
+            configValidators: ConfigValidator[] = [];
+
+        for (let j = 0, m = expressions.length; j < m; j++) {
+            let expression = expressions[j];
+
+            if (ts.isSpreadElement(expression) || ts.isOmittedExpression(expression)) {
+                continue;
+            }
+
+            let async = isAsyncFunction(expression),
+                variable = uid('v');
+
+            hoisted.push(`const ${variable} = ${expression.getText(sourceFile)};`);
+            configValidators.push({ async, name: variable });
+
+            if (async) {
+                hasAsync = true;
+            }
+        }
+
+        if (configValidators.length > 0) {
+            map.set(key, configValidators);
+        }
+    }
+
+    return { hasAsync, hoisted, map };
+}
+
+function transform(call: DetectedCall, ctx: TransformContext, validators: Map<string, BrandedValidator>): { code: string; hoisted: string[] } {
+    let analyzed = analyzeType(call.typeArg, ctx.checker),
         messages = new Map<string, string>();
 
     if (call.errorMessagesType) {
         extractMessages(ctx.checker.getTypeAtLocation(call.errorMessagesType), [], messages, ctx.checker);
     }
 
-    return generateValidator(
-        analyzeType(call.typeArg, ctx.checker),
-        {
-            brandValidators: validators,
-            customMessages: messages,
-            hasAsync: source ? ASYNC_PATTERN.test(source) : false
-        },
-        source
-    );
+    let config = call.configArg
+        ? parseConfig(call.configArg, analyzed, ctx.sourceFile)
+        : undefined;
+
+    return {
+        code: generateValidator(
+            analyzed,
+            {
+                brandValidators: validators,
+                customMessages: messages,
+                hasAsync: config?.hasAsync ?? false
+            },
+            config?.map
+        ),
+        hoisted: config?.hoisted ?? []
+    };
 }
 
 function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChecker, node: ts.Node): void {
@@ -184,10 +277,17 @@ export default {
                 });
             }
             else {
-                let cache = validators.get(call.importSource, ctx.program);
+                let cache = validators.get(call.importSource, ctx.program),
+                    generated = transform(call, ctx, cache);
+
+                for (let i = 0, n = generated.hoisted.length; i < n; i++) {
+                    prepend.push(generated.hoisted[i]);
+                }
+
+                let generatedCode = generated.code;
 
                 replacements.push({
-                    generate: () => transform(call, ctx, cache),
+                    generate: () => generatedCode,
                     node: call.node
                 });
             }
