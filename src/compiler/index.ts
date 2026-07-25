@@ -13,7 +13,6 @@ import type { Annotations, JsonSchema } from '../types';
 type DetectedCall = {
     configArg?: ts.Expression;
     errorMessagesType?: ts.TypeNode;
-    importSource?: string;
     method: 'build' | 'toJsonSchema';
     node: ts.CallExpression;
     typeArg: ts.TypeNode;
@@ -46,27 +45,6 @@ function extractMessages(type: ts.Type, parts: string[], messages: Map<string, s
         }
     }
 }
-
-// Trace symbol through re-exports to find original declaration source file
-const trace = (node: ts.Identifier, checker: ts.TypeChecker): string | null => {
-    let symbol = checker.getSymbolAtLocation(node);
-
-    if (!symbol) {
-        return null;
-    }
-
-    if (symbol.flags & ts.SymbolFlags.Alias) {
-        symbol = checker.getAliasedSymbol(symbol);
-    }
-
-    let declarations = symbol.getDeclarations();
-
-    if (!declarations || declarations.length === 0) {
-        return null;
-    }
-
-    return declarations[0].getSourceFile().fileName;
-};
 
 function isAsyncFunction(node: ts.Expression): boolean {
     if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
@@ -241,8 +219,7 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
     if (ts.isCallExpression(node) && node.typeArguments && node.typeArguments.length > 0) {
         let expr = node.expression,
             matched = false,
-            method: 'build' | 'toJsonSchema' = 'build',
-            traceNode: ts.Node | undefined;
+            method: 'build' | 'toJsonSchema' = 'build';
 
         // Property access: validator.<m><T>() or ns.validator.<m><T>()
         if (ts.isPropertyAccessExpression(expr)) {
@@ -254,7 +231,6 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
                     if (validatorLocalName !== undefined && imports.includes(checker, expr.expression, PACKAGE_NAME, validatorLocalName)) {
                         matched = true;
                         method = methodName;
-                        traceNode = expr.expression;
                     }
                 }
                 // ns.validator.<m><T>() - namespace import; verify the base identifier resolves to the package,
@@ -266,16 +242,14 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
                         if (imports.includes(checker, inner.expression, PACKAGE_NAME)) {
                             matched = true;
                             method = methodName;
-                            traceNode = inner.name;
                         }
                     }
                 }
             }
         }
 
-        if (matched && traceNode) {
+        if (matched) {
             let detected: DetectedCall = {
-                    importSource: trace(traceNode as ts.Identifier, checker) ?? undefined,
                     method,
                     node,
                     typeArg: node.typeArguments[0]
@@ -319,15 +293,17 @@ export default {
         // plugins, never required for this plugin's own detection, so the write is best-effort
         ctx.shared?.set(VALIDATOR_ALIASES, aliases);
 
-        let detected = new Map<ts.CallExpression, DetectedCall>();
+        let detected = new Map<ts.CallExpression, DetectedCall>(),
+            registrations = validators.collect(ctx.sourceFile, ctx.checker);
 
         visit(detected, ctx.checker, ctx.sourceFile, aliases.get('validator'));
 
-        if (detected.size === 0) {
+        if (detected.size === 0 && registrations.nodes.length === 0) {
             return {};
         }
 
-        let builds = new Map<string, string>(),
+        let brands = registrations.validators,
+            builds = new Map<string, string>(),
             hoisted = new Map<string, string>(),
             intents: ImportIntent[] = [],
             prepend: string[] = [],
@@ -366,8 +342,7 @@ export default {
                     buildName = builds.get(buildKey);
 
                 if (buildName === undefined) {
-                    let cache = validators.get(call.importSource, ctx.program),
-                        generated = transform(call, ctx, cache),
+                    let generated = transform(call, ctx, brands),
                         schemaName = hoisted.get(generated.schema);
 
                     if (schemaName === undefined) {
@@ -393,17 +368,23 @@ export default {
                 });
             }
 
-            if (remove.indexOf('validator') === -1) {
-                remove.push('validator');
-            }
         }
 
-        if (remove.length > 0) {
-            intents.push({
-                package: PACKAGE_NAME,
-                remove
+        for (let i = 0, n = registrations.nodes.length; i < n; i++) {
+            replacements.push({
+                generate: () => '',
+                node: registrations.nodes[i]
             });
         }
+
+        // Every validator reference is either replaced (build/toJsonSchema) or removed (set),
+        // so the import is always dead once the file is transformed.
+        remove.push('validator');
+
+        intents.push({
+            package: PACKAGE_NAME,
+            remove
+        });
 
         if (prepend.length > 0) {
             return { imports: intents, prepend, replacements };

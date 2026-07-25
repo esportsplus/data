@@ -1,5 +1,6 @@
-import { ast } from '@esportsplus/typescript/compiler';
+import { ast, imports } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
+import { PACKAGE_NAME } from '../constants';
 import { resolveBrandedType } from './type-analyzer';
 import { PathMode } from './types';
 import error from './error';
@@ -11,6 +12,13 @@ interface BrandedValidator {
     brand: string;
 }
 
+type Registrations = {
+    nodes: ts.ExpressionStatement[];
+    validators: Map<string, BrandedValidator>;
+};
+
+
+const DISALLOWED_BODY_REGEX = /\b(eval|Function)\s*\(/;
 
 const ERRORS_PUSH_REGEX = /errors\.push\((['"`])(.+?)\1\)/g;
 
@@ -28,13 +36,64 @@ function collectParamRefs(node: ts.Node, paramSymbol: ts.Symbol | undefined, che
     ts.forEachChild(node, (child) => collectParamRefs(child, paramSymbol, checker, bodyStart, spans));
 }
 
-function parse(node: ts.CallExpression, checker: ts.TypeChecker): BrandedValidator | null {
+// Source files directly imported by `file` - the registration scope: a build site consumes
+// brands registered in its own file plus the files it imports (ts module resolution), so the
+// README's set-in-a-separate-validation.ts example works order-independently under any host.
+function importedSourceFiles(file: ts.SourceFile, checker: ts.TypeChecker): ts.SourceFile[] {
+    let files: ts.SourceFile[] = [];
+
+    for (let i = 0, n = file.statements.length; i < n; i++) {
+        let statement = file.statements[i];
+
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
+            continue;
+        }
+
+        let symbol = checker.getSymbolAtLocation(statement.moduleSpecifier);
+
+        if (!symbol) {
+            continue;
+        }
+
+        let declarations = symbol.getDeclarations();
+
+        if (!declarations) {
+            continue;
+        }
+
+        for (let j = 0, m = declarations.length; j < m; j++) {
+            let declaration = declarations[j];
+
+            if (ts.isSourceFile(declaration)) {
+                files.push(declaration);
+            }
+        }
+    }
+
+    return files;
+}
+
+function localName(file: ts.SourceFile): string | undefined {
+    let found = imports.all(file, PACKAGE_NAME);
+
+    for (let i = 0, n = found.length; i < n; i++) {
+        let local = found[i].specifiers.get('validator');
+
+        if (local !== undefined) {
+            return local;
+        }
+    }
+
+    return undefined;
+}
+
+function parse(node: ts.CallExpression, checker: ts.TypeChecker, name: string): BrandedValidator | null {
     let expr = node.expression;
 
     if (
         !ts.isPropertyAccessExpression(expr) ||
         !ts.isIdentifier(expr.expression) ||
-        expr.expression.text !== 'validator' ||
+        expr.expression.text !== name ||
         expr.name.text !== 'set'
     ) {
         return null;
@@ -82,42 +141,68 @@ function parse(node: ts.CallExpression, checker: ts.TypeChecker): BrandedValidat
     return { async: isAsync, body, brand };
 }
 
-function visit(node: ts.Node, validators: Map<string, BrandedValidator>, checker: ts.TypeChecker): void {
+function visit(node: ts.Node, checker: ts.TypeChecker, name: string, registrations: Registrations): void {
     if (ts.isCallExpression(node)) {
-        let result = parse(node, checker);
+        let result = parse(node, checker, name);
 
         if (result) {
-            validators.set(result.brand, result);
+            registrations.validators.set(result.brand, result);
+
+            if (ts.isExpressionStatement(node.parent)) {
+                registrations.nodes.push(node.parent);
+            }
         }
     }
 
-    ts.forEachChild(node, (child) => visit(child, validators, checker));
+    ts.forEachChild(node, (child) => visit(child, checker, name, registrations));
 }
 
+// Imported files contribute brand validators only (never removable nodes - the plugin
+// only emits the current file). Cached per source file since a build site re-scans the
+// same registration file for every consuming file the host processes.
+function scanImported(file: ts.SourceFile, checker: ts.TypeChecker): Map<string, BrandedValidator> {
+    let cached = cache.get(file);
 
-const get = (path: string | null | undefined, program: ts.Program) => {
-    let file = path ? program.getSourceFile(path) : undefined;
-
-    if (!file) {
-        return new Map();
+    if (cached) {
+        return cached;
     }
 
-    if (cache.has(file)) {
-        return cache.get(file)!;
+    let name = localName(file),
+        validators = new Map<string, BrandedValidator>();
+
+    if (name !== undefined) {
+        visit(file, checker, name, { nodes: [], validators });
     }
-
-    let validators = new Map<string, BrandedValidator>();
-
-    visit(file, validators, program.getTypeChecker());
 
     cache.set(file, validators);
 
     return validators;
+}
+
+
+const collect = (sourceFile: ts.SourceFile, checker: ts.TypeChecker): Registrations => {
+    let name = localName(sourceFile),
+        registrations: Registrations = { nodes: [], validators: new Map() };
+
+    let imported = importedSourceFiles(sourceFile, checker);
+
+    for (let i = 0, n = imported.length; i < n; i++) {
+        let map = scanImported(imported[i], checker);
+
+        for (let [brand, validator] of map) {
+            registrations.validators.set(brand, validator);
+        }
+    }
+
+    // Current file registered last so a same-brand registration here overrides an import.
+    if (name !== undefined) {
+        visit(sourceFile, checker, name, registrations);
+    }
+
+    return registrations;
 };
 
-const DISALLOWED_BODY_REGEX = /\b(eval|Function)\s*\(/;
-
-// Inline validator body into generated code — input is compile-time source only.
+// Inline validator body into generated code - input is compile-time source only.
 // Trust boundary: the body originates from the user's own TypeScript AST via
 // `fn.body.getText()`. Supply-chain risk (compromised dependency injecting
 // malicious validator bodies) is mitigated by rejecting bodies that contain
@@ -140,5 +225,5 @@ const inline = (body: string, path: PathMode, varname: string): string => {
 }
 
 
-export default { get, inline };
+export default { collect, inline };
 export type { BrandedValidator };
