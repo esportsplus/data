@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: BLOCKED
 priority: P1
 source: findings C8, C13, C17, C18 (audit section C)
 depends-on: [relocate-tests-and-benches, emitted-code-escaping]
 files-own: [src/compiler/error.ts, src/compiler/validator.ts, test/compiler/custom-messages.test.ts]
 tests: [test/compiler/error.test.ts, test/compiler/custom-messages.test.ts]
+blocked-reason: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [error-path-fidelity] commits to recover
 ---
 
 # Error paths carry real indices/keys and reach element messages
@@ -49,3 +50,4 @@ Test plan: extend `test/compiler/error.test.ts` + rework `test/compiler/custom-m
 ## Notes
 
 src/compiler/validator.ts is deliberately shared surface with output-construction-safety (fresh-output emission) — the planner will weld these compiler items into one serialized unit; that is expected, not a slicing error. Path rendering must use emitted-code-escaping's emitString for every static key literal.
+FABLE_REPLAN ledger: []

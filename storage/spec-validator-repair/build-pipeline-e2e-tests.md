@@ -1,12 +1,13 @@
 ---
 type: test
 recommended-model: opus
-status: PENDING
+status: BLOCKED
 priority: P1
 source: audit section A (the three coverage mechanisms)
 depends-on: [relocate-tests-and-benches, repair-validator-config-compilation, compiler-annotation-extraction, repair-brand-registration, compiler-import-detection, analyzer-structural-types, output-construction-safety, error-path-fidelity]
 files-own: [test/compiler/e2e-build.test.ts, test/compiler/compile-validators.ts, test/utils.ts]
 tests: [test/compiler/e2e-build.test.ts]
+blocked-reason: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [build-pipeline-e2e-tests] commits to recover
 ---
 
 # End-to-end coverage through validator.build
@@ -48,3 +49,4 @@ Test plan: the suite itself is the deliverable; its own gate is that deliberatel
 ## Notes
 
 test/compiler/compile-validators.ts is a helper (non-.test name), so its deletion removes zero discovered test cases — no removes-tests declaration is owed. test/utils.ts is files-own for the additive helper extension only; 15 suites consume it (ownership map), so extensions must be purely additive. If a row exposes a NEW pipeline defect, file it as a follow-up rather than patching sources under this test-only item (files-own carries no src/ surface by design).
+FABLE_REPLAN ledger: []

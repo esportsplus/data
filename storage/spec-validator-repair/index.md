@@ -43,6 +43,7 @@
 - **Total features**: 25
 - **Model mix**: opus 20 · sonnet 5
 - **Path convention**: every `tests` entry uses POST-relocation paths; each is created either by `relocate-tests-and-benches` (which lands first and declares them `files-own`) or by the item that lists it.
+- **Spec UUID**: 38a9a1b8-7f20-4f9b-a88a-7a0ddf7373f1
 
 ## Baseline
 - **Commit**: HEAD at authoring, clean tree (sha unrecorded — the synthesizer seat runs without CLIs; the engine captures the sha at first plan)
@@ -72,13 +73,13 @@
 - repair-brand-registration
 - compiler-import-detection
 - emitted-code-escaping
-- output-construction-safety
-- error-path-fidelity
+- output-construction-safety — BLOCKED: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [output-construction-safety] commits to recover
+- error-path-fidelity — BLOCKED: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [error-path-fidelity] commits to recover
 - analyzer-structural-types
 - analyzer-schema-gaps
 - format-validators-p0
 - format-validators-correctness
-- numeric-constraint-validators
+- numeric-constraint-validators — BLOCKED: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [numeric-constraint-validators] commits to recover
 - sbc-compile-time-parity
 - sbc-schema-preregistration
 - sbc-encode-safety
@@ -90,8 +91,39 @@
 - compiler-annotation-extraction
 - plugin-self-assertion
 - runtime-tojsonschema
-- build-pipeline-e2e-tests
+- build-pipeline-e2e-tests — BLOCKED: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [build-pipeline-e2e-tests] commits to recover
 - readme-accuracy
 
 ## Feed
 run,scope,unit,ordinal,slug,event,state,detail,elapsed_ms,ts
+aa871fa6,item,u1,1.1,relocate-tests-and-benches,blocked,BLOCKED,,,2026-07-25T10:10:48-07:00
+aa871fa6,item,u1,1.2,repair-validator-config-compilation,blocked,BLOCKED,,,2026-07-25T10:10:48-07:00
+aa871fa6,item,u1,1.3,output-construction-safety,blocked,BLOCKED,,,2026-07-25T10:10:48-07:00
+aa871fa6,item,u1,1.4,analyzer-structural-types,blocked,BLOCKED,,,2026-07-25T10:10:48-07:00
+aa871fa6,item,u1,1.5,analyzer-schema-gaps,blocked,BLOCKED,,,2026-07-25T10:10:48-07:00
+aa871fa6,item,u1,1.6,format-validators-correctness,blocked,BLOCKED,,,2026-07-25T10:10:49-07:00
+aa871fa6,item,u1,1.7,numeric-constraint-validators,blocked,BLOCKED,,,2026-07-25T10:10:49-07:00
+aa871fa6,item,u1,1.8,annotated-validator-types,blocked,BLOCKED,,,2026-07-25T10:10:49-07:00
+aa871fa6,item,u1,1.9,compiler-annotation-extraction,blocked,BLOCKED,,,2026-07-25T10:10:49-07:00
+aa871fa6,item,u1,1.10,runtime-tojsonschema,blocked,BLOCKED,,,2026-07-25T10:10:49-07:00
+aa871fa6,item,u1,1.11,compiler-import-detection,blocked,BLOCKED,,,2026-07-25T10:10:49-07:00
+aa871fa6,item,u1,1.14,repair-brand-registration,blocked,BLOCKED,,,2026-07-25T10:10:49-07:00
+aa871fa6,item,u1,1.15,error-path-fidelity,blocked,BLOCKED,,,2026-07-25T10:10:49-07:00
+aa871fa6,item,u1,1.16,plugin-self-assertion,blocked,BLOCKED,,,2026-07-25T10:10:49-07:00
+aa871fa6,item,u1,1.17,build-pipeline-e2e-tests,blocked,BLOCKED,,,2026-07-25T10:10:49-07:00
+aa871fa6,item,u1,1.12,emitted-code-escaping,blocked,BLOCKED,,,2026-07-25T10:10:49-07:00
+aa871fa6,item,u1,1.13,format-validators-p0,blocked,BLOCKED,,,2026-07-25T10:10:49-07:00
+aa871fa6,run,,,,run-end,RUN END,"applied: 0 completed, 17 rejected, 34 status-actions, 3 changelog-rows",,2026-07-25T10:10:50-07:00
+,item,mutator,,relocate-tests-and-benches,requeued,REQUEUED,,,2026-07-25T16:07:03-07:00
+,item,mutator,,repair-validator-config-compilation,requeued,REQUEUED,,,2026-07-25T16:07:03-07:00
+,item,mutator,,repair-brand-registration,requeued,REQUEUED,,,2026-07-25T16:07:04-07:00
+,item,mutator,,compiler-import-detection,requeued,REQUEUED,,,2026-07-25T16:07:04-07:00
+,item,mutator,,emitted-code-escaping,requeued,REQUEUED,,,2026-07-25T16:07:04-07:00
+,item,mutator,,analyzer-structural-types,requeued,REQUEUED,,,2026-07-25T16:07:04-07:00
+,item,mutator,,analyzer-schema-gaps,requeued,REQUEUED,,,2026-07-25T16:07:04-07:00
+,item,mutator,,format-validators-p0,requeued,REQUEUED,,,2026-07-25T16:07:05-07:00
+,item,mutator,,format-validators-correctness,requeued,REQUEUED,,,2026-07-25T16:07:05-07:00
+,item,mutator,,annotated-validator-types,requeued,REQUEUED,,,2026-07-25T16:07:05-07:00
+,item,mutator,,compiler-annotation-extraction,requeued,REQUEUED,,,2026-07-25T16:07:06-07:00
+,item,mutator,,plugin-self-assertion,requeued,REQUEUED,,,2026-07-25T16:07:06-07:00
+,item,mutator,,runtime-tojsonschema,requeued,REQUEUED,,,2026-07-25T16:07:06-07:00

@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: BLOCKED
 priority: P1
 source: findings C5, C6, C7, C15, C16 + the validator.ts:559 nullable gate (audit sections C, E)
 depends-on: relocate-tests-and-benches
 files-own: [src/compiler/validator.ts, test/compiler/validator.test.ts]
 tests: [test/compiler/validator.test.ts]
+blocked-reason: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [output-construction-safety] commits to recover
 ---
 
 # Emitted validators build output instead of mutating input
@@ -52,3 +53,4 @@ Test plan (new `test/compiler/validator.test.ts` — the mirror suite src/compil
 ## Notes
 
 Coercion divergence flag (must be surfaced, per evidence J): even after tightening, this package coerces `'30'`→30 while zod 4.4.3 coerces NOTHING by default — the ai-orchestrator follow-up spec must decide whether plan-node inputs may rely on coercion. Out of scope here; recorded in the index's Out of Scope section.
+FABLE_REPLAN ledger: []

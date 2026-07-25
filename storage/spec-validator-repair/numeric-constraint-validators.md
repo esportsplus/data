@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: BLOCKED
 priority: P1
 source: audit section E (numeric/constraint block)
 depends-on: relocate-tests-and-benches
 files-own: [src/validators/min.ts, src/validators/max.ts, src/validators/range.ts, src/validators/multiple-of.ts, src/validators/length.ts, src/validators/integer.ts, src/validators/positive.ts, src/validators/negative.ts, src/validators/non-negative.ts, src/validators/non-positive.ts, src/validators/finite.ts, src/validators/safe-integer.ts, src/validators/bytes.ts, src/validators/graphemes.ts, src/validators/date-constraint.ts, test/validators/number-date.test.ts, test/validators/constraints.test.ts, test/validators/advanced.test.ts]
 tests: [test/validators/number-date.test.ts, test/validators/constraints.test.ts, test/validators/advanced.test.ts]
+blocked-reason: test-join conflict — Engine: test-JOIN conflict is not a resolvable same-path add/add — merge failed with no conflicted paths; salvage ref salvage/aa871fa6-u1 @ 06c4a76d19ecc4434f6987c56b633cf165c41a1b — the unit branch tip survives as this tag; cherry-pick the item's [numeric-constraint-validators] commits to recover
 ---
 
 # Numeric/constraint validators: never throw, handle NaN and bigint coherently
@@ -54,3 +55,4 @@ Test plan across the three moved suites (spec vectors, not implementation echoes
 ## Notes
 
 The compiler-side reason `null` ever reaches these validators (validator.ts:559 nullable gate) is output-construction-safety's scope; convention 2 here is defense in depth, not the fix for that finding.
+FABLE_REPLAN ledger: []
