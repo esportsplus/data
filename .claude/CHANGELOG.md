@@ -1,6 +1,7 @@
 # Changelog
 
 ## Completed
+- follow-up discharged (completed) from spec-validator-repair-residuals: sbc: injectable CodecOptions.cache for per-tenant isolation (two codecs with dif… — evidence: 3a04be6
 - [infer-nullable-not-mixed] 7990c42. Deviations: salvaged session-side from salvage/8f60bc49-u1 — the item's own gates were green and the unit salvage refused only because the narrowed cherry-pick targeted a commit an excluded sibling owned; merging the ref was conflict-free and the full suite went 45 files / 1928 passed with tsc clean; ladder: merge-infeasible, salvaged. · spec: spec-validator-repair-residuals
 - abandoned spend: ~$77.99 equivalent API cost across 1 terminal non-COMPLETED item(s) (infer-nullable-not-mixed); recorded, not divided into per-item costs (run 8f60bc49)
 - run-level spend: ~$3.26 equivalent API cost (warm implementer runs + unit-scoped + boundary seats; never divided across items; blended rate = mean(input, output, cache_read, cache_creation) per million tokens) (run 8f60bc49)
