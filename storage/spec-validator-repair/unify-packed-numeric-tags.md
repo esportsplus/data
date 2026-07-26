@@ -1,12 +1,13 @@
 ---
 type: refactor
 recommended-model: opus
-status: PENDING
+status: RUN_THROUGH_SPEC_CREATE
 priority: P2
 depends-on: [remove-map-set-tags]
 files-own: [src/sbc/tagged.ts, src/sbc/codegen.ts, src/sbc/size.ts, test/sbc/index.test.ts, test/sbc/codegen.test.ts]
 files-shared: [src/sbc/platform.ts]
 tests: [test/sbc/index.test.ts, test/sbc/codegen.test.ts]
+blocked-reason: salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [unify-packed-numeric-tags] commits to recover
 ---
 
 # Unify packed numeric arrays onto one typeId-carrying tag

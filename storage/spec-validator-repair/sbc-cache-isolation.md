@@ -1,13 +1,14 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: BLOCKED
 priority: P2
 source: findings D7, D8 (audit section D)
 depends-on: [relocate-tests-and-benches, sbc-schema-preregistration]
 files-own: [src/sbc/cache.ts, src/sbc/schema.ts, test/sbc/cache.test.ts, test/sbc/schema-store.test.ts]
 files-shared: [src/sbc/index.ts]
 tests: [test/sbc/cache.test.ts, test/sbc/schema-store.test.ts]
+blocked-reason: test evidence destroyed — sbc-cache-isolation net-removes test cases from its declared test(s) [test/sbc/schema-store.test.ts]; a fixer must re-scope the bound or BLOCK, never discharge by deletion; salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [sbc-cache-isolation] commits to recover
 ---
 
 # Per-codec schema cache; store tests that actually exercise the store
@@ -65,3 +66,4 @@ Test plan — rewrite `test/sbc/schema-store.test.ts`. Every case calls `cache.c
 src/sbc/index.ts carries only the mechanical construction-site hook (instantiate the cache in codec() and pass it down) — declared files-shared per the hub grammar; all substantive cache logic stays in files-own. The decode-interleave suite's `lastDecodeFn` invariant (verified at baseline) must stay green — it lives at test/sbc/decode-interleave.test.ts and runs at merge boundaries.
 2026-07-25 — SUPERSESSION (user review of Q3/Q4). D8's premise is REJECTED: the module-scope cache is not a leak, it is a correct content-addressed memo, because `computeShapeHash` makes hash H determine the shape. Per-codec isolation would force N codecs to re-fetch and re-`defineSchema` the identical shape and would split one 1024-entry budget N ways — a regression bought for design purity. The Rationale and title above are frozen by the mutator contract and read as authored; the Design section is authoritative where they disagree, and the surviving work is D7 (vacuous store tests) plus the unguarded `set` overwrite. Follow-up recorded, not built: an injectable `CodecOptions.cache` for codecs holding different PersistentStores.
 DEFERRED 2026-07-26T08:28:15.391Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none
+FABLE_REPLAN ledger: []

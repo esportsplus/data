@@ -1,10 +1,11 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: RUN_THROUGH_SPEC_CREATE
 priority: P0
 files-own: [src/sbc/index.ts, src/sbc/tagged.ts, src/sbc/codegen.ts, test/sbc/index.test.ts]
 tests: [test/sbc/index.test.ts]
+blocked-reason: salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [encode-growth-signal] commits to recover
 ---
 
 # Stop reading buffer overflow out of RangeError; bound the retry loop

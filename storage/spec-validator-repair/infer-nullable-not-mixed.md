@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: RUN_THROUGH_SPEC_CREATE
 priority: P1
 depends-on: [relocate-tests-and-benches]
 files-own: [src/sbc/schema.ts, src/sbc/types.ts, test/sbc/schema.test.ts]
 files-shared: [src/sbc/index.ts, src/sbc/codegen.ts]
 tests: [test/sbc/schema.test.ts, test/sbc/index.test.ts]
+blocked-reason: salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [infer-nullable-not-mixed] commits to recover
 ---
 
 # Nullable fields defer their base type instead of collapsing to mixed

@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: REVERTED
 priority: P1
 depends-on: [remove-map-set-tags, unify-packed-numeric-tags]
 files-own: [src/sbc/types.ts, src/sbc/tagged.ts, test/sbc/types.test.ts]
 files-shared: [src/sbc/index.ts]
 tests: [test/sbc/types.test.ts, test/sbc/index.test.ts]
+blocked-reason: merge suite_red: reverted — salvage red — no parseable failing test — tail: eived: undefined ❯ test/sbc/types.test.ts:123:55 121| let c = codec(); 122| 123| expect(() => c.decode(Uint8Array.from([15]))).toThrow('Codec2:… | ^ 124| expect(() => c.decode(Uint8Array.from([16]))).toThrow('Codec2:… 125| }); ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯ Test Files 1 failed | 39 passed (40) Tests 3 failed | 1817 passed | 1 expected fail (1821) Start at 05:17:44 Duration 7.09s (transform 8.16s, setup 0ms, import 39.43s, tests 59.24s, environment 3ms) ELIFECYCLE Command failed with exit code 1.; salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [encodable-type-constraint] commits to recover
 ---
 
 # Encodable constraint on encode; named throw for unrepresentable values

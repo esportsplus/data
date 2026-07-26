@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: REVERTED
 priority: P0
 source: findings D2, D4 (audit section D)
 depends-on: relocate-tests-and-benches
 files-own: [src/sbc/index.ts, test/sbc/index.test.ts]
 tests: [test/sbc/index.test.ts]
+blocked-reason: merge suite_red: reverted — salvage red — no parseable failing test — tail: schema hash 12345 ❯ resolveSchemaForEncode src/sbc/index.ts:753:23 751| 752| if (!s) { 753| throw new Error('Codec2: unknown schema hash ' + hint); | ^ 754| } 755| ❯ Object.encode src/sbc/index.ts:547:30 ❯ test/compiler/sbc/index.test.ts:206:25 ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯ Test Files 1 failed | 34 passed (35) Tests 1 failed | 1797 passed (1798) Start at 05:17:01 Duration 6.88s (transform 7.81s, setup 0ms, import 37.41s, tests 53.90s, environment 3ms) ELIFECYCLE Command failed with exit code 1.; salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [sbc-schema-preregistration] commits to recover
 ---
 
 # defineSchema pre-registration is honored; unknown hints throw

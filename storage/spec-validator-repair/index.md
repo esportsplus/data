@@ -89,22 +89,22 @@
 - format-validators-p0
 - format-validators-correctness
 - numeric-constraint-validators
-- encode-growth-signal
+- encode-growth-signal — RUN_THROUGH_SPEC_CREATE: salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [encode-growth-signal] commits to recover
 - sbc-key-enumeration-parity
 - residue-codec-false-positive
 - decoder-count-limits
 - registry-hash-validation
 - codegen-uint16-hoist
-- remove-map-set-tags
-- unify-packed-numeric-tags
-- encodable-type-constraint
-- infer-nullable-not-mixed
-- bigint-int64-parity
-- sbc-compile-time-parity
-- sbc-schema-preregistration
-- sbc-encode-safety
-- sbc-cache-isolation
-- sbc-compute-size
+- remove-map-set-tags — BLOCKED: test evidence destroyed — remove-map-set-tags net-removes test cases from its declared test(s) [test/sbc/index.test.ts]; a fixer must re-scope the bound or BLOCK, never discharge by deletion; salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [remove-map-set-tags] commits to recover
+- unify-packed-numeric-tags — RUN_THROUGH_SPEC_CREATE: salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [unify-packed-numeric-tags] commits to recover
+- encodable-type-constraint — REVERTED: merge suite_red: reverted — salvage red — no parseable failing test — tail: eived: undefined ❯ test/sbc/types.test.ts:123:55 121| let c = codec(); 122| 123| expect(() => c.decode(Uint8Array.from([15]))).toThrow('Codec2:… | ^ 124| expect(() => c.decode(Uint8Array.from([16]))).toThrow('Codec2:… 125| }); ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯ Test Files 1 failed | 39 passed (40) Tests 3 failed | 1817 passed | 1 expected fail (1821) Start at 05:17:44 Duration 7.09s (transform 8.16s, setup 0ms, import 39.43s, tests 59.24s, environment 3ms) ELIFECYCLE Command failed with exit code 1.; salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [encodable-type-constraint] commits to recover
+- infer-nullable-not-mixed — RUN_THROUGH_SPEC_CREATE: salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [infer-nullable-not-mixed] commits to recover
+- bigint-int64-parity — RUN_THROUGH_SPEC_CREATE: salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [bigint-int64-parity] commits to recover
+- sbc-compile-time-parity — REVERTED: merge suite_red: reverted — salvage red — no parseable failing test — tail: ted [Function] to throw an error - Expected: null + Received: undefined ❯ test/compiler/sbc/index.test.ts:282:69 280| let c = codec(); 281| 282| expect(() => c.encode({ name: 'test' }, { schema: 12345 })).to… | ^ 283| }); 284| ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯ Test Files 1 failed | 34 passed (35) Tests 1 failed | 1800 passed | 1 expected fail (1802) Start at 05:16:45 Duration 6.48s (transform 7.47s, setup 0ms, import 34.44s, tests 49.99s, environment 3ms) ELIFECYCLE Command failed with exit code 1.; salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [sbc-compile-time-parity] commits to recover
+- sbc-schema-preregistration — REVERTED: merge suite_red: reverted — salvage red — no parseable failing test — tail: schema hash 12345 ❯ resolveSchemaForEncode src/sbc/index.ts:753:23 751| 752| if (!s) { 753| throw new Error('Codec2: unknown schema hash ' + hint); | ^ 754| } 755| ❯ Object.encode src/sbc/index.ts:547:30 ❯ test/compiler/sbc/index.test.ts:206:25 ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯ Test Files 1 failed | 34 passed (35) Tests 1 failed | 1797 passed (1798) Start at 05:17:01 Duration 6.88s (transform 7.81s, setup 0ms, import 37.41s, tests 53.90s, environment 3ms) ELIFECYCLE Command failed with exit code 1.; salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [sbc-schema-preregistration] commits to recover
+- sbc-encode-safety — RUN_THROUGH_SPEC_CREATE: salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [sbc-encode-safety] commits to recover
+- sbc-cache-isolation — BLOCKED: test evidence destroyed — sbc-cache-isolation net-removes test cases from its declared test(s) [test/sbc/schema-store.test.ts]; a fixer must re-scope the bound or BLOCK, never discharge by deletion; salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [sbc-cache-isolation] commits to recover
+- sbc-compute-size — RUN_THROUGH_SPEC_CREATE: salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [sbc-compute-size] commits to recover
 - remove-typed-array-codec
 - sbc-browser-platform-tests
 - annotated-validator-types
@@ -112,7 +112,7 @@
 - plugin-self-assertion
 - runtime-tojsonschema
 - build-pipeline-e2e-tests
-- readme-accuracy
+- readme-accuracy — BLOCKED: FABLE_REPLAN budget exhausted (1/1) — hard band (severity high, multi-file, or root cause unknown) — critic evidence: FAIL (high) — Gate evidence copied verbatim: scoped:readme-accuracy RED (979ms). tests_run=true (the gate executed), tests_failed set to 1 as the RED status confirms at least one failure — the injected evidence gives only a pass/fail status plus elapsedMs, no numeric count. The item's Acceptance and ## Checks both require `npx tsc -p tsconfig.build.json --noEmit` clean; the injected RED result directly contradicts that clause regardless of the docs-only diff content, so the acceptance is unmet and the verdict cannot be PASS or CONCERNS. root_cause_known=false because this unit's diff touches only README.md and two storage/*.md files — a build-wide tsc failure implicates code outside this unit's files-own surface, which is outside what the injected evidence or diff can explain from this re…; salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [readme-accuracy] commits to recover
 
 ## Feed
 run,scope,unit,ordinal,slug,event,state,detail,elapsed_ms,ts
@@ -196,3 +196,22 @@ f177cf28,run,,,,run-end,RUN END,"applied: 3 completed, 4 rejected, 4 status-acti
 ,item,mutator,,validator-recursive-types,requeued,REQUEUED,,,2026-07-26T01:36:53-07:00
 ,item,mutator,,validator-proto-property-reads,requeued,REQUEUED,,,2026-07-26T01:36:53-07:00
 ,item,mutator,,validator-boolean-coercion,requeued,REQUEUED,,,2026-07-26T01:36:53-07:00
+5776b305,item,u1,1.2,encode-growth-signal,deferred,DEFERRED,,,2026-07-26T05:18:09-07:00
+5776b305,item,u1,1.7,unify-packed-numeric-tags,deferred,DEFERRED,,,2026-07-26T05:18:09-07:00
+5776b305,item,u1,1.9,infer-nullable-not-mixed,deferred,DEFERRED,,,2026-07-26T05:18:09-07:00
+5776b305,item,u1,1.10,bigint-int64-parity,deferred,DEFERRED,,,2026-07-26T05:18:09-07:00
+5776b305,item,u1,1.15,sbc-compute-size,deferred,DEFERRED,,,2026-07-26T05:18:09-07:00
+5776b305,item,u1,1.3,sbc-key-enumeration-parity,complete,COMPLETE,,,2026-07-26T05:18:09-07:00
+5776b305,item,u1,1.6,remove-map-set-tags,blocked,BLOCKED,,,2026-07-26T05:18:09-07:00
+5776b305,item,u1,1.11,sbc-compile-time-parity,reverted,REVERTED,,,2026-07-26T05:18:09-07:00
+5776b305,item,u1,1.12,sbc-schema-preregistration,reverted,REVERTED,,,2026-07-26T05:18:09-07:00
+5776b305,item,u1,1.1,validator-body-ast-rewrite,complete,COMPLETE,,,2026-07-26T05:18:09-07:00
+5776b305,item,u1,1.4,decoder-count-limits,complete,COMPLETE,,,2026-07-26T05:18:09-07:00
+5776b305,item,u1,1.5,registry-hash-validation,complete,COMPLETE,,,2026-07-26T05:18:09-07:00
+5776b305,item,u1,1.8,encodable-type-constraint,reverted,REVERTED,,,2026-07-26T05:18:10-07:00
+5776b305,item,u1,1.13,sbc-encode-safety,deferred,DEFERRED,,,2026-07-26T05:18:10-07:00
+5776b305,item,u1,1.14,sbc-cache-isolation,blocked,BLOCKED,,,2026-07-26T05:18:10-07:00
+5776b305,item,u1,1.16,sbc-browser-platform-tests,complete,COMPLETE,,,2026-07-26T05:18:10-07:00
+5776b305,item,u1,1.17,codegen-uint16-hoist,complete,COMPLETE,,,2026-07-26T05:18:10-07:00
+5776b305,item,u1,1.18,readme-accuracy,blocked,BLOCKED,,,2026-07-26T05:18:10-07:00
+5776b305,run,,,,run-end,RUN END,"applied: 6 completed, 12 rejected, 15 status-actions, 9 changelog-rows",,2026-07-26T05:18:10-07:00

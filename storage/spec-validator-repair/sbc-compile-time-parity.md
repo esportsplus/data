@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: REVERTED
 priority: P0
 source: findings D1, D5 (audit section D)
 depends-on: [relocate-tests-and-benches, analyzer-structural-types, remove-map-set-tags, unify-packed-numeric-tags]
 files-own: [src/compiler/sbc/index.ts, test/compiler/sbc/index.test.ts]
 tests: [test/compiler/sbc/index.test.ts]
+blocked-reason: merge suite_red: reverted — salvage red — no parseable failing test — tail: ted [Function] to throw an error - Expected: null + Received: undefined ❯ test/compiler/sbc/index.test.ts:282:69 280| let c = codec(); 281| 282| expect(() => c.encode({ name: 'test' }, { schema: 12345 })).to… | ^ 283| }); 284| ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯ Test Files 1 failed | 34 passed (35) Tests 1 failed | 1800 passed | 1 expected fail (1802) Start at 05:16:45 Duration 6.48s (transform 7.47s, setup 0ms, import 34.44s, tests 49.99s, environment 3ms) ELIFECYCLE Command failed with exit code 1.; salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [sbc-compile-time-parity] commits to recover
 ---
 
 # Compile-time SBC hints match runtime behavior byte-for-byte

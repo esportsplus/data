@@ -1,11 +1,12 @@
 ---
 type: docs
 recommended-model: sonnet
-status: PENDING
+status: BLOCKED
 priority: P2
 source: findings C22, D10 + doc consequences of D2, D5, D6, D9, D13, C15, E-P2 (audit sections C, D, E)
 depends-on: [compiler-annotation-extraction, output-construction-safety, plugin-self-assertion, runtime-tojsonschema, sbc-compute-size, sbc-encode-safety, sbc-schema-preregistration, repair-brand-registration, sbc-compile-time-parity, format-validators-correctness]
 files-own: [README.md]
+blocked-reason: FABLE_REPLAN budget exhausted (1/1) — hard band (severity high, multi-file, or root cause unknown) — critic evidence: FAIL (high) — Gate evidence copied verbatim: scoped:readme-accuracy RED (979ms). tests_run=true (the gate executed), tests_failed set to 1 as the RED status confirms at least one failure — the injected evidence gives only a pass/fail status plus elapsedMs, no numeric count. The item's Acceptance and ## Checks both require `npx tsc -p tsconfig.build.json --noEmit` clean; the injected RED result directly contradicts that clause regardless of the docs-only diff content, so the acceptance is unmet and the verdict cannot be PASS or CONCERNS. root_cause_known=false because this unit's diff touches only README.md and two storage/*.md files — a build-wide tsc failure implicates code outside this unit's files-own surface, which is outside what the injected evidence or diff can explain from this re…; salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [readme-accuracy] commits to recover
 ---
 
 # README tells the truth about the shipped surface
@@ -59,3 +60,4 @@ Every code block that claims to be compiler OUTPUT must be generated from the re
 
 The README-content clauses admit no quote-free literal gate predicate (gate commands reject quoted arguments), so correction 3 is critic/review evidence rather than a `## Checks` line. Lands LAST (document order) — it documents every predecessor's final behavior. If any predecessor's discretion point resolved differently than assumed here (e.g. residue check as bin script), document the LANDED shape, not this list's phrasing.
 DEFERRED 2026-07-26T08:28:15.511Z run=f177cf28 class=dependency reason="dependency sbc-compute-size did not land — deferred" salvage=none
+FABLE_REPLAN ledger: [{'role':'critic','verdict':'FAIL'},{'role':'replanner','status':'completed'},{'role':'implementer','status':'COMPLETED'},{'role':'critic','verdict':'FAIL'}]

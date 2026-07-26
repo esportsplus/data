@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: RUN_THROUGH_SPEC_CREATE
 priority: P1
 source: findings D3, D9, D12, D13, D14 (audit section D)
 depends-on: [relocate-tests-and-benches, sbc-schema-preregistration]
 files-own: [src/sbc/index.ts, src/sbc/tagged.ts, src/sbc/codegen.ts, test/sbc/encode-safety.test.ts]
 tests: [test/sbc/encode-safety.test.ts]
+blocked-reason: salvage ref salvage/5776b305-u1 @ b080c13005ca81adf40c4a9ec7cf7669978fe189 — the unit branch tip survives as this tag; cherry-pick the item's [sbc-encode-safety] commits to recover
 ---
 
 # Encode/decode fail loud: bigint ranges, hinted mismatches, non-encodables
