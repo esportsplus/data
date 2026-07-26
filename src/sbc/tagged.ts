@@ -2,11 +2,18 @@
 // Extracted from codec() closure; state threaded via DecodeContext / EncodeContext
 
 import { MAX_ARRAY_COUNT } from './constants';
-import { byteLen, isNode, readBI64, readF64, readStr, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
+import { byteLen, readBI64, readF64, readStr, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 import { inferAndRegister } from './schema';
 
 import type { PersistentStore, SchemaRegistry } from './types';
 import type { Schema, SbcHelpers } from './codegen';
+
+
+// int64 bounds — writeBigInt64LE throws RangeError above these on Node and silently
+// wraps modulo 2^64 in the browser (DataView.setBigInt64), so guard every int64 write.
+const INT64_MIN = -(2n ** 63n);
+
+const INT64_OVERFLOW = 2n ** 63n;
 
 
 type DecodeContext = {
@@ -38,7 +45,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
     }
 
     if (len === 0) {
-        return undefined;
+        throw new Error('Codec2: empty buffer');
     }
 
     let tag = buf[offset]!;
@@ -69,10 +76,8 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
                 throw new Error('Codec2: truncated bytes at offset ' + offset);
             }
 
-            if (isNode) {
-                return Buffer.from(buf.subarray(offset + 5, offset + 5 + bLen));
-            }
-
+            // Always a plain Uint8Array COPY (README contract): constructor === Uint8Array,
+            // no pooled Buffer aliasing into the source buffer, structuredClone-safe.
             return new Uint8Array(buf.subarray(offset + 5, offset + 5 + bLen));
         }
 
@@ -392,6 +397,10 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
 
     switch (typeof value) {
         case 'bigint':
+            if (value < INT64_MIN || value >= INT64_OVERFLOW) {
+                throw new Error('Codec2: bigint out of int64 range');
+            }
+
             buf[pos] = 9;
             writeBI64.call(buf, value, pos + 1);
             return pos + 9;
