@@ -128,7 +128,7 @@ function generateArrayValidation(
                     prop.itemType || { name: 'item', optional: false, type: 'unknown' },
                     `${source}[${i}]`,
                     `${a}[${i}]`,
-                    { segments: [...pathMode.segments, { expr: i, kind: 'index' }] },
+                    { segments: [...pathMode.segments, { expr: i, kind: 'index', position: '0' }] },
                     context
                 )}
 
@@ -511,7 +511,7 @@ function generateSetValidation(
                     prop.valueType || { name: 'value', optional: false, type: 'unknown' },
                     value,
                     valueOut,
-                    { segments: [...pathMode.segments, { expr: i, kind: 'index' }] },
+                    { segments: [...pathMode.segments, { expr: i, kind: 'index', position: '0' }] },
                     context
                 )}
 
@@ -587,7 +587,7 @@ function generateTupleValidation(
             tupleTypes[i],
             `${source}[${i}]`,
             `${a}[${i}]`,
-            { segments: [...path, { expr: String(i), kind: 'index' }] },
+            { segments: [...path, { expr: String(i), kind: 'index', position: String(i) }] },
             context
         );
 
@@ -612,7 +612,7 @@ function generateTupleValidation(
                     restType,
                     `${source}[${i}]`,
                     `${a}[${i}]`,
-                    { segments: [...path, { expr: i, kind: 'index' }] },
+                    { segments: [...path, { expr: i, kind: 'index', position: String(tupleTypes.length) }] },
                     context
                 )}
 

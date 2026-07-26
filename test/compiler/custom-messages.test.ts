@@ -120,3 +120,32 @@ describe('Custom Error Messages', () => {
         });
     });
 });
+
+describe('Custom messages by schema position', () => {
+    const errors = (source: string, input: unknown): Array<{ message: string; path: string }> => {
+        let built = createValidator(source) as unknown as { validate?: (i: unknown) => unknown },
+            validate = (typeof built === 'function' ? built : built.validate) as (i: unknown) => { errors?: Array<{ message: string; path: string }> };
+
+        return validate(input).errors ?? [];
+    };
+
+    it('reaches an array element via the ErrorMessages<U>[] first entry', () => {
+        expect(errors("type U = { tags: string[] };\nexport const x = validator.build<U, { tags: ['elem message'] }>();", { tags: [5] }))
+            .toEqual([{ message: 'elem message', path: 'tags[0]' }]);
+    });
+
+    it('reaches a later array element with the same first-entry message', () => {
+        expect(errors("type U = { tags: string[] };\nexport const x = validator.build<U, { tags: ['elem message'] }>();", { tags: ['a', 5] }))
+            .toEqual([{ message: 'elem message', path: 'tags[1]' }]);
+    });
+
+    it('resolves tuple messages positionally', () => {
+        expect(errors("type U = { coords: [number, number] };\nexport const x = validator.build<U, { coords: ['x bad', 'y bad'] }>();", { coords: [1, 'z'] }))
+            .toEqual([{ message: 'y bad', path: 'coords[1]' }]);
+    });
+
+    it('leaves a record value on its default message (an index signature has no positional key)', () => {
+        expect(errors('type U = { scores: Record<string, number> };\nexport const x = validator.build<U>();', { scores: { a: 'x' } }))
+            .toEqual([{ message: 'must be a number', path: 'scores.a' }]);
+    });
+});

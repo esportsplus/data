@@ -22,7 +22,7 @@ describe('Error: generate', () => {
     });
 
     it('generates error push code with dynamic path', () => {
-        let result = error.generate('invalid item', { segments: [{ kind: 'key', name: 'items' }, { expr: '_i', kind: 'index' }] });
+        let result = error.generate('invalid item', { segments: [{ kind: 'key', name: 'items' }, { expr: '_i', kind: 'index', position: '0' }] });
 
         expect(result).toContain('(_errors ??= []).push({');
         expect(result).toContain('message: "invalid item"');
@@ -58,18 +58,36 @@ describe('Error: generate', () => {
         expect(result).toContain('message: "must be a string"');
     });
 
-    it('uses empty string key for non-static path mode custom message lookup', () => {
+    it('resolves an array element message by schema position, not by a runtime key', () => {
+        // The element index is a runtime loop variable, so the message is looked up by the
+        // element's COMPILE-TIME position (`items.0`) — the ErrorMessages<U>[] first entry.
         let customMessages = new Map<string, string>();
 
-        customMessages.set('', 'Global message');
+        customMessages.set('items.0', 'Element message');
 
-        let result = error.generate('must be valid', { segments: [{ kind: 'key', name: 'items' }, { expr: '_i', kind: 'index' }] }, {
+        let result = error.generate('must be valid', { segments: [{ kind: 'key', name: 'items' }, { expr: '_i', kind: 'index', position: '0' }] }, {
             brandValidators: new Map(),
             customMessages,
             hasAsync: false
         });
 
-        expect(result).toContain('message: "Global message"');
+        expect(result).toContain('message: "Element message"');
+    });
+
+    it('leaves a record value on its default message', () => {
+        // An index signature contributes no properties for the flattener to walk, so a record
+        // value has no positional key and keeps the generated default.
+        let customMessages = new Map<string, string>();
+
+        customMessages.set('', 'Global message');
+
+        let result = error.generate('must be valid', { segments: [{ kind: 'key', name: 'scores' }, { expr: '_k', kind: 'record' }] }, {
+            brandValidators: new Map(),
+            customMessages,
+            hasAsync: false
+        });
+
+        expect(result).toContain('message: "must be valid"');
     });
 
     it('escapes a message containing quotes and a newline via JSON.stringify', () => {

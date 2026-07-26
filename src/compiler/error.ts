@@ -71,7 +71,11 @@ const emitString = (value: string): string => JSON.stringify(value);
 
 const generate = (message: string, pathMode: PathMode, context?: GeneratorContext): string => {
     if (context) {
-        message = context.customMessages.get(messageKey(pathMode)) || message;
+        let key = messageKey(pathMode);
+
+        if (key !== undefined) {
+            message = context.customMessages.get(key) || message;
+        }
     }
 
     return code`
@@ -82,20 +86,24 @@ const generate = (message: string, pathMode: PathMode, context?: GeneratorContex
     `;
 };
 
-// The lookup key for a user-supplied message: the dot-joined STATIC property names. A path
-// carrying any runtime segment has no compile-time key, so it never matches an entry.
-const messageKey = (mode: PathMode): string => {
+// The lookup key for a user-supplied message, resolved by SCHEMA POSITION at codegen rather
+// than by the runtime path. A property contributes its name and an array/tuple element its
+// compile-time `position`, matching the keys `extractMessages` flattens the ErrorMessages tree
+// into (`tags.0`, `coords.1`, `user.name`). A RECORD value contributes no key: an index
+// signature has no properties for the flattener to walk, so a record carries container-level
+// messages only.
+const messageKey = (mode: PathMode): string | undefined => {
     let parts: string[] = [],
         segments = mode.segments;
 
     for (let i = 0, n = segments.length; i < n; i++) {
         let segment = segments[i];
 
-        if (segment.kind !== 'key') {
-            return '';
+        if (segment.kind === 'record') {
+            return undefined;
         }
 
-        parts.push(segment.name);
+        parts.push(segment.kind === 'index' ? segment.position : segment.name);
     }
 
     return parts.join('.');
