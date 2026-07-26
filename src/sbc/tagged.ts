@@ -228,52 +228,6 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
             return arr;
         }
 
-        case 15: {
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: map count ' + count + ' exceeds limit');
-            }
-
-            let map = new Map(),
-                p = offset + 5;
-
-            for (let i = 0; i < count; i++) {
-                let kEnd = decodeTagEnd(buf, p, depth + 1);
-                let key = decodeSbc(dctx, buf, p, kEnd - p, depth + 1);
-
-                p = kEnd;
-
-                let vEnd = decodeTagEnd(buf, p, depth + 1);
-                let val = decodeSbc(dctx, buf, p, vEnd - p, depth + 1);
-
-                p = vEnd;
-                map.set(key, val);
-            }
-
-            return map;
-        }
-
-        case 16: {
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: set count ' + count + ' exceeds limit');
-            }
-
-            let set = new Set(),
-                p = offset + 5;
-
-            for (let i = 0; i < count; i++) {
-                let end = decodeTagEnd(buf, p, depth + 1);
-
-                set.add(decodeSbc(dctx, buf, p, end - p, depth + 1));
-                p = end;
-            }
-
-            return set;
-        }
-
         case 17: {
             let typeId = buf[offset + 1]!;
             let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
@@ -407,36 +361,6 @@ function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
             }
 
             return offset + 5 + count * 4;
-        }
-        case 15: {
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: map count ' + count + ' exceeds limit');
-            }
-
-            let p = offset + 5;
-
-            for (let i = 0, n = count * 2; i < n; i++) {
-                p = decodeTagEnd(buf, p, depth + 1);
-            }
-
-            return p;
-        }
-        case 16: {
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: set count ' + count + ' exceeds limit');
-            }
-
-            let p = offset + 5;
-
-            for (let i = 0; i < count; i++) {
-                p = decodeTagEnd(buf, p, depth + 1);
-            }
-
-            return p;
         }
         case 17: {
             let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
@@ -590,47 +514,6 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 }
 
                 return needed;
-            }
-
-            if (value instanceof Map) {
-                let count = value.size;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: map count exceeds limit');
-                }
-
-                buf[pos] = 15;
-                buf[pos + 1] = count & 0xFF;
-                buf[pos + 2] = (count >>> 8) & 0xFF;
-                buf[pos + 3] = (count >>> 16) & 0xFF;
-                buf[pos + 4] = (count >>> 24) & 0xFF;
-
-                let p = pos + 5;
-
-                for (let [k, v] of value) {
-                    p = encodeSbc(ectx, k, buf, p);
-                    p = encodeSbc(ectx, v, buf, p);
-                }
-                return p;
-            }
-
-            if (value instanceof Set) {
-                let count = value.size;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: set count exceeds limit');
-                }
-
-                buf[pos] = 16;
-                buf[pos + 1] = count & 0xFF;
-                buf[pos + 2] = (count >>> 8) & 0xFF;
-                buf[pos + 3] = (count >>> 16) & 0xFF;
-                buf[pos + 4] = (count >>> 24) & 0xFF;
-
-                let p = pos + 5;
-
-                for (let v of value) { p = encodeSbc(ectx, v, buf, p); }
-                return p;
             }
 
             if (Array.isArray(value)) {

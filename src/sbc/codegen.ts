@@ -304,8 +304,6 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
                 break;
 
-            case 'map':
-            case 'set':
             case 'typedarray':
 
                 body += `p=_enc(${val},b,p);\n`;
@@ -589,8 +587,6 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
                 break;
 
-            case 'map':
-            case 'set':
             case 'typedarray':
                 body += `{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}\n`;
 
@@ -863,7 +859,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                 }
 
                 break;
-            case 'map': case 'set': case 'typedarray': case 'mixed':
+            case 'typedarray': case 'mixed':
                 body += `${no}{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}${nc}\n`;
                 break;
         }
@@ -1185,7 +1181,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                 }
 
                 break;
-            case 'map': case 'set': case 'typedarray': case 'mixed':
+            case 'typedarray': case 'mixed':
                 if (f.nullable) {
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }

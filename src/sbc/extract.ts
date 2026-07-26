@@ -238,8 +238,6 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
 
                 break;
             }
-            case 'map':
-            case 'set':
             case 'typedarray': {
                 pos = decodeTagEnd(buffer, pos, 0);
                 break;
@@ -280,9 +278,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
 
             return undefined;
         }
-        case 'map':
         case 'mixed':
-        case 'set':
         case 'typedarray':
             return ctx.decodeSbc(buffer, pos, decodeTagEnd(buffer, pos, 0) - pos, 0);
         case 'object': {

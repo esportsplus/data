@@ -1224,141 +1224,6 @@ describe('Codec2', () => {
     });
 
 
-    // === MAP ===
-
-    describe('Map', () => {
-        it('empty Map', () => {
-            let result = c.decode(c.encode(new Map())) as Map<unknown, unknown>;
-
-            expect(result).toBeInstanceOf(Map);
-            expect(result.size).toBe(0);
-        });
-
-        it('string keys', () => {
-            let m = new Map([['a', 1], ['b', 2], ['c', 3]]);
-            let result = c.decode(c.encode(m)) as Map<unknown, unknown>;
-
-            expect(result).toBeInstanceOf(Map);
-            expect(result.size).toBe(3);
-            expect(result.get('a')).toBe(1);
-            expect(result.get('b')).toBe(2);
-            expect(result.get('c')).toBe(3);
-        });
-
-        it('numeric keys', () => {
-            let m = new Map([[1, 'one'], [2, 'two']]);
-            let result = c.decode(c.encode(m)) as Map<unknown, unknown>;
-
-            expect(result.get(1)).toBe('one');
-            expect(result.get(2)).toBe('two');
-        });
-
-        it('mixed value types', () => {
-            let m = new Map<unknown, unknown>([['str', 'hello'], ['num', 42], ['bool', true], ['null', null]]);
-            let result = c.decode(c.encode(m)) as Map<unknown, unknown>;
-
-            expect(result.get('str')).toBe('hello');
-            expect(result.get('num')).toBe(42);
-            expect(result.get('bool')).toBe(true);
-            expect(result.get('null')).toBe(null);
-        });
-
-        it('nested Map', () => {
-            let inner = new Map([['x', 1]]);
-            let outer = new Map<string, unknown>([['inner', inner]]);
-            let result = c.decode(c.encode(outer)) as Map<string, unknown>;
-            let resultInner = result.get('inner') as Map<string, unknown>;
-
-            expect(resultInner).toBeInstanceOf(Map);
-            expect(resultInner.get('x')).toBe(1);
-        });
-
-        it('Map in object field', () => {
-            let obj = { data: new Map([['key', 'val']]) };
-            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
-            let m = result.data as Map<string, string>;
-
-            expect(m).toBeInstanceOf(Map);
-            expect(m.get('key')).toBe('val');
-        });
-
-        it('large Map (1000 entries)', () => {
-            let m = new Map<number, number>();
-
-            for (let i = 0; i < 1000; i++) {
-                m.set(i, i * 2);
-            }
-
-            let result = c.decode(c.encode(m)) as Map<number, number>;
-
-            expect(result.size).toBe(1000);
-            expect(result.get(0)).toBe(0);
-            expect(result.get(999)).toBe(1998);
-        });
-    });
-
-
-    // === SET ===
-
-    describe('Set', () => {
-        it('empty Set', () => {
-            let result = c.decode(c.encode(new Set())) as Set<unknown>;
-
-            expect(result).toBeInstanceOf(Set);
-            expect(result.size).toBe(0);
-        });
-
-        it('string values', () => {
-            let s = new Set(['a', 'b', 'c']);
-            let result = c.decode(c.encode(s)) as Set<string>;
-
-            expect(result).toBeInstanceOf(Set);
-            expect(result.size).toBe(3);
-            expect(result.has('a')).toBe(true);
-            expect(result.has('b')).toBe(true);
-            expect(result.has('c')).toBe(true);
-        });
-
-        it('numeric values', () => {
-            let s = new Set([1, 2, 3, 42]);
-            let result = c.decode(c.encode(s)) as Set<number>;
-
-            expect(result.size).toBe(4);
-            expect(result.has(42)).toBe(true);
-        });
-
-        it('mixed types', () => {
-            let s = new Set<unknown>([1, 'hello', true, null]);
-            let result = c.decode(c.encode(s)) as Set<unknown>;
-
-            expect(result.size).toBe(4);
-            expect(result.has(1)).toBe(true);
-            expect(result.has('hello')).toBe(true);
-            expect(result.has(true)).toBe(true);
-            expect(result.has(null)).toBe(true);
-        });
-
-        it('nested Set', () => {
-            let inner = new Set([1, 2]);
-            let outer = new Set<unknown>([inner]);
-            let result = c.decode(c.encode(outer)) as Set<unknown>;
-            let items = [...result];
-
-            expect(items[0]).toBeInstanceOf(Set);
-            expect((items[0] as Set<number>).has(1)).toBe(true);
-        });
-
-        it('Set in object field', () => {
-            let obj = { tags: new Set(['a', 'b']) };
-            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
-            let s = result.tags as Set<string>;
-
-            expect(s).toBeInstanceOf(Set);
-            expect(s.has('a')).toBe(true);
-        });
-    });
-
-
     // === TYPED ARRAYS ===
 
     describe('Typed Arrays', () => {
@@ -1669,22 +1534,6 @@ describe('Codec2', () => {
             expect(c.decode(c.encode({ id: 2, value: 42 }))).toEqual({ id: 2, value: 42 });
         });
 
-        it('schema with map/set types', () => {
-            let c = codec();
-
-            c.defineSchema([
-                { name: 'meta', type: 'map' },
-                { name: 'tags', type: 'set' },
-            ]);
-
-            let obj = { meta: new Map([['k', 'v']]), tags: new Set(['a', 'b']) };
-            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
-
-            expect(result.tags).toBeInstanceOf(Set);
-            expect((result.tags as Set<string>).has('a')).toBe(true);
-            expect(result.meta).toBeInstanceOf(Map);
-            expect((result.meta as Map<string, string>).get('k')).toBe('v');
-        });
     });
 
 
@@ -1973,80 +1822,6 @@ describe('Codec2', () => {
             expect(addr.city).toBe('NYC');
         });
 
-        it('extracts field after map field', () => {
-            let c = codec();
-
-            c.defineSchema([
-                { name: 'meta', type: 'map' },
-                { name: 'id', type: 'uint8' },
-            ]);
-
-            let buf = c.encode({ meta: new Map([['a', 1]]), id: 42 });
-
-            expect(c.extractField(buf, 'id')).toBe(42);
-        });
-
-        it('extracts field after set field', () => {
-            let c = codec();
-
-            c.defineSchema([
-                { name: 'tags', type: 'set' },
-                { name: 'name', type: 'string' },
-            ]);
-
-            let buf = c.encode({ tags: new Set(['x', 'y']), name: 'test' });
-
-            expect(c.extractField(buf, 'name')).toBe('test');
-        });
-
-        it('extracts field after multiple map/set fields', () => {
-            let c = codec();
-
-            c.defineSchema([
-                { name: 'meta', type: 'map' },
-                { name: 'tags', type: 'set' },
-                { name: 'id', type: 'uint8' },
-            ]);
-
-            let buf = c.encode({
-                meta: new Map([['k1', 'v1'], ['k2', 'v2']]),
-                tags: new Set([10, 20, 30]),
-                id: 99,
-            });
-
-            expect(c.extractField(buf, 'id')).toBe(99);
-        });
-
-        it('extracts map field directly', () => {
-            let c = codec();
-
-            c.defineSchema([
-                { name: 'id', type: 'uint8' },
-                { name: 'meta', type: 'map' },
-            ]);
-
-            let buf = c.encode({ id: 1, meta: new Map([['key', 'val']]) });
-            let meta = c.extractField(buf, 'meta') as Map<string, string>;
-
-            expect(meta).toBeInstanceOf(Map);
-            expect(meta.get('key')).toBe('val');
-        });
-
-        it('extracts set field directly', () => {
-            let c = codec();
-
-            c.defineSchema([
-                { name: 'id', type: 'uint8' },
-                { name: 'tags', type: 'set' },
-            ]);
-
-            let buf = c.encode({ id: 1, tags: new Set(['a', 'b']) });
-            let tags = c.extractField(buf, 'tags') as Set<string>;
-
-            expect(tags).toBeInstanceOf(Set);
-            expect(tags.has('a')).toBe(true);
-            expect(tags.has('b')).toBe(true);
-        });
     });
 
 
@@ -2125,14 +1900,6 @@ describe('Codec2', () => {
                 size = c.computeSize(obj);
 
             expect(size).toBe(c.encode(obj).length);
-        });
-
-        it('returns -1 for Map', () => {
-            expect(c.computeSize(new Map())).toBe(-1);
-        });
-
-        it('returns -1 for Set', () => {
-            expect(c.computeSize(new Set())).toBe(-1);
         });
 
         it('returns -1 for typed array', () => {
@@ -3592,53 +3359,31 @@ describe('Codec2', () => {
     });
 
 
-    // === F-014: Map/Set count guard (encode + decode) ===
+    // === Retired tags 15/16 (Map/Set value types removed) ===
 
-    describe('Map/Set count guard (F-014)', () => {
-        it('decode: map count > MAX_ARRAY_COUNT throws', () => {
-            // tag 15 (Map) + u32 LE count = 1048577 (0x00100001)
-            let buf = new Uint8Array([15, 0x01, 0x00, 0x10, 0x00]);
+    describe('retired tags 15/16', () => {
+        it('decode: tag 15 throws unknown tag', () => {
+            let buf = new Uint8Array([15, 0, 0, 0, 0]);
 
-            expect(() => c.decode(buf)).toThrow('map count');
+            expect(() => c.decode(buf)).toThrow('Codec2: unknown tag 15');
         });
 
-        it('decode: set count > MAX_ARRAY_COUNT throws', () => {
-            // tag 16 (Set) + u32 LE count = 1048577 (0x00100001)
-            let buf = new Uint8Array([16, 0x01, 0x00, 0x10, 0x00]);
+        it('decode: tag 16 throws unknown tag', () => {
+            let buf = new Uint8Array([16, 0, 0, 0, 0]);
 
-            expect(() => c.decode(buf)).toThrow('set count');
+            expect(() => c.decode(buf)).toThrow('Codec2: unknown tag 16');
         });
 
-        it('decode: map count exactly at MAX_ARRAY_COUNT + 1 throws', () => {
-            // 1048577 = 0x100001 → LE bytes: [0x01, 0x00, 0x10, 0x00]
-            let buf = new Uint8Array([15, 0x01, 0x00, 0x10, 0x00]);
+        it('defineSchema refuses a field typed map', () => {
+            let c = codec();
 
-            expect(() => c.decode(buf)).toThrow('map count');
+            expect(() => c.defineSchema([{ name: 'meta', type: 'map' }])).toThrow('unknown field type: map');
         });
 
-        it('decode: set count at 2 billion throws', () => {
-            // 0x7FFFFFFF = 2147483647 → LE: [0xFF, 0xFF, 0xFF, 0x7F]
-            let buf = new Uint8Array([16, 0xFF, 0xFF, 0xFF, 0x7F]);
+        it('defineSchema refuses a field typed set', () => {
+            let c = codec();
 
-            expect(() => c.decode(buf)).toThrow('set count');
-        });
-
-        it('small Map still round-trips', () => {
-            let m = new Map<string, number>([['a', 1], ['b', 2]]);
-            let result = c.decode(c.encode(m)) as Map<string, number>;
-
-            expect(result).toBeInstanceOf(Map);
-            expect(result.size).toBe(2);
-            expect(result.get('a')).toBe(1);
-        });
-
-        it('small Set still round-trips', () => {
-            let s = new Set([10, 20, 30]);
-            let result = c.decode(c.encode(s)) as Set<number>;
-
-            expect(result).toBeInstanceOf(Set);
-            expect(result.size).toBe(3);
-            expect(result.has(20)).toBe(true);
+            expect(() => c.defineSchema([{ name: 'tags', type: 'set' }])).toThrow('unknown field type: set');
         });
     });
 
