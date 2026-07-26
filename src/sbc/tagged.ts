@@ -402,7 +402,9 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
             }
 
             buf[pos] = 9;
-            writeBI64.call(buf, value, pos + 1);
+            if (pos + 9 <= buf.length) {
+                writeBI64.call(buf, value, pos + 1);
+            }
             return pos + 9;
 
         case 'boolean':
@@ -430,7 +432,9 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
             }
 
             buf[pos] = 4;
-            writeF64.call(buf, n, pos + 1);
+            if (pos + 9 <= buf.length) {
+                writeF64.call(buf, n, pos + 1);
+            }
             return pos + 9;
         }
 
@@ -483,7 +487,9 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
         case 'object': {
             if (value instanceof Date) {
                 buf[pos] = 10;
-                writeF64.call(buf, value.getTime(), pos + 1);
+                if (pos + 9 <= buf.length) {
+                    writeF64.call(buf, value.getTime(), pos + 1);
+                }
                 return pos + 9;
             }
 
@@ -633,12 +639,16 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
 
                         let p = pos + 5;
 
-                        for (let i = 0; i < len; i++) {
-                            writeF64.call(buf, value[i], p);
-                            p += 8;
+                        if (pos + 5 + len * 8 <= buf.length) {
+                            for (let i = 0; i < len; i++) {
+                                writeF64.call(buf, value[i], p);
+                                p += 8;
+                            }
+
+                            return p;
                         }
 
-                        return p;
+                        return pos + 5 + len * 8;
                     }
                 }
 
