@@ -86,10 +86,16 @@ describe('min Validator', () => {
     describe('invalid type handling', () => {
         let validator = min(5);
 
-        it('throws for unsupported type', () => {
+        it('reports an error for an unsupported type instead of throwing', () => {
+            // Throwing escapes the ValidatorFn result contract, so an unsupported
+            // input is reported like any other failure
+            let thrown: string[] = [];
+
             expect(() => {
-                validator({} as any, { push: () => {} });
-            }).toThrow('@esportsplus/data: min validator can only be applied to number, bigint, string, or array types');
+                validator({} as any, { push: (m) => thrown.push(m) });
+            }).not.toThrow();
+
+            expect(thrown).toEqual(['must be a number, bigint, string, or array']);
         });
     });
 });
@@ -179,10 +185,16 @@ describe('max Validator', () => {
     describe('invalid type handling', () => {
         let validator = max(10);
 
-        it('throws for unsupported type', () => {
+        it('reports an error for an unsupported type instead of throwing', () => {
+            // Throwing escapes the ValidatorFn result contract, so an unsupported
+            // input is reported like any other failure
+            let thrown: string[] = [];
+
             expect(() => {
-                validator({} as any, { push: () => {} });
-            }).toThrow('@esportsplus/data: max validator can only be applied to number, bigint, string, or array types');
+                validator({} as any, { push: (m) => thrown.push(m) });
+            }).not.toThrow();
+
+            expect(thrown).toEqual(['must be a number, bigint, string, or array']);
         });
     });
 });
@@ -299,10 +311,16 @@ describe('range Validator', () => {
     describe('invalid type handling', () => {
         let validator = range(5, 10);
 
-        it('throws for unsupported type', () => {
+        it('reports an error for an unsupported type instead of throwing', () => {
+            // Throwing escapes the ValidatorFn result contract, so an unsupported
+            // input is reported like any other failure
+            let thrown: string[] = [];
+
             expect(() => {
-                validator({} as any, { push: () => {} });
-            }).toThrow('@esportsplus/data: range validator can only be applied to number, bigint, string, or array types');
+                validator({} as any, { push: (m) => thrown.push(m) });
+            }).not.toThrow();
+
+            expect(thrown).toEqual(['must be a number, bigint, string, or array']);
         });
     });
 });

@@ -240,13 +240,12 @@ describe('Type Coercion', () => {
             expect(result.ok).toBe(false);
         });
 
-        it('handles empty string', () => {
-            // Empty string coerces to 0 in JavaScript via +''
+        it('rejects empty string', () => {
+            // `+''` is 0 in JavaScript, but an empty string is not a number the
+            // caller meant to supply — coercion accepts numeric strings only
             let result = validate({ value: '' });
 
-            // Empty string becomes 0, which is a valid number
-            expect(result.ok).toBe(true);
-            expect(result.data.value).toBe(0);
+            expect(result.ok).toBe(false);
         });
     });
 
