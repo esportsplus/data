@@ -61,11 +61,13 @@ c.encode({
     timestamp: Date.now()
 });
 
-// Maps, Sets, Uint8Array, typed arrays
-c.encode(new Map([['key', 'value']]));
-c.encode(new Set([1, 2, 3]));
+// Uint8Array, typed arrays
 c.encode(new Uint8Array([0xFF, 0x00]));
 c.encode(new Float64Array([1.1, 2.2]));
+
+// Map and Set are NOT encodable — encode() throws a `Codec2:` error for both
+// c.encode(new Map([['key', 'value']])); // throws
+// c.encode(new Set([1, 2, 3]));          // throws
 ```
 
 ### Wire Format
@@ -77,19 +79,26 @@ c.encode(new Float64Array([1.1, 2.2]));
 | `uint8` (0–255) | 3 | 1 byte |
 | `float64` | 4 | 8 bytes |
 | `string` | 5 | u32 length + UTF-8 |
-| `Uint8Array` | 6 | u32 length + raw bytes |
+| `Uint8Array` | 6 | u32 length + raw bytes (decodes to a fresh copy, never a view into the source buffer) |
 | `Array` | 7 | u32 count + tagged elements |
 | `object` | 8 | u32 hash + u32 length + compiled fields |
 | `bigint` | 9 | 8 bytes |
 | `Date` | 10 | f64 (timestamp) |
 | `int32` | 11 | 4 bytes |
-| packed `Uint8Array[]` | 12 | u32 count + raw bytes |
-| packed `Float64Array[]` | 13 | u32 count + raw f64s |
-| packed `Int32Array[]` | 14 | u32 count + raw i32s |
-| `Map` | 15 | u32 count + key/value pairs |
-| `Set` | 16 | u32 count + elements |
+| packed array of `uint8` numbers | 12 | u32 count + raw bytes |
+| packed array of `float64` numbers | 13 | u32 count + raw f64s |
+| packed array of `int32` numbers | 14 | u32 count + raw i32s |
 | typed array | 17 | u8 typeId + u32 byteLen + raw bytes |
 | compressed object | 18 | u32 hash + u32 length + packed fields |
+
+Tags 12–14 are an internal encoder optimization for a plain JS `Array` whose every element is a
+number in that tag's width — not a typed array. A real `Uint8Array[]` (array of `Uint8Array`
+instances) encodes as tag 7 (`Array`) with each element as a tag-6 `Uint8Array`. `Map` and `Set`
+have no wire tag: they are not encodable (see below).
+
+`undefined` values and array holes both encode as tag 0 (`null`) and decode back as `null`, never
+`undefined`. A value with no representable tag (`Map`, `Set`, a function, a symbol, a class
+instance) throws a `Codec2:` error from `encode()`.
 
 ### Schema Pre-Registration
 
@@ -110,6 +119,10 @@ let buf = c.encode({ name: 'Alice', age: 30, active: true });
 let obj = c.decode(buf);
 ```
 
+A declared schema is honored for every object whose keys AND value types match — not only the
+first shape the codec happens to see — so pre-registering ahead of the first `encode()` call
+guarantees the fast path regardless of call order.
+
 #### Field Types
 
 | Type | Description |
@@ -129,8 +142,6 @@ let obj = c.decode(buf);
 | `array` | Generic array |
 | `array<T>` | Typed array (e.g. `array<uint8>`) |
 | `object(hash)` | Nested object referencing another schema |
-| `map` | Map / Record |
-| `set` | Set |
 | `typedarray` | TypedArray (Float32Array, etc.) |
 | `mixed` | Any value (tagged encoding) |
 
@@ -231,6 +242,9 @@ let buf2 = c.encode({ x: 3, y: 4 }, {
 });
 ```
 
+An unknown schema hash — one never `defineSchema`'d or restored via `deserializeRegistry` —
+throws `Codec2: unknown schema hash <n>` rather than silently falling back to inference.
+
 ### View Mode (Zero-Copy Encode)
 
 Return a subarray of the internal buffer instead of copying:
@@ -244,6 +258,31 @@ let view = c.encode({ x: 1 }, true);
 // Or via options
 let view2 = c.encode({ x: 1 }, { view: true });
 ```
+
+### Computing Encoded Size
+
+`computeSize(value)` returns the exact encoded byte length, without encoding, for primitives
+(`null`, `boolean`, `number`, `bigint`, `string`, `Date`, `Uint8Array`) and for plain objects
+matching a registered schema:
+
+```typescript
+let c = codec();
+
+c.computeSize({ name: 'Alice', age: 30 }); // exact byte length, no encode() call
+```
+
+It returns `-1` — a sentinel, not an estimate — for arrays, non-`Uint8Array` typed arrays, and
+any object containing one of them; call `encode()` and read `.length` to size those.
+
+```typescript
+c.computeSize([1, 2, 3]); // -1
+```
+
+`Map` and `Set` are not currently special-cased by `computeSize` the way `encode()` special-cases
+them (`encode()` rejects both with a `Codec2:` error) — a `Map`/`Set` value returns a positive
+number that does not correspond to any real encoding, so don't rely on `computeSize` for either.
+Compressed (`{ compress: true }`) sizing is also not always exact. Treat the exact-size guarantee
+as scoped to the uncompressed, primitive / schema-registered-object case above.
 
 ### Codec API Reference
 
@@ -289,23 +328,45 @@ type PersistentStore = {
 
 ### Compile-Time Optimization (Optional)
 
-When using the compiler plugin, type-parameterized `encode<T>()` and `decode<T>()` calls are transformed to inject schema hints automatically:
+When using the compiler plugin, type-parameterized `encode<T>()` and `decode<T>()` calls on a
+codec (any receiver whose type carries a `defineSchema` method) are transformed to inject schema
+hints automatically — but only under a **parity-or-omit** rule: a hint is injected only when
+every property of `T` is *width-determinate*, meaning its static type always resolves to the same
+field type the runtime inferrer would assign to every value it admits. A single non-determinate
+property makes the WHOLE call hint-free rather than shipping a hint that could diverge from
+runtime inference. An unbranded `number` is never determinate (its width depends on the runtime
+value); `Map`, `Set`, `Promise`, `RegExp`, `WeakMap`, and `WeakSet` fields are never determinate
+either (they aren't encodable — see Wire Format). `string`, `boolean`, `bigint`, `Date`,
+`Uint8Array`, other typed arrays, nested objects, and branded `uint8` numbers ARE supported hint
+sources.
 
 ```typescript
 type Point = { x: number; y: number };
 
-// Before (source):
+// x/y are plain `number` — non-determinate — so this call is left UNCHANGED by the compiler:
 c.encode<Point>({ x: 1, y: 2 });
-
-// After (compiled):
-c.encode({ x: 1, y: 2 }, { schema: [{ name: 'x', type: 'float64' }, { name: 'y', type: 'float64' }] });
 ```
 
-This skips runtime type inference on the first encode of a shape. Without the compiler, the codec infers the schema from the value's runtime types — identical behavior, one extra inference step on first encounter.
+```typescript
+type Event = { name: string; active: boolean };
+
+// Before (source):
+c.encode<Event>({ name: 'login', active: true });
+
+// After (compiled) — every field is determinate, so a hint is injected:
+c.encode({ name: 'login', active: true }, { schema: [{ name: 'active', type: 'boolean' }, { name: 'name', type: 'string' }] });
+```
+
+Because parity-or-omit never ships a hint that could diverge from runtime inference, "identical
+behavior" is now literally true: a hinted call and its uncompiled equivalent always produce the
+same bytes. Without the compiler, the codec infers the schema from the value's runtime types —
+identical behavior, one extra inference step on first encounter.
 
 ## Validators (Compile-Time)
 
-Validators require the build-time transformer. Without it, `validator.build()` and `validator.set()` throw.
+Validators require the build-time transformer. With it, `validator.build()`, `validator.set()`,
+and `validator.toJsonSchema()` calls are consumed at compile time and replaced with generated
+code. Without it, all three throw a stub error at runtime.
 
 ### Build Tool Setup
 
@@ -352,10 +413,10 @@ type User = {
     email?: string;
 };
 
-// Validator is generated at compile time
-const validate = validator.build<User>();
+// validator.build<T>() returns a plain object: { validate, toJsonSchema }
+const v = validator.build<User>();
 
-const result = validate({
+const result = v.validate({
     name: 'John',
     age: 25
 });
@@ -366,6 +427,8 @@ if (result.ok) {
 else {
     console.log(result.errors); // ValidationError[]
 }
+
+v.toJsonSchema(); // draft 2020-12 JSON Schema for User
 ```
 
 ### Supported Types
@@ -390,7 +453,7 @@ import type { integer, float } from '@esportsplus/data';
 
 type Product = {
     quantity: integer;  // Must be whole number
-    price: float;       // 32-bit float (for codec)
+    price: float;       // Nominal brand for numeric intent — stored as float64, no 32-bit rounding
 };
 ```
 
@@ -524,7 +587,8 @@ type Data = {
 Add custom validation logic:
 
 ```typescript
-import { validator, min, max, range } from '@esportsplus/data';
+import { validator } from '@esportsplus/data';
+import { min, max, range } from '@esportsplus/data/validators';
 
 type User = {
     name: string;
@@ -532,7 +596,7 @@ type User = {
     email: string;
 };
 
-const validate = validator.build<User>({
+const v = validator.build<User>({
     name: min(2, 'Name must be at least 2 characters'),
     age: range(18, 120, 'Must be between 18 and 120'),
     email: (value, errors) => {
@@ -543,18 +607,30 @@ const validate = validator.build<User>({
 });
 ```
 
+Built-in validators live at `@esportsplus/data/validators` (never the package root — the root
+export surface is only `codec`, `validator`, and shared types).
+
 #### Built-in Validators
+
+`@esportsplus/data/validators` ships many more assertions (string format, numeric bounds, IDs,
+...) beyond this short list — `min`/`max`/`range`, plus `trim`/`normalize`, are the ones this
+README documents by name:
 
 | Validator | Description |
 |-----------|-------------|
 | `min(n)` | Minimum value/length |
 | `max(n)` | Maximum value/length |
 | `range(min, max)` | Value/length between min and max |
+| `trim()` / `trim.start()` / `trim.end()` | Asserts the string has no leading/trailing whitespace (does not trim it) |
+| `normalize()` / `.nfd()` / `.nfkc()` / `.nfkd()` | Asserts the string is already Unicode-normalized in the given form (does not normalize it) |
+
+`trim`/`normalize` are **assertions**, not transforms: they push an error when the input isn't
+already in the expected form; they never mutate the value.
 
 #### Multiple Validators
 
 ```typescript
-const validate = validator.build<User>({
+const v = validator.build<User>({
     name: [min(2), max(50)],
     age: [min(0), max(150)]
 });
@@ -563,7 +639,7 @@ const validate = validator.build<User>({
 #### Async Validators
 
 ```typescript
-const validate = validator.build<User>({
+const v = validator.build<User>({
     email: async (value, errors) => {
         const exists = await checkEmailInDatabase(value);
         if (exists) {
@@ -573,8 +649,44 @@ const validate = validator.build<User>({
 });
 
 // Result is a Promise when async validators are used
-const result = await validate(data);
+const result = await v.validate(data);
 ```
+
+#### Annotations (`describe` / `default` / `meta`)
+
+Built-in validators and custom validators wrapped with `fn()` carry a chainable
+`.describe(text)` / `.default(value)` / `.meta(object)` annotation API. Chains are peeled at
+compile time and folded into the property's JSON Schema fragment — they never run at validation
+time.
+
+```typescript
+import { validator } from '@esportsplus/data';
+import { fn, min, range } from '@esportsplus/data/validators';
+
+type Profile = {
+    name: string;
+    age: number;
+    tags: string[];
+};
+
+const v = validator.build<Profile>({
+    name: min(2).describe("the user's display name"),
+    age: range(18, 120).meta({ examples: [25] }),
+    tags: fn((value: string[], errors) => {
+        if (value.length === 0) {
+            errors.push('must have at least one tag');
+        }
+    }).default([])
+});
+```
+
+- `.describe(text)` sets the property's JSON Schema `description`.
+- `.meta(object)` shallow-merges arbitrary keys (`title`, `examples`, ...) into the property schema.
+- `.default(value)` sets the JSON Schema `default` AND fills the input at validation time when the
+  property is `undefined`. An array/object literal default mints a **fresh** instance on every
+  fill — no shared-reference mutation across calls; a scalar default reuses the literal directly.
+- `fn(customValidatorFn)` attaches the same chain to a bare custom validator function so it can be
+  annotated exactly like a built-in.
 
 ### Branded Type Validators
 
@@ -614,7 +726,7 @@ validator.set((value: Email, errors: ErrorType) => {
 });
 
 // UUID and Email validators automatically applied
-const validate = validator.build<User>();
+const v = validator.build<User>();
 ```
 
 ### Custom Error Messages
@@ -622,7 +734,7 @@ const validate = validator.build<User>();
 Override default error messages:
 
 ```typescript
-const validate = validator.build<User, {
+const v = validator.build<User, {
     name: 'Please enter your name';
     age: 'Age must be a valid number';
 }>();
@@ -646,7 +758,14 @@ type ValidationError = {
 ```typescript
 function build<T, TErrors extends ErrorMessages<T> = {}>(
     config?: ValidatorConfig<T>
-): ValidatorFn<T>;
+): Schema<T>;
+
+function toJsonSchema<T>(config?: ValidatorConfig<T>): JsonSchema;
+
+type Schema<T> = {
+    toJsonSchema(): JsonSchema;
+    validate: ValidatorFn<T>;
+};
 
 type ValidatorFn<T> = (input: unknown) => ValidationResult<T> | Promise<ValidationResult<T>>;
 ```
@@ -656,6 +775,8 @@ function set<T extends BrandBase>(
     fn: (value: T, errors: ErrorType) => void | Promise<void>
 ): void;
 ```
+
+Built-in validators (imported from `@esportsplus/data/validators`, not the package root):
 
 ```typescript
 function min(value: number, message?: string): ValidatorFunction<unknown>;
@@ -669,42 +790,143 @@ At compile time, the transformer:
 
 1. Detects `validator.build<T>()` calls
 2. Analyzes the TypeScript type `T`
-3. Generates an optimized validation function
-4. Replaces the call with the generated function
+3. Generates an optimized validation function plus a JSON Schema for `T`
+4. Replaces the call with a hoisted `{ toJsonSchema, validate }` object literal
 
 **Before (source):**
 ```typescript
-const validate = validator.build<User>();
+type User = {
+    name: string;
+    age: number;
+    email?: string;
+};
+
+const v = validator.build<User>();
 ```
 
-**After (compiled):**
+**After (compiled)** — real transformer output for the type above, reformatted for readability
+(hoisted names are generator-assigned and will differ run to run):
 ```javascript
-const validate = (_input) => {
-    let _error;
+const schema = {"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"age":{"type":"number"},"email":{"type":"string"},"name":{"type":"string"}},"required":["age","name"],"type":"object"};
 
-    if (typeof _input.name !== 'string') {
-        (_error ??= []).push({ message: 'must be a string', path: 'name' });
-    }
-    if (typeof _input.age !== 'number' && isNaN(_input.age = +_input.age)) {
-        (_error ??= []).push({ message: 'must be a number', path: 'age' });
-    }
+const v = {
+    toJsonSchema: () => schema,
+    validate: (_input) => {
+        let _errors, _output;
 
-    if (_error) {
-        return { ok: false, data: _input, errors: _error };
-    }
+        if (_input === null || typeof _input !== 'object' || Array.isArray(_input)) {
+            (_errors ??= []).push({ message: 'must be an object', path: '' });
 
-    return { ok: true, data: { age: _input.age, name: _input.name }, errors: undefined };
+            return { ok: false, data: _input, errors: _errors };
+        }
+
+        _output = {};
+
+        {
+            let n = (typeof _input.age === 'number' || (typeof _input.age === 'string' && /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(_input.age))) ? +_input.age : NaN;
+
+            if (!isFinite(n)) {
+                (_errors ??= []).push({ message: 'must be a number', path: 'age' });
+            }
+            else {
+                _output.age = n;
+            }
+        }
+
+        if (_input.email !== undefined) {
+            if (typeof _input.email !== 'string') {
+                (_errors ??= []).push({ message: 'must be a string', path: 'email' });
+            }
+            else {
+                _output.email = _input.email;
+            }
+        }
+
+        if (typeof _input.name !== 'string') {
+            (_errors ??= []).push({ message: 'must be a string', path: 'name' });
+        }
+        else {
+            _output.name = _input.name;
+        }
+
+        if (_errors && _errors.length > 0) {
+            return { ok: false, data: _input, errors: _errors };
+        }
+
+        return { ok: true, data: _output, errors: undefined };
+    }
 };
 ```
+
+Note the emitted error array is `_errors` (plural) and property checks run in alphabetical
+property order (`age`, `email`, `name`), not declaration order — both are generator details, not
+guarantees to code against.
 
 **Generated validator optimizations:**
 
 - **Lazy error allocation**: Error array only created when errors occur
-- **Number coercion**: Strings automatically coerced to numbers
-- **Boolean coercion**: Strings/numbers coerced to booleans
-- **Inline extraction**: Copies only known properties (prevents prototype pollution)
+- **Number coercion**: strings-only — decimal/scientific numeric forms (`/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/`) coerce to `number`; no hex, no empty/whitespace-only strings, no booleans/arrays/objects. (Divergence from zod: `z.number()` does not coerce by default — this package always attempts numeric/boolean coercion for `number`/`boolean`-typed fields.)
+- **Boolean coercion**: `'true'`, `1`, `'1'` coerce to `true`; `'false'`, `0`, `'0'` coerce to `false`
+- **Inline extraction**: copies only known properties into a fresh output object; a `__proto__`-named property is written via `Object.defineProperty` as an own enumerable property, so it can never mutate the output's prototype (prevents prototype pollution)
 - **Conditional async**: Only async when custom validators require it
 - **Pre-computed paths**: Static error paths computed at compile time
+
+### Runtime Schema Builder (no compiler)
+
+`@esportsplus/data/runtime` builds JSON Schema fragments programmatically for shapes whose exact
+literals are only known at runtime — e.g. an enum sourced from a database — and converts them to a
+draft 2020-12 JSON Schema. It does not validate input itself; combine it with an external JSON
+Schema validator, or model runtime-known shapes structurally in your own code.
+
+```typescript
+import { schema, toJsonSchema } from '@esportsplus/data/runtime';
+
+// Ids fetched at runtime — not a compile-time literal union
+let roleIds = await fetchRoleIds(); // ['admin', 'editor', 'viewer']
+
+let userSchema = schema.object({
+    id: schema.string(),
+    role: schema.enum(roleIds)
+});
+
+toJsonSchema(userSchema);
+// {
+//     $schema: 'https://json-schema.org/draft/2020-12/schema',
+//     additionalProperties: false,
+//     properties: { id: { type: 'string' }, role: { enum: ['admin', 'editor', 'viewer'] } },
+//     required: ['id', 'role'],
+//     type: 'object'
+// }
+```
+
+`schema` also exposes `array`, `boolean`, `literal`, `number`, `record`, `union`, and `unknown`
+node builders, each accepting an optional `{ default, description, nullable, optional }` options
+object.
+
+### Build Output Residue Check
+
+The transformer replaces every `validator.build()` / `.set()` / `.toJsonSchema()` call it detects
+and throws at build time if one survives untransformed (a missing type argument, for example) —
+but that only catches call sites, not a misconfigured build tool that skips the plugin file
+entirely. `@esportsplus/data/compiler/residue` scans emitted `.js` output for surviving
+`validator.*` calls or a root import binding the compile-time-only `validator` export, so wire it
+into your own `build` / `prepublishOnly` script as a second, independent check:
+
+```javascript
+// check-residue.mjs
+import { assertNoResidue } from '@esportsplus/data/compiler/residue';
+
+assertNoResidue('build'); // throws, naming file:line:col, if a validator.* call escaped the transform
+```
+
+```json
+{
+    "scripts": {
+        "build": "tsc -p tsconfig.build.json && node check-residue.mjs",
+        "prepublishOnly": "pnpm build"
+    }
+}
+```
 
 ## Requirements
 
