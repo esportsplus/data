@@ -118,4 +118,47 @@ describe('SBC schema — nullable inference defers base type instead of collapsi
 
         expect(backing.has(resolvedHash)).toBe(true);
     });
+
+    it('case 8 — an identity-cached provisional object re-encodes under the resolved schema once its field gains a value', () => {
+        let obj: { count: number | null } = { count: null },
+            c = codec();
+
+        c.encode(obj);
+        obj.count = 7;
+
+        let buf = c.encode(obj);
+
+        let cold = codec();
+
+        cold.encode({ count: null });
+
+        let coldResolved = cold.encode({ count: 7 });
+
+        expect(readShapeHash(buf)).toBe(readShapeHash(coldResolved));
+        expect(c.decode(buf)).toEqual({ count: 7 });
+    });
+
+    it('case 9 — late-null (order-B): pre-upgrade non-null buffers stay decodable and pure non-null records keep the non-nullable hash', () => {
+        let c = codec(),
+            b1 = c.encode({ count: 7 }),
+            b2 = c.encode({ count: null }),
+            b3 = c.encode({ count: 7 });
+
+        expect(c.decode(b1)).toEqual({ count: 7 });
+        expect(c.decode(b2)).toEqual({ count: null });
+        expect(c.decode(b3)).toEqual({ count: 7 });
+        expect(readShapeHash(b2)).not.toBe(readShapeHash(b1));
+        expect(readShapeHash(b3)).toBe(readShapeHash(b1));
+    });
+
+    it('case 10 — the 16-nullable cap fires on the inference path for a 17-field all-null record', () => {
+        let c = codec(),
+            obj = {
+                a01: null, a02: null, a03: null, a04: null, a05: null, a06: null,
+                a07: null, a08: null, a09: null, a10: null, a11: null, a12: null,
+                a13: null, a14: null, a15: null, a16: null, a17: null,
+            };
+
+        expect(() => c.encode(obj)).toThrow('max 16 nullable fields');
+    });
 });
