@@ -3,7 +3,13 @@ import { ts } from '@esportsplus/typescript';
 import plugin from '../src/compiler/index';
 
 
+const EXPORT_PREFIX = /^\s*export\s+/;
+
+const IMPORT_LINE = /^\s*import\b/;
+
 const PACKAGE_IMPORT = "import { codec, validator } from '@esportsplus/data';\n";
+
+const TYPE_LINE = /^\s*(export\s+)?type\b/;
 
 let compilerOptions: ts.CompilerOptions = {
     lib: ['lib.es2020.d.ts'],
@@ -120,4 +126,22 @@ function createValidator<T>(code: string): (input: unknown) => { ok: boolean; da
     return new Function(`${prelude}\nreturn ${name}.validate;`)();
 }
 
-export { createProgram, createValidator, mightNeedTransform, transformCode };
+// Executes the WHOLE emitted module rather than extracting one binding, so a case can assert
+// the behavior of every construct the pipeline emits (hoisted consts, config factories,
+// stripped `validator.set` registrations, a build POJO and a toJsonSchema const side by side).
+// `injected` supplies the runtime values the emitted module imports; `expression` names what
+// to hand back.
+function evaluateModule(code: string, injected: Record<string, unknown> = {}, expression: string = 'validate'): unknown {
+    let body = transformCode(code)
+            .split(String.fromCharCode(10))
+            .filter((line) => !IMPORT_LINE.test(line) && !TYPE_LINE.test(line))
+            .map((line) => line.replace(EXPORT_PREFIX, ''))
+            .join(String.fromCharCode(10)),
+        keys = Object.keys(injected);
+
+    // eslint-disable-next-line no-new-func
+    return new Function(...keys, body + String.fromCharCode(10) + 'return ' + expression + ';')(...keys.map((key) => injected[key]));
+}
+
+
+export { createProgram, createValidator, evaluateModule, mightNeedTransform, transformCode };

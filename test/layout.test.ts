@@ -16,7 +16,6 @@ const BENCH_FILES = [
 
 const HELPER_FILES = [
     'bench/sbc/autoresearch-sbc.ts',
-    'test/compiler/compile-validators.ts',
     'test/utils.ts'
 ];
 
