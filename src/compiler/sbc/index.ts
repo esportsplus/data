@@ -121,7 +121,7 @@ function generateSchemaLiteral(properties: AnalyzedProperty[]): string {
     return JSON.stringify(specs);
 }
 
-function getFieldSpecs(typeArg: ts.TypeNode, checker: ts.TypeChecker): FieldSpec[] | null {
+function getFieldSpecs(typeArg: ts.TypeNode, checker: ts.Checker): FieldSpec[] | null {
     let cached = fieldSpecCache.get(typeArg);
 
     if (cached) {
@@ -150,8 +150,8 @@ function getFieldSpecs(typeArg: ts.TypeNode, checker: ts.TypeChecker): FieldSpec
     return specs;
 }
 
-function hasDefineSchemaMethod(type: ts.Type, checker: ts.TypeChecker): boolean {
-    let prop = type.getProperty('defineSchema');
+function hasDefineSchemaMethod(type: ts.Type, checker: ts.Checker): boolean {
+    let prop = checker.getPropertyOfType(type, 'defineSchema');
 
     if (!prop) {
         return false;
@@ -159,7 +159,11 @@ function hasDefineSchemaMethod(type: ts.Type, checker: ts.TypeChecker): boolean 
 
     let propType = checker.getTypeOfSymbol(prop);
 
-    return propType.getCallSignatures().length > 0;
+    if (propType === undefined) {
+        return false;
+    }
+
+    return checker.getSignaturesOfType(propType, ts.SignatureKind.Call).length > 0;
 }
 
 function replaceCall(call: DetectedCall, ctx: TransformContext): string {
@@ -236,7 +240,7 @@ function replaceCall(call: DetectedCall, ctx: TransformContext): string {
     return `${receiverText}.${methodName}(${firstArgText},{...${secondArgText},"schema":${schema}})`;
 }
 
-function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChecker, node: ts.Node): void {
+function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.Checker, node: ts.Node): void {
     if (
         ts.isCallExpression(node) &&
         node.typeArguments &&
@@ -249,12 +253,12 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
         if (methodName === 'decode' || methodName === 'encode') {
             let receiverType = checker.getTypeAtLocation(expr.expression);
 
-            if (hasDefineSchemaMethod(receiverType, checker)) {
+            if (receiverType !== undefined && hasDefineSchemaMethod(receiverType, checker)) {
                 let typeArg = node.typeArguments[0],
                     type = checker.getTypeAtLocation(typeArg);
 
                 // Skip primitive types — only transform object types with properties
-                if (type.flags & ts.TypeFlags.Object) {
+                if (type !== undefined && (type.flags & ts.TypeFlags.Object)) {
                     calls.set(node, {
                         method: methodName,
                         node,
@@ -265,7 +269,7 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
         }
     }
 
-    ts.forEachChild(node, n => visit(calls, checker, n));
+    node.forEachChild(n => visit(calls, checker, n));
 }
 
 

@@ -37,8 +37,8 @@ type Survivor = {
 const VALIDATOR_ALIASES = 'compiler/validator-aliases';
 
 
-function extractMessages(type: ts.Type, parts: string[], messages: Map<string, string>, checker: ts.TypeChecker): void {
-    if (type.isStringLiteral()) {
+function extractMessages(type: ts.Type, parts: string[], messages: Map<string, string>, checker: ts.Checker): void {
+    if (type.isStringLiteralType()) {
         messages.set(parts.join('.'), type.value);
         return;
     }
@@ -47,9 +47,14 @@ function extractMessages(type: ts.Type, parts: string[], messages: Map<string, s
         let properties = checker.getPropertiesOfType(type);
 
         for (let i = 0, n = properties.length; i < n; i++) {
-            let prop = properties[i];
+            let prop = properties[i],
+                propType = checker.getTypeOfSymbol(prop);
 
-            extractMessages(checker.getTypeOfSymbol(prop), [...parts, prop.getName()], messages, checker);
+            // Custom messages are cosmetic overrides - an unresolvable member contributes no
+            // message and the generated validator falls back to its default text.
+            if (propType !== undefined) {
+                extractMessages(propType, [...parts, prop.name], messages, checker);
+            }
         }
     }
 }
@@ -212,7 +217,11 @@ function transform(call: DetectedCall, ctx: TransformContext, validators: Map<st
         root = analyzeRootType(call.typeArg, ctx.checker);
 
     if (call.errorMessagesType) {
-        extractMessages(ctx.checker.getTypeAtLocation(call.errorMessagesType), [], messages, ctx.checker);
+        let messagesType = ctx.checker.getTypeAtLocation(call.errorMessagesType);
+
+        if (messagesType !== undefined) {
+            extractMessages(messagesType, [], messages, ctx.checker);
+        }
     }
 
     let config = call.configArg
@@ -251,7 +260,7 @@ function transform(call: DetectedCall, ctx: TransformContext, validators: Map<st
     };
 }
 
-function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChecker, node: ts.Node, validatorLocalName: string | undefined, namespaceName: string | undefined): void {
+function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.Checker, node: ts.Node, validatorLocalName: string | undefined, namespaceName: string | undefined): void {
     if (ts.isCallExpression(node) && node.typeArguments && node.typeArguments.length > 0) {
         let expr = node.expression,
             matched = false,
@@ -303,7 +312,7 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
         }
     }
 
-    ts.forEachChild(node, n => visit(calls, checker, n, validatorLocalName, namespaceName));
+    node.forEachChild(n => visit(calls, checker, n, validatorLocalName, namespaceName));
 }
 
 // Self-assertion scanner: a "survivor" is a consumable call site - validator.<build|set|toJsonSchema>()
@@ -312,7 +321,7 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.TypeChec
 // The base-binding check mirrors visit()/validators.collect() exactly, so anything those intentionally
 // leave (namespace-only access, non-package look-alikes) is never flagged; only genuinely-missed sites
 // that would otherwise ship dead config and throw from the runtime stub at call time.
-function collectSurvivors(node: ts.Node, sourceFile: ts.SourceFile, checker: ts.TypeChecker, validatorLocalName: string | undefined, namespaceName: string | undefined, consumed: Set<ts.Node>, survivors: Survivor[]): void {
+function collectSurvivors(node: ts.Node, sourceFile: ts.SourceFile, checker: ts.Checker, validatorLocalName: string | undefined, namespaceName: string | undefined, consumed: Set<ts.Node>, survivors: Survivor[]): void {
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
         let expr = node.expression,
             matched = false,
@@ -345,11 +354,11 @@ function collectSurvivors(node: ts.Node, sourceFile: ts.SourceFile, checker: ts.
         }
     }
 
-    ts.forEachChild(node, child => collectSurvivors(child, sourceFile, checker, validatorLocalName, namespaceName, consumed, survivors));
+    node.forEachChild(child => collectSurvivors(child, sourceFile, checker, validatorLocalName, namespaceName, consumed, survivors));
 }
 
 
-const findUntransformed = (sourceFile: ts.SourceFile, checker: ts.TypeChecker, validatorLocalName: string | undefined, namespaceName: string | undefined, consumed: Set<ts.Node>): Survivor[] => {
+const findUntransformed = (sourceFile: ts.SourceFile, checker: ts.Checker, validatorLocalName: string | undefined, namespaceName: string | undefined, consumed: Set<ts.Node>): Survivor[] => {
     let survivors: Survivor[] = [];
 
     collectSurvivors(sourceFile, sourceFile, checker, validatorLocalName, namespaceName, consumed, survivors);
@@ -444,8 +453,16 @@ export default {
                 });
             }
             else {
+                let callType = ctx.checker.getTypeAtLocation(call.typeArg);
+
+                // The build cache is keyed on the resolved type's identity, so an unresolvable
+                // type argument would collapse distinct builds onto one key.
+                if (callType === undefined) {
+                    throw new Error(`${PACKAGE_NAME}: unable to resolve the type argument of a validator.build call in ${ctx.sourceFile.fileName}`);
+                }
+
                 let configText = call.configArg ? call.configArg.getText(ctx.sourceFile) : '',
-                    typeIdentity = ctx.checker.typeToString(ctx.checker.getTypeAtLocation(call.typeArg)),
+                    typeIdentity = ctx.checker.typeToString(callType),
                     buildKey = JSON.stringify([typeIdentity, configText]),
                     buildName = builds.get(buildKey);
 

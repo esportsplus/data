@@ -28,18 +28,18 @@ const VALUE_SENTINEL = '\0';
 let cache = new WeakMap<ts.SourceFile, Map<string, BrandedValidator>>();
 
 
-function collectParamRefs(node: ts.Node, paramSymbol: ts.Symbol | undefined, checker: ts.TypeChecker, bodyStart: number, spans: [number, number][]): void {
+function collectParamRefs(node: ts.Node, paramSymbol: ts.Symbol | undefined, checker: ts.Checker, bodyStart: number, spans: [number, number][]): void {
     if (paramSymbol && ts.isIdentifier(node) && checker.getSymbolAtLocation(node) === paramSymbol) {
         spans.push([node.getStart() - bodyStart, node.getEnd() - bodyStart]);
     }
 
-    ts.forEachChild(node, (child) => collectParamRefs(child, paramSymbol, checker, bodyStart, spans));
+    node.forEachChild((child) => collectParamRefs(child, paramSymbol, checker, bodyStart, spans));
 }
 
 // Source files directly imported by `file` - the registration scope: a build site consumes
 // brands registered in its own file plus the files it imports (ts module resolution), so the
 // README's set-in-a-separate-validation.ts example works order-independently under any host.
-function importedSourceFiles(file: ts.SourceFile, checker: ts.TypeChecker): ts.SourceFile[] {
+function importedSourceFiles(file: ts.SourceFile, checker: ts.Checker): ts.SourceFile[] {
     let files: ts.SourceFile[] = [];
 
     for (let i = 0, n = file.statements.length; i < n; i++) {
@@ -55,16 +55,16 @@ function importedSourceFiles(file: ts.SourceFile, checker: ts.TypeChecker): ts.S
             continue;
         }
 
-        let declarations = symbol.getDeclarations();
+        let declarations = symbol.declarations;
 
         if (!declarations) {
             continue;
         }
 
         for (let j = 0, m = declarations.length; j < m; j++) {
-            let declaration = declarations[j];
+            let declaration = declarations[j].resolve();
 
-            if (ts.isSourceFile(declaration)) {
+            if (declaration !== undefined && ts.isSourceFile(declaration)) {
                 files.push(declaration);
             }
         }
@@ -87,7 +87,7 @@ function localName(file: ts.SourceFile): string | undefined {
     return undefined;
 }
 
-function parse(node: ts.CallExpression, checker: ts.TypeChecker, name: string): BrandedValidator | null {
+function parse(node: ts.CallExpression, checker: ts.Checker, name: string): BrandedValidator | null {
     let expr = node.expression;
 
     if (
@@ -111,7 +111,13 @@ function parse(node: ts.CallExpression, checker: ts.TypeChecker, name: string): 
         return null;
     }
 
-    let brand = resolveBrandedType(checker.getTypeAtLocation(param.type), checker).brand;
+    let paramType = checker.getTypeAtLocation(param.type);
+
+    if (paramType === undefined) {
+        return null;
+    }
+
+    let brand = resolveBrandedType(paramType, checker).brand;
 
     if (!brand) {
         return null;
@@ -141,7 +147,7 @@ function parse(node: ts.CallExpression, checker: ts.TypeChecker, name: string): 
     return { async: isAsync, body, brand };
 }
 
-function visit(node: ts.Node, checker: ts.TypeChecker, name: string, registrations: Registrations): void {
+function visit(node: ts.Node, checker: ts.Checker, name: string, registrations: Registrations): void {
     if (ts.isCallExpression(node)) {
         let result = parse(node, checker, name);
 
@@ -154,13 +160,13 @@ function visit(node: ts.Node, checker: ts.TypeChecker, name: string, registratio
         }
     }
 
-    ts.forEachChild(node, (child) => visit(child, checker, name, registrations));
+    node.forEachChild((child) => visit(child, checker, name, registrations));
 }
 
 // Imported files contribute brand validators only (never removable nodes - the plugin
 // only emits the current file). Cached per source file since a build site re-scans the
 // same registration file for every consuming file the host processes.
-function scanImported(file: ts.SourceFile, checker: ts.TypeChecker): Map<string, BrandedValidator> {
+function scanImported(file: ts.SourceFile, checker: ts.Checker): Map<string, BrandedValidator> {
     let cached = cache.get(file);
 
     if (cached) {
@@ -180,7 +186,7 @@ function scanImported(file: ts.SourceFile, checker: ts.TypeChecker): Map<string,
 }
 
 
-const collect = (sourceFile: ts.SourceFile, checker: ts.TypeChecker): Registrations => {
+const collect = (sourceFile: ts.SourceFile, checker: ts.Checker): Registrations => {
     let name = localName(sourceFile),
         registrations: Registrations = { nodes: [], validators: new Map() };
 

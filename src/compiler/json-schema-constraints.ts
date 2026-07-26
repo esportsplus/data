@@ -139,23 +139,23 @@ function extractArgs(args: ts.NodeArray<ts.Expression>): StaticArg[] | null {
     return result;
 }
 
-function isNamespaceImport(id: ts.Identifier, checker: ts.TypeChecker): boolean {
+function isNamespaceImport(id: ts.Identifier, checker: ts.Checker): boolean {
     let symbol = checker.getSymbolAtLocation(id);
 
     if (!symbol) {
         return false;
     }
 
-    let declarations = symbol.getDeclarations();
+    let declarations = symbol.declarations;
 
     if (!declarations) {
         return false;
     }
 
     for (let i = 0, n = declarations.length; i < n; i++) {
-        let declaration = declarations[i];
+        let declaration = declarations[i].resolve();
 
-        if (ts.isNamespaceImport(declaration)) {
+        if (declaration !== undefined && ts.isNamespaceImport(declaration)) {
             let importDeclaration = declaration.parent.parent;
 
             if (ts.isImportDeclaration(importDeclaration) && ts.isStringLiteral(importDeclaration.moduleSpecifier)) {
@@ -438,7 +438,7 @@ function propertyName(name: ts.PropertyName): string | null {
 function recognizeCallee(
     call: ts.CallExpression,
     namedTable: Map<string, string>,
-    checker: ts.TypeChecker
+    checker: ts.Checker
 ): { name: string; variant?: string } | null {
     let callee = call.expression;
 
@@ -613,7 +613,7 @@ const extractConfig = (
     configArg: ts.Expression,
     root: AnalyzedProperty,
     sourceFile: ts.SourceFile,
-    checker: ts.TypeChecker
+    checker: ts.Checker
 ): { annotations: Map<string, Annotations>; constraints: Map<string, JsonSchema> } => {
     let annotations = new Map<string, Annotations>(),
         constraints = new Map<string, JsonSchema>();
@@ -728,7 +728,7 @@ const extractConstraints = (
     configArg: ts.Expression,
     root: AnalyzedProperty,
     sourceFile: ts.SourceFile,
-    checker: ts.TypeChecker
+    checker: ts.Checker
 ): Map<string, JsonSchema> => {
     return extractConfig(configArg, root, sourceFile, checker).constraints;
 };
