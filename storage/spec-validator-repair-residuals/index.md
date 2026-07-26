@@ -100,7 +100,7 @@ updated to landed truth:
 
 - encode-growth-signal
 - bigint-int64-parity
-- infer-nullable-not-mixed — REVERTED: merge refused: reverted — salvage red — the narrowed selection cherry-picks onto a commit an excluded sibling owns — infeasible, nothing landed; salvage ref salvage/8f60bc49-u1 @ 7990c423d65b517dd3503d95126e14bffa958b2e — the unit branch tip survives as this tag; cherry-pick the item's [infer-nullable-not-mixed] commits to recover
+- infer-nullable-not-mixed
 - unify-packed-numeric-tags
 - sbc-compute-size
 - remove-legacy-config-form
@@ -114,3 +114,4 @@ run,scope,unit,ordinal,slug,event,state,detail,elapsed_ms,ts
 8f60bc49,item,u1,1.3,infer-nullable-not-mixed,reverted,REVERTED,,,2026-07-26T15:24:35-07:00
 8f60bc49,item,u1,1.5,sbc-compute-size,complete,COMPLETE,,,2026-07-26T15:24:35-07:00
 8f60bc49,run,,,,run-end,RUN END,"applied: 5 completed, 1 rejected, 1 status-actions, 8 changelog-rows",,2026-07-26T15:24:36-07:00
+,item,mutator,,infer-nullable-not-mixed,requeued,REQUEUED,,,2026-07-26T15:26:10-07:00
