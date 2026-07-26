@@ -1,13 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P2
 source: finding D6 (audit section D)
 depends-on: relocate-tests-and-benches
 files-own: [src/sbc/size.ts, test/sbc/size.test.ts]
 tests: [test/sbc/size.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # computeSize returns the exact encoded length, compress included

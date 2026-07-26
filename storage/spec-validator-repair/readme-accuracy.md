@@ -1,12 +1,11 @@
 ---
 type: docs
 recommended-model: sonnet
-status: DEFERRED
+status: PENDING
 priority: P2
 source: findings C22, D10 + doc consequences of D2, D5, D6, D9, D13, C15, E-P2 (audit sections C, D, E)
 depends-on: [compiler-annotation-extraction, output-construction-safety, plugin-self-assertion, runtime-tojsonschema, sbc-compute-size, sbc-encode-safety, sbc-schema-preregistration, repair-brand-registration, sbc-compile-time-parity, format-validators-correctness]
 files-own: [README.md]
-blocked-reason: dependency sbc-compute-size did not land — deferred
 ---
 
 # README tells the truth about the shipped surface

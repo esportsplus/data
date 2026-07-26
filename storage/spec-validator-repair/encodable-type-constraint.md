@@ -1,13 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P1
 depends-on: [remove-map-set-tags, unify-packed-numeric-tags]
 files-own: [src/sbc/types.ts, src/sbc/tagged.ts, test/sbc/types.test.ts]
 files-shared: [src/sbc/index.ts]
 tests: [test/sbc/types.test.ts, test/sbc/index.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Encodable constraint on encode; named throw for unrepresentable values

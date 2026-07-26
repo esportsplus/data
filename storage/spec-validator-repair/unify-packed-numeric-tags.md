@@ -1,13 +1,12 @@
 ---
 type: refactor
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P2
 depends-on: [remove-map-set-tags]
 files-own: [src/sbc/tagged.ts, src/sbc/codegen.ts, src/sbc/size.ts, test/sbc/index.test.ts, test/sbc/codegen.test.ts]
 files-shared: [src/sbc/platform.ts]
 tests: [test/sbc/index.test.ts, test/sbc/codegen.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Unify packed numeric arrays onto one typeId-carrying tag

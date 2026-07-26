@@ -1,12 +1,11 @@
 ---
 type: fix
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P1
 depends-on: [validator-boolean-coercion]
 files-own: [src/compiler/validators.ts, test/compiler/validators.test.ts]
 tests: [test/compiler/validators.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Rewrite validator bodies through the AST, not a regex

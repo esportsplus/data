@@ -1,13 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P0
 depends-on: [relocate-tests-and-benches, encode-growth-signal]
 files-own: [src/sbc/tagged.ts, src/sbc/constants.ts, src/sbc/schema.ts, test/sbc/platform.test.ts]
 files-shared: [src/sbc/codegen.ts, src/sbc/extract.ts]
 tests: [test/sbc/platform.test.ts, test/sbc/index.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # One int64 range behavior across Node and browser; rename the vocabulary

@@ -1,13 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P0
 source: findings D2, D4 (audit section D)
 depends-on: relocate-tests-and-benches
 files-own: [src/sbc/index.ts, test/sbc/index.test.ts]
 tests: [test/sbc/index.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # defineSchema pre-registration is honored; unknown hints throw

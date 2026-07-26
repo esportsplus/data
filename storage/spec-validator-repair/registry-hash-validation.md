@@ -1,12 +1,11 @@
 ---
 type: fix
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P1
 depends-on: [decoder-count-limits]
 files-own: [src/sbc/registry.ts, src/sbc/schema.ts, test/sbc/registry.test.ts]
 tests: [test/sbc/registry.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Verify the registry wire hash against the fields it labels

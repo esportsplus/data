@@ -1,13 +1,12 @@
 ---
 type: test
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P2
 source: audit section D (SBC NOT TESTED — browser platform branch)
 depends-on: relocate-tests-and-benches
 files-own: [src/sbc/platform.ts, test/sbc/platform.test.ts, vitest.config.ts]
 tests: [test/sbc/platform.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Exercise the browser branch of the SBC platform layer

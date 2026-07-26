@@ -1,14 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P2
 source: findings D7, D8 (audit section D)
 depends-on: [relocate-tests-and-benches, sbc-schema-preregistration]
 files-own: [src/sbc/cache.ts, src/sbc/schema.ts, test/sbc/cache.test.ts, test/sbc/schema-store.test.ts]
 files-shared: [src/sbc/index.ts]
 tests: [test/sbc/cache.test.ts, test/sbc/schema-store.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Per-codec schema cache; store tests that actually exercise the store

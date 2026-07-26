@@ -1,6 +1,9 @@
 # Changelog
 
 ## Completed
+- [validator-boolean-coercion] 042225b. Deviations: salvaged session-side from salvage/f177cf28-u1; the item's undeclared removes_tests was the run's root cause — two legacy edge-cases.test.ts assertions encoding the old String(source).toLowerCase() policy were updated to assert rejection; ladder: 1 attempt (critic), completed. · spec: spec-validator-repair
+- [validator-proto-property-reads] 2ff27e3. Deviations: salvaged session-side from salvage/f177cf28-u1 after the u1 batch merge reverted on a sibling's suite_red; ladder: 1 attempt (critic), completed. · spec: spec-validator-repair
+- [validator-recursive-types] 24af36d. Deviations: salvaged session-side from salvage/f177cf28-u1 after the u1 batch merge reverted on an unrelated sibling's suite_red; ladder: 2 attempts (critic FAIL high, FABLE_REPLAN), completed. · spec: spec-validator-repair
 - abandoned spend: ~$238.50 equivalent API cost across 4 terminal non-COMPLETED item(s) (validator-recursive-types, validator-proto-property-reads, validator-boolean-coercion, remove-legacy-config-form); recorded, not divided into per-item costs (run f177cf28)
 - run-level spend: ~$648.42 equivalent API cost (warm implementer runs + unit-scoped + boundary seats; never divided across items; blended rate = mean(input, output, cache_read, cache_creation) per million tokens) (run f177cf28)
 - [residue-codec-false-positive] e25aa7a. Deviations: none; ladder: 1 attempt (critic), completed. Cost: ~$8.52 equivalent API cost (blended-rate approximation). · spec: spec-validator-repair

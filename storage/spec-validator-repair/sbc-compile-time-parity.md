@@ -1,13 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P0
 source: findings D1, D5 (audit section D)
 depends-on: [relocate-tests-and-benches, analyzer-structural-types, remove-map-set-tags, unify-packed-numeric-tags]
 files-own: [src/compiler/sbc/index.ts, test/compiler/sbc/index.test.ts]
 tests: [test/compiler/sbc/index.test.ts]
-blocked-reason: dependency remove-map-set-tags did not land — deferred
 ---
 
 # Compile-time SBC hints match runtime behavior byte-for-byte

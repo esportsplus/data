@@ -1,11 +1,10 @@
 ---
 type: fix
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P0
 files-own: [src/sbc/index.ts, src/sbc/tagged.ts, src/sbc/codegen.ts, test/sbc/index.test.ts]
 tests: [test/sbc/index.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Stop reading buffer overflow out of RangeError; bound the retry loop

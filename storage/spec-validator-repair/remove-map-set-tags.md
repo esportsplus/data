@@ -1,13 +1,12 @@
 ---
 type: refactor
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P1
 depends-on: [relocate-tests-and-benches]
 files-own: [src/sbc/tagged.ts, src/sbc/constants.ts, src/sbc/schema.ts, src/sbc/size.ts, src/sbc/extract.ts, test/sbc/index.test.ts]
 files-shared: [src/sbc/codegen.ts, src/sbc/index.ts]
 tests: [test/sbc/index.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Remove Map and Set value types (tags 15/16)

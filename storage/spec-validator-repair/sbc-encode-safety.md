@@ -1,13 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P1
 source: findings D3, D9, D12, D13, D14 (audit section D)
 depends-on: [relocate-tests-and-benches, sbc-schema-preregistration]
 files-own: [src/sbc/index.ts, src/sbc/tagged.ts, src/sbc/codegen.ts, test/sbc/encode-safety.test.ts]
 tests: [test/sbc/encode-safety.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Encode/decode fail loud: bigint ranges, hinted mismatches, non-encodables

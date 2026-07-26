@@ -1,13 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P0
 depends-on: [encode-growth-signal]
 files-own: [src/sbc/codegen.ts, src/sbc/extract.ts, test/sbc/codegen.test.ts, test/sbc/extract.test.ts]
 files-shared: [src/sbc/constants.ts]
 tests: [test/sbc/codegen.test.ts, test/sbc/extract.test.ts, test/sbc/index.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Carry MAX_ARRAY_COUNT into the compiled decoder and extractField

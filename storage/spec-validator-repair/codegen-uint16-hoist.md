@@ -1,12 +1,11 @@
 ---
 type: refactor
 recommended-model: sonnet
-status: DEFERRED
+status: PENDING
 priority: P2
 depends-on: [decoder-count-limits]
 files-own: [src/sbc/codegen.ts, test/sbc/codegen.test.ts]
 tests: [test/sbc/codegen.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Hoist the uint16 property read to match its sibling width arms

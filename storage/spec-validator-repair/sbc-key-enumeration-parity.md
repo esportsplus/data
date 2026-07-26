@@ -1,12 +1,11 @@
 ---
 type: fix
 recommended-model: opus
-status: DEFERRED
+status: PENDING
 priority: P1
 depends-on: [encode-growth-signal]
 files-own: [src/sbc/index.ts, test/sbc/index.test.ts]
 tests: [test/sbc/index.test.ts]
-blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Count own keys only, matching the rest of the encode pipeline
