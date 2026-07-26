@@ -25,12 +25,6 @@ const validator: Validator = {
 
 
 export { codec } from './sbc/index';
-export {
-    decodeTypedArray,
-    encodeTypedArrayInto,
-    getTypedArrayType,
-    TYPED_ARRAY_MARKER,
-} from './typed-array-codec';
 export { validator };
 export * from './types';
 
