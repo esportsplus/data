@@ -276,13 +276,10 @@ describe('codec2 schema hints runtime', () => {
         )).toThrow('Codec2: unknown schema hash');
     });
 
-    test('encode with unknown hash falls through to inference', () => {
+    test('encode with unknown hash throws', () => {
         let c = codec();
-        let obj = { name: 'test' };
-        let encoded = c.encode(obj, { schema: 12345 });
-        let decoded = c.decode(encoded);
 
-        expect(decoded).toEqual(obj);
+        expect(() => c.encode({ name: 'test' }, { schema: 12345 })).toThrow('Codec2: unknown schema hash 12345');
     });
 
     test('encode with view option and schema hint', () => {
