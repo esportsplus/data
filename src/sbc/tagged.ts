@@ -2,11 +2,18 @@
 // Extracted from codec() closure; state threaded via DecodeContext / EncodeContext
 
 import { MAX_ARRAY_COUNT } from './constants';
-import { byteLen, isNode, readBI64, readF64, readStr, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
+import { byteLen, readBI64, readF64, readStr, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 import { inferAndRegister } from './schema';
 
 import type { PersistentStore, SchemaRegistry } from './types';
 import type { Schema, SbcHelpers } from './codegen';
+
+
+// int64 bounds — writeBigInt64LE throws RangeError above these on Node and silently
+// wraps modulo 2^64 in the browser (DataView.setBigInt64), so guard every int64 write.
+const INT64_MIN = -(2n ** 63n);
+
+const INT64_OVERFLOW = 2n ** 63n;
 
 
 type DecodeContext = {
@@ -38,7 +45,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
     }
 
     if (len === 0) {
-        return undefined;
+        throw new Error('Codec2: empty buffer');
     }
 
     let tag = buf[offset]!;
@@ -69,10 +76,8 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
                 throw new Error('Codec2: truncated bytes at offset ' + offset);
             }
 
-            if (isNode) {
-                return Buffer.from(buf.subarray(offset + 5, offset + 5 + bLen));
-            }
-
+            // Always a plain Uint8Array COPY (README contract): constructor === Uint8Array,
+            // no pooled Buffer aliasing into the source buffer, structuredClone-safe.
             return new Uint8Array(buf.subarray(offset + 5, offset + 5 + bLen));
         }
 
@@ -228,52 +233,6 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
             return arr;
         }
 
-        case 15: {
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: map count ' + count + ' exceeds limit');
-            }
-
-            let map = new Map(),
-                p = offset + 5;
-
-            for (let i = 0; i < count; i++) {
-                let kEnd = decodeTagEnd(buf, p, depth + 1);
-                let key = decodeSbc(dctx, buf, p, kEnd - p, depth + 1);
-
-                p = kEnd;
-
-                let vEnd = decodeTagEnd(buf, p, depth + 1);
-                let val = decodeSbc(dctx, buf, p, vEnd - p, depth + 1);
-
-                p = vEnd;
-                map.set(key, val);
-            }
-
-            return map;
-        }
-
-        case 16: {
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: set count ' + count + ' exceeds limit');
-            }
-
-            let set = new Set(),
-                p = offset + 5;
-
-            for (let i = 0; i < count; i++) {
-                let end = decodeTagEnd(buf, p, depth + 1);
-
-                set.add(decodeSbc(dctx, buf, p, end - p, depth + 1));
-                p = end;
-            }
-
-            return set;
-        }
-
         case 17: {
             let typeId = buf[offset + 1]!;
             let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
@@ -408,36 +367,6 @@ function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
 
             return offset + 5 + count * 4;
         }
-        case 15: {
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: map count ' + count + ' exceeds limit');
-            }
-
-            let p = offset + 5;
-
-            for (let i = 0, n = count * 2; i < n; i++) {
-                p = decodeTagEnd(buf, p, depth + 1);
-            }
-
-            return p;
-        }
-        case 16: {
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: set count ' + count + ' exceeds limit');
-            }
-
-            let p = offset + 5;
-
-            for (let i = 0; i < count; i++) {
-                p = decodeTagEnd(buf, p, depth + 1);
-            }
-
-            return p;
-        }
         case 17: {
             let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
 
@@ -453,6 +382,13 @@ function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
 }
 
 
+function unrepresentable(value: unknown): never {
+    let ctor = value == null ? undefined : (value as { constructor?: { name?: string } }).constructor;
+
+    throw new Error('Codec2: unrepresentable value of type ' + (ctor?.name ?? typeof value));
+}
+
+
 function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: number): number {
     if (value === null || value === undefined) {
         buf[pos] = 0;
@@ -461,6 +397,10 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
 
     switch (typeof value) {
         case 'bigint':
+            if (value < INT64_MIN || value >= INT64_OVERFLOW) {
+                throw new Error('Codec2: bigint out of int64 range');
+            }
+
             buf[pos] = 9;
             writeBI64.call(buf, value, pos + 1);
             return pos + 9;
@@ -569,8 +509,7 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 let typeId = TYPED_ARRAY_IDS.get(ta.constructor);
 
                 if (typeId === undefined) {
-                    buf[pos] = 0;
-                    return pos + 1;
+                    unrepresentable(value);
                 }
 
                 let bLen = ta.byteLength,
@@ -590,47 +529,6 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 }
 
                 return needed;
-            }
-
-            if (value instanceof Map) {
-                let count = value.size;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: map count exceeds limit');
-                }
-
-                buf[pos] = 15;
-                buf[pos + 1] = count & 0xFF;
-                buf[pos + 2] = (count >>> 8) & 0xFF;
-                buf[pos + 3] = (count >>> 16) & 0xFF;
-                buf[pos + 4] = (count >>> 24) & 0xFF;
-
-                let p = pos + 5;
-
-                for (let [k, v] of value) {
-                    p = encodeSbc(ectx, k, buf, p);
-                    p = encodeSbc(ectx, v, buf, p);
-                }
-                return p;
-            }
-
-            if (value instanceof Set) {
-                let count = value.size;
-
-                if (count > MAX_ARRAY_COUNT) {
-                    throw new Error('Codec2: set count exceeds limit');
-                }
-
-                buf[pos] = 16;
-                buf[pos + 1] = count & 0xFF;
-                buf[pos + 2] = (count >>> 8) & 0xFF;
-                buf[pos + 3] = (count >>> 16) & 0xFF;
-                buf[pos + 4] = (count >>> 24) & 0xFF;
-
-                let p = pos + 5;
-
-                for (let v of value) { p = encodeSbc(ectx, v, buf, p); }
-                return p;
             }
 
             if (Array.isArray(value)) {
@@ -759,6 +657,16 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 return p;
             }
 
+            // Runtime backstop for the Encodable constraint: reject any object that is
+            // not a plain record (Map, Set, WeakMap, RegExp, Promise, class instances).
+            // The TypeScript constraint is the primary gate; this catches `any`-typed and
+            // plain-JS call sites the compiler never saw.
+            let ctor = (value as { constructor?: unknown }).constructor;
+
+            if (ctor !== Object && ctor !== undefined) {
+                unrepresentable(value);
+            }
+
             // Plain object → schema-compiled path
             let obj = value as Record<string, unknown>,
                 schema = ectx.weakCache.get(obj) ?? null;
@@ -804,9 +712,12 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
             return end;
         }
 
+        case 'function':
+        case 'symbol':
+            return unrepresentable(value);
+
         default:
-            buf[pos] = 0;
-            return pos + 1;
+            return unrepresentable(value);
     }
 }
 

@@ -10,13 +10,126 @@ import { computeNameHash, computeShapeHash, inferAndRegister, inferType, parseFi
 import { computeSize } from './size';
 import { decodeSbc, decodeTagEnd, encodeSbc } from './tagged';
 
-import type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, SchemaRegistry } from './types';
+import type { CodecOptions, DecodeOptions, Encodable, EncodeOptions, FieldSpec, SchemaRegistry } from './types';
 import type { DecodeContext, EncodeContext } from './tagged';
 import type { ExtractContext } from './extract';
 import type { SizeContext } from './size';
 import type { FieldDef, Schema, SbcHelpers } from './codegen';
 
 import cache from './cache';
+
+
+// int64 bounds — an out-of-range bigint throws RangeError on Node and silently wraps
+// modulo 2^64 in the browser, so the hinted validator rejects it up front.
+const INT64_MIN = -(2n ** 63n);
+
+const INT64_OVERFLOW = 2n ** 63n;
+
+// Ceiling for the encode-buffer grow-loop — a value-range RangeError (not a buffer-size
+// one) cannot be resolved by a larger buffer, so growth stops here instead of doubling
+// toward an "Array buffer allocation failed" OOM.
+const MAX_ENCODE_BUF = 0x7fffffff;
+
+const HINTED_INT_RANGE: Record<string, [number, number]> = {
+    int16: [-32768, 32767],
+    int32: [-2147483648, 2147483647],
+    int8: [-128, 127],
+    uint16: [0, 65535],
+    uint32: [0, 4294967295],
+    uint8: [0, 255],
+};
+
+
+// Hinted-path validation (D12): an explicit schema drives fixed-width writes, so a value
+// that does not match the declared field would silently truncate/corrupt. Validate once
+// per field on the hinted path only; the inference path narrows widths from values already.
+function validateHinted(schema: Schema, obj: Record<string, unknown>): void {
+    let fields = schema.fields;
+
+    for (let i = 0, n = fields.length; i < n; i++) {
+        let f = fields[i]!,
+            name = f.name,
+            value = obj[name];
+
+        if (value === null || value === undefined) {
+            if (!f.nullable) {
+                throw new Error("Codec2: field '" + name + "' is required (non-nullable)");
+            }
+
+            continue;
+        }
+
+        switch (f.type) {
+            case 'bigint':
+                if (typeof value !== 'bigint') {
+                    throw new Error("Codec2: field '" + name + "' expected bigint, got " + typeof value);
+                }
+
+                if (value < INT64_MIN || value >= INT64_OVERFLOW) {
+                    throw new Error("Codec2: field '" + name + "' bigint out of int64 range");
+                }
+
+                break;
+
+            case 'boolean':
+                if (typeof value !== 'boolean') {
+                    throw new Error("Codec2: field '" + name + "' expected boolean, got " + typeof value);
+                }
+
+                break;
+
+            case 'bytes':
+                if (!(value instanceof Uint8Array)) {
+                    throw new Error("Codec2: field '" + name + "' expected bytes (Uint8Array)");
+                }
+
+                break;
+
+            case 'date':
+                if (!(value instanceof Date)) {
+                    throw new Error("Codec2: field '" + name + "' expected date (Date)");
+                }
+
+                break;
+
+            case 'float64':
+                if (typeof value !== 'number') {
+                    throw new Error("Codec2: field '" + name + "' expected float64, got " + typeof value);
+                }
+
+                break;
+
+            case 'int16':
+            case 'int32':
+            case 'int8':
+            case 'uint16':
+            case 'uint32':
+            case 'uint8':
+                validateHintedInt(name, value, f.type);
+                break;
+
+            case 'string':
+                if (typeof value !== 'string') {
+                    throw new Error("Codec2: field '" + name + "' expected string, got " + typeof value);
+                }
+
+                break;
+        }
+    }
+}
+
+
+function validateHintedInt(name: string, value: unknown, type: string): void {
+    if (typeof value !== 'number' || !Number.isInteger(value)) {
+        throw new Error("Codec2: field '" + name + "' expected " + type + ', got ' + (typeof value === 'number' ? value : typeof value));
+    }
+
+    let range = HINTED_INT_RANGE[type]!;
+
+    if (value < range[0] || value > range[1]) {
+        throw new Error("Codec2: field '" + name + "' value " + value + ' out of ' + type + ' range [' + range[0] + ', ' + range[1] + ']');
+    }
+}
 
 
 // Tags:
@@ -39,12 +152,12 @@ import cache from './cache';
 // 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
 const codec = (options?: CodecOptions): {
-    computeSize(value: unknown): number;
+    computeSize<T>(value: T & Encodable<T>): number;
     decode<T = unknown>(buffer: Uint8Array, lengthOrOptions?: number | DecodeOptions): T;
     decodeAt<T = unknown>(buffer: Uint8Array, offset: number): T;
     defineSchema(fields: FieldSpec[]): number;
     deserializeRegistry(data: Uint8Array): void;
-    encode<T>(value: T, viewOrOptions?: boolean | EncodeOptions): Uint8Array;
+    encode<T>(value: T & Encodable<T>, viewOrOptions?: boolean | EncodeOptions): Uint8Array;
     extractField<T = unknown>(buffer: Uint8Array, fieldName: string): T;
     serializeRegistry(): Uint8Array
 } => {
@@ -64,7 +177,7 @@ const codec = (options?: CodecOptions): {
         cacheSchemas: (Schema | null)[] = [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
         lastSortedKeys: string[] | null = null,
         typedSchemaFieldCounts = new Set<number>(),
-        typedSchemas = new Map<number, Schema>(),  // nameHash → schema for defineSchema with structural types
+        typedSchemas = new Map<number, Schema>(),  // nameHash → schema for every declared schema (matchSchema lookup)
         weakCache = new WeakMap<object, Schema>();
 
     function setCache(schema: Schema, obj: object): void {
@@ -97,6 +210,14 @@ const codec = (options?: CodecOptions): {
 
     // Specialized object encoder — skips typeof/instanceof checks for known-object fields
     function encodeObj(obj: Record<string, unknown>, buf: Uint8Array, pos: number): number {
+        // Non-plain-object backstop (D13): RegExp/Error/DataView/ArrayBuffer infer to
+        // 'object' and route here, where an empty own-key set would silently encode as {}.
+        let ctor = (obj as { constructor?: unknown } | null)?.constructor;
+
+        if (ctor !== Object && ctor !== undefined) {
+            throw new Error('Codec2: unencodable value (' + ((ctor as { name?: string }).name ?? typeof obj) + ')');
+        }
+
         let schema = weakCache.get(obj) ?? null;
 
         if (schema && !revalidateCached(obj, schema)) {
@@ -465,7 +586,13 @@ const codec = (options?: CodecOptions): {
                     throw e;
                 }
 
-                encodeBuf = allocBuf(encodeBuf.length * 2);
+                let next = encodeBuf.length * 2;
+
+                if (next > MAX_ENCODE_BUF) {
+                    throw e;
+                }
+
+                encodeBuf = allocBuf(next);
             }
         }
     }
@@ -486,13 +613,23 @@ const codec = (options?: CodecOptions): {
                     throw e;
                 }
 
-                encodeBuf = allocBuf(encodeBuf.length * 2);
+                let next = encodeBuf.length * 2;
+
+                if (next > MAX_ENCODE_BUF) {
+                    throw e;
+                }
+
+                encodeBuf = allocBuf(next);
             }
         }
     }
 
 
-    function encodeObject(schema: Schema, obj: Record<string, unknown>, view: boolean): Uint8Array {
+    function encodeObject(schema: Schema, obj: Record<string, unknown>, view: boolean, validate: boolean): Uint8Array {
+        if (validate) {
+            validateHinted(schema, obj);
+        }
+
         let end: number,
             h = schema.hash,
             useCompressed = compress && schema.compressible && schema.compressedEncodeFn;
@@ -550,7 +687,7 @@ const codec = (options?: CodecOptions): {
 
         // Schema hint fast path — skip typeof check, WeakMap, matchSchema, inferAndRegister
         if (hintSchema) {
-            return encodeObject(hintSchema, value as Record<string, unknown>, view);
+            return encodeObject(hintSchema, value as Record<string, unknown>, view, true);
         }
 
         // Fast path: plain object
@@ -572,7 +709,7 @@ const codec = (options?: CodecOptions): {
                 setCache(schema, obj);
             }
 
-            return encodeObject(schema, obj, view);
+            return encodeObject(schema, obj, view, false);
         }
 
         // Generic path
@@ -710,27 +847,18 @@ const codec = (options?: CodecOptions): {
             store.set(hash, { fields: sorted, hash });
         }
 
-        // Index typed schemas by name hash for matchSchema lookup
-        let hasStructural = false;
+        // Index every declared schema by name hash so matchSchema honors declared
+        // widths and nullable flags ahead of inference (D2) — not just structural ones.
+        // A same-names/different-types collision drops the entry to avoid a wrong bind.
+        let nameHash = computeNameHash(keys),
+            existing = typedSchemas.get(nameHash);
 
-        for (let i = 0, m = fieldDefs.length; i < m; i++) {
-            if (fieldDefs[i]!.elementType || fieldDefs[i]!.refHash !== undefined) {
-                hasStructural = true;
-                break;
-            }
+        if (existing && existing.hash !== schema.hash) {
+            typedSchemas.delete(nameHash);
         }
-
-        if (hasStructural) {
-            let nameHash = computeNameHash(keys),
-                existing = typedSchemas.get(nameHash);
-
-            if (existing && existing.hash !== schema.hash) {
-                typedSchemas.delete(nameHash);
-            }
-            else {
-                typedSchemas.set(nameHash, schema);
-                typedSchemaFieldCounts.add(schema.fields.length);
-            }
+        else {
+            typedSchemas.set(nameHash, schema);
+            typedSchemaFieldCounts.add(schema.fields.length);
         }
 
         return hash;
@@ -754,9 +882,15 @@ const codec = (options?: CodecOptions): {
     }
 
 
-    function resolveSchemaForEncode(hint: number | FieldSpec[]): Schema | null {
+    function resolveSchemaForEncode(hint: number | FieldSpec[]): Schema {
         if (typeof hint === 'number') {
-            return registry.schemas.get(hint) ?? null;
+            let s = registry.schemas.get(hint);
+
+            if (!s) {
+                throw new Error('Codec2: unknown schema hash ' + hint);
+            }
+
+            return s;
         }
 
         let hash = defineSchema(hint);
@@ -801,6 +935,6 @@ const codec = (options?: CodecOptions): {
 
 
 export { codec };
-export type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, PersistentStore, SchemaRegistry } from './types';
+export type { CodecOptions, DecodeOptions, Encodable, EncodeOptions, FieldSpec, PersistentStore, SchemaRegistry } from './types';
 export type { Schema } from './codegen';
 export type { StoredSchema } from './cache';

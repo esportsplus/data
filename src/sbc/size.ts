@@ -51,10 +51,6 @@ function computeSize(ctx: SizeContext, value: unknown): number {
                 return 5 + value.length;
             }
 
-            if (value instanceof Map || value instanceof Set) {
-                return -1;
-            }
-
             if (ArrayBuffer.isView(value)) {
                 return -1;
             }

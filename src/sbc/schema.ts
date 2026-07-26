@@ -148,14 +148,6 @@ function inferType(value: unknown): string {
                 return 'typedarray';
             }
 
-            if (value instanceof Map) {
-                return 'map';
-            }
-
-            if (value instanceof Set) {
-                return 'set';
-            }
-
             if (Array.isArray(value)) {
                 return 'array';
             }

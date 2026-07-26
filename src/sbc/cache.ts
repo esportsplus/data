@@ -28,6 +28,11 @@ let hand: CacheEntry | null = null,
     tail: CacheEntry | null = null;
 
 
+function clear(): void {
+    hand = head = tail = null;
+    map = new Map<number, CacheEntry>();
+}
+
 function evictOne(): void {
     let o = hand ?? tail;
 
@@ -84,7 +89,6 @@ const set = (hash: number, schema: StoredSchema): void => {
     let entry = map.get(hash);
 
     if (entry) {
-        entry.schema = schema;
         entry.visited = true;
 
         return;
@@ -109,5 +113,5 @@ const set = (hash: number, schema: StoredSchema): void => {
 }
 
 
-export default { get, set };
+export default { clear, get, set };
 export type { StoredSchema };

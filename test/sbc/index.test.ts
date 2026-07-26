@@ -809,19 +809,16 @@ describe('Codec2', () => {
             expect(Array.from(enc1)).toEqual(Array.from(enc2));
         });
 
-        it('DataView falls through to object encoder (F-TEST-4)', () => {
+        it('DataView throws the unrepresentable error (F-TEST-4)', () => {
             let ab = new ArrayBuffer(8),
                 dv = new DataView(ab);
 
             dv.setFloat64(0, 3.14);
 
-            // DataView is not handled by the typed array branch (explicitly excluded)
-            // It falls through to the plain-object encoder path
-            let encoded = c.encode(dv);
-
-            // Should not throw — documents current behavior
-            expect(encoded).toBeInstanceOf(Uint8Array);
-            expect(encoded.length).toBeGreaterThan(0);
+            // DataView is excluded from the typed-array branch and is not a plain
+            // record, so the encoder rejects it with a named throw rather than
+            // silently emitting tag 0 (null).
+            expect(() => c.encode(dv)).toThrow('Codec2: unrepresentable value of type DataView');
         });
     });
 
@@ -1224,141 +1221,6 @@ describe('Codec2', () => {
     });
 
 
-    // === MAP ===
-
-    describe('Map', () => {
-        it('empty Map', () => {
-            let result = c.decode(c.encode(new Map())) as Map<unknown, unknown>;
-
-            expect(result).toBeInstanceOf(Map);
-            expect(result.size).toBe(0);
-        });
-
-        it('string keys', () => {
-            let m = new Map([['a', 1], ['b', 2], ['c', 3]]);
-            let result = c.decode(c.encode(m)) as Map<unknown, unknown>;
-
-            expect(result).toBeInstanceOf(Map);
-            expect(result.size).toBe(3);
-            expect(result.get('a')).toBe(1);
-            expect(result.get('b')).toBe(2);
-            expect(result.get('c')).toBe(3);
-        });
-
-        it('numeric keys', () => {
-            let m = new Map([[1, 'one'], [2, 'two']]);
-            let result = c.decode(c.encode(m)) as Map<unknown, unknown>;
-
-            expect(result.get(1)).toBe('one');
-            expect(result.get(2)).toBe('two');
-        });
-
-        it('mixed value types', () => {
-            let m = new Map<unknown, unknown>([['str', 'hello'], ['num', 42], ['bool', true], ['null', null]]);
-            let result = c.decode(c.encode(m)) as Map<unknown, unknown>;
-
-            expect(result.get('str')).toBe('hello');
-            expect(result.get('num')).toBe(42);
-            expect(result.get('bool')).toBe(true);
-            expect(result.get('null')).toBe(null);
-        });
-
-        it('nested Map', () => {
-            let inner = new Map([['x', 1]]);
-            let outer = new Map<string, unknown>([['inner', inner]]);
-            let result = c.decode(c.encode(outer)) as Map<string, unknown>;
-            let resultInner = result.get('inner') as Map<string, unknown>;
-
-            expect(resultInner).toBeInstanceOf(Map);
-            expect(resultInner.get('x')).toBe(1);
-        });
-
-        it('Map in object field', () => {
-            let obj = { data: new Map([['key', 'val']]) };
-            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
-            let m = result.data as Map<string, string>;
-
-            expect(m).toBeInstanceOf(Map);
-            expect(m.get('key')).toBe('val');
-        });
-
-        it('large Map (1000 entries)', () => {
-            let m = new Map<number, number>();
-
-            for (let i = 0; i < 1000; i++) {
-                m.set(i, i * 2);
-            }
-
-            let result = c.decode(c.encode(m)) as Map<number, number>;
-
-            expect(result.size).toBe(1000);
-            expect(result.get(0)).toBe(0);
-            expect(result.get(999)).toBe(1998);
-        });
-    });
-
-
-    // === SET ===
-
-    describe('Set', () => {
-        it('empty Set', () => {
-            let result = c.decode(c.encode(new Set())) as Set<unknown>;
-
-            expect(result).toBeInstanceOf(Set);
-            expect(result.size).toBe(0);
-        });
-
-        it('string values', () => {
-            let s = new Set(['a', 'b', 'c']);
-            let result = c.decode(c.encode(s)) as Set<string>;
-
-            expect(result).toBeInstanceOf(Set);
-            expect(result.size).toBe(3);
-            expect(result.has('a')).toBe(true);
-            expect(result.has('b')).toBe(true);
-            expect(result.has('c')).toBe(true);
-        });
-
-        it('numeric values', () => {
-            let s = new Set([1, 2, 3, 42]);
-            let result = c.decode(c.encode(s)) as Set<number>;
-
-            expect(result.size).toBe(4);
-            expect(result.has(42)).toBe(true);
-        });
-
-        it('mixed types', () => {
-            let s = new Set<unknown>([1, 'hello', true, null]);
-            let result = c.decode(c.encode(s)) as Set<unknown>;
-
-            expect(result.size).toBe(4);
-            expect(result.has(1)).toBe(true);
-            expect(result.has('hello')).toBe(true);
-            expect(result.has(true)).toBe(true);
-            expect(result.has(null)).toBe(true);
-        });
-
-        it('nested Set', () => {
-            let inner = new Set([1, 2]);
-            let outer = new Set<unknown>([inner]);
-            let result = c.decode(c.encode(outer)) as Set<unknown>;
-            let items = [...result];
-
-            expect(items[0]).toBeInstanceOf(Set);
-            expect((items[0] as Set<number>).has(1)).toBe(true);
-        });
-
-        it('Set in object field', () => {
-            let obj = { tags: new Set(['a', 'b']) };
-            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
-            let s = result.tags as Set<string>;
-
-            expect(s).toBeInstanceOf(Set);
-            expect(s.has('a')).toBe(true);
-        });
-    });
-
-
     // === TYPED ARRAYS ===
 
     describe('Typed Arrays', () => {
@@ -1572,17 +1434,20 @@ describe('Codec2', () => {
     // === DEFINE SCHEMA ===
 
     describe('defineSchema', () => {
-        it('pre-registered schema encodes/decodes', () => {
+        it('pre-registered schema encodes/decodes with its declared widths', () => {
             let c = codec();
-
-            c.defineSchema([
+            let h = c.defineSchema([
+                { name: 'age', type: 'int32' },
                 { name: 'name', type: 'string' },
-                { name: 'age', type: 'uint8' },
             ]);
 
-            let obj = { age: 25, name: 'Alice' };
+            let obj = { age: 25, name: 'Alice' },
+                buf = c.encode(obj);
 
-            expect(c.decode(c.encode(obj))).toEqual(obj);
+            // Declared int32 is honored over the uint8 inference would pick for 25 —
+            // the emitted hash is the declared hash, not an inferred one.
+            expect(schemaHash(buf)).toBe(h);
+            expect(c.decode(buf)).toEqual(obj);
         });
 
         it('returns consistent hash for same fields', () => {
@@ -1616,14 +1481,17 @@ describe('Codec2', () => {
             let c = codec();
             let obj = { active: true, name: 'Bob' };
 
-            c.encode(obj);
+            let inferred = c.encode(obj).slice();
 
             let hash = c.defineSchema([
                 { name: 'active', type: 'boolean' },
                 { name: 'name', type: 'string' },
             ]);
 
-            expect(typeof hash).toBe('number');
+            // The declared shape hash equals the hash inference already minted for
+            // this object — declaring after inferring is idempotent.
+            expect(hash).toBe(schemaHash(inferred));
+            expect(schemaHash(c.encode(obj))).toBe(hash);
             expect(c.decode(c.encode(obj))).toEqual(obj);
         });
 
@@ -1669,22 +1537,6 @@ describe('Codec2', () => {
             expect(c.decode(c.encode({ id: 2, value: 42 }))).toEqual({ id: 2, value: 42 });
         });
 
-        it('schema with map/set types', () => {
-            let c = codec();
-
-            c.defineSchema([
-                { name: 'meta', type: 'map' },
-                { name: 'tags', type: 'set' },
-            ]);
-
-            let obj = { meta: new Map([['k', 'v']]), tags: new Set(['a', 'b']) };
-            let result = c.decode(c.encode(obj)) as Record<string, unknown>;
-
-            expect(result.tags).toBeInstanceOf(Set);
-            expect((result.tags as Set<string>).has('a')).toBe(true);
-            expect(result.meta).toBeInstanceOf(Map);
-            expect((result.meta as Map<string, string>).get('k')).toBe('v');
-        });
     });
 
 
@@ -1973,80 +1825,6 @@ describe('Codec2', () => {
             expect(addr.city).toBe('NYC');
         });
 
-        it('extracts field after map field', () => {
-            let c = codec();
-
-            c.defineSchema([
-                { name: 'meta', type: 'map' },
-                { name: 'id', type: 'uint8' },
-            ]);
-
-            let buf = c.encode({ meta: new Map([['a', 1]]), id: 42 });
-
-            expect(c.extractField(buf, 'id')).toBe(42);
-        });
-
-        it('extracts field after set field', () => {
-            let c = codec();
-
-            c.defineSchema([
-                { name: 'tags', type: 'set' },
-                { name: 'name', type: 'string' },
-            ]);
-
-            let buf = c.encode({ tags: new Set(['x', 'y']), name: 'test' });
-
-            expect(c.extractField(buf, 'name')).toBe('test');
-        });
-
-        it('extracts field after multiple map/set fields', () => {
-            let c = codec();
-
-            c.defineSchema([
-                { name: 'meta', type: 'map' },
-                { name: 'tags', type: 'set' },
-                { name: 'id', type: 'uint8' },
-            ]);
-
-            let buf = c.encode({
-                meta: new Map([['k1', 'v1'], ['k2', 'v2']]),
-                tags: new Set([10, 20, 30]),
-                id: 99,
-            });
-
-            expect(c.extractField(buf, 'id')).toBe(99);
-        });
-
-        it('extracts map field directly', () => {
-            let c = codec();
-
-            c.defineSchema([
-                { name: 'id', type: 'uint8' },
-                { name: 'meta', type: 'map' },
-            ]);
-
-            let buf = c.encode({ id: 1, meta: new Map([['key', 'val']]) });
-            let meta = c.extractField(buf, 'meta') as Map<string, string>;
-
-            expect(meta).toBeInstanceOf(Map);
-            expect(meta.get('key')).toBe('val');
-        });
-
-        it('extracts set field directly', () => {
-            let c = codec();
-
-            c.defineSchema([
-                { name: 'id', type: 'uint8' },
-                { name: 'tags', type: 'set' },
-            ]);
-
-            let buf = c.encode({ id: 1, tags: new Set(['a', 'b']) });
-            let tags = c.extractField(buf, 'tags') as Set<string>;
-
-            expect(tags).toBeInstanceOf(Set);
-            expect(tags.has('a')).toBe(true);
-            expect(tags.has('b')).toBe(true);
-        });
     });
 
 
@@ -2125,14 +1903,6 @@ describe('Codec2', () => {
                 size = c.computeSize(obj);
 
             expect(size).toBe(c.encode(obj).length);
-        });
-
-        it('returns -1 for Map', () => {
-            expect(c.computeSize(new Map())).toBe(-1);
-        });
-
-        it('returns -1 for Set', () => {
-            expect(c.computeSize(new Set())).toBe(-1);
         });
 
         it('returns -1 for typed array', () => {
@@ -3415,7 +3185,7 @@ describe('Codec2', () => {
                 expect(c.extractField(encoded, 'id')).toBe(42);
             });
 
-            it.fails('BUG: test schema mismatch — inferred uint8 !== defined int32, encode never produces tag-18', () => {
+            it('declared int32-nullable schema is honored and compresses to tag-18', () => {
                 let c = codec({ compress: true });
 
                 c.defineSchema([
@@ -3425,8 +3195,11 @@ describe('Codec2', () => {
 
                 let encoded = c.encode({ id: 5, optional: 123 });
 
+                // Declared int32 is compressible → tag-18; the uint8 inference would
+                // pick for 123 is not, so pre-fix this emitted tag-8.
                 expect(encoded[0]).toBe(18);
                 expect(c.extractField(encoded, 'optional')).toBe(123);
+                expect(c.decode(encoded)).toEqual({ id: 5, optional: 123 });
             });
         });
 
@@ -3592,53 +3365,31 @@ describe('Codec2', () => {
     });
 
 
-    // === F-014: Map/Set count guard (encode + decode) ===
+    // === Retired tags 15/16 (Map/Set value types removed) ===
 
-    describe('Map/Set count guard (F-014)', () => {
-        it('decode: map count > MAX_ARRAY_COUNT throws', () => {
-            // tag 15 (Map) + u32 LE count = 1048577 (0x00100001)
-            let buf = new Uint8Array([15, 0x01, 0x00, 0x10, 0x00]);
+    describe('retired tags 15/16', () => {
+        it('decode: tag 15 throws unknown tag', () => {
+            let buf = new Uint8Array([15, 0, 0, 0, 0]);
 
-            expect(() => c.decode(buf)).toThrow('map count');
+            expect(() => c.decode(buf)).toThrow('Codec2: unknown tag 15');
         });
 
-        it('decode: set count > MAX_ARRAY_COUNT throws', () => {
-            // tag 16 (Set) + u32 LE count = 1048577 (0x00100001)
-            let buf = new Uint8Array([16, 0x01, 0x00, 0x10, 0x00]);
+        it('decode: tag 16 throws unknown tag', () => {
+            let buf = new Uint8Array([16, 0, 0, 0, 0]);
 
-            expect(() => c.decode(buf)).toThrow('set count');
+            expect(() => c.decode(buf)).toThrow('Codec2: unknown tag 16');
         });
 
-        it('decode: map count exactly at MAX_ARRAY_COUNT + 1 throws', () => {
-            // 1048577 = 0x100001 → LE bytes: [0x01, 0x00, 0x10, 0x00]
-            let buf = new Uint8Array([15, 0x01, 0x00, 0x10, 0x00]);
+        it('defineSchema refuses a field typed map', () => {
+            let c = codec();
 
-            expect(() => c.decode(buf)).toThrow('map count');
+            expect(() => c.defineSchema([{ name: 'meta', type: 'map' }])).toThrow('unknown field type: map');
         });
 
-        it('decode: set count at 2 billion throws', () => {
-            // 0x7FFFFFFF = 2147483647 → LE: [0xFF, 0xFF, 0xFF, 0x7F]
-            let buf = new Uint8Array([16, 0xFF, 0xFF, 0xFF, 0x7F]);
+        it('defineSchema refuses a field typed set', () => {
+            let c = codec();
 
-            expect(() => c.decode(buf)).toThrow('set count');
-        });
-
-        it('small Map still round-trips', () => {
-            let m = new Map<string, number>([['a', 1], ['b', 2]]);
-            let result = c.decode(c.encode(m)) as Map<string, number>;
-
-            expect(result).toBeInstanceOf(Map);
-            expect(result.size).toBe(2);
-            expect(result.get('a')).toBe(1);
-        });
-
-        it('small Set still round-trips', () => {
-            let s = new Set([10, 20, 30]);
-            let result = c.decode(c.encode(s)) as Set<number>;
-
-            expect(result).toBeInstanceOf(Set);
-            expect(result.size).toBe(3);
-            expect(result.has(20)).toBe(true);
+            expect(() => c.defineSchema([{ name: 'tags', type: 'set' }])).toThrow('unknown field type: set');
         });
     });
 
@@ -4658,6 +4409,82 @@ describe('Codec2', () => {
 
             expect(store.sets).toBe(setsAfterFirst);
             expect(c.decode(snapshot)).toEqual(obj);
+        });
+    });
+
+    describe('sbc-schema-preregistration: declared schemas honored, unknown hints throw (D2/D4)', () => {
+        it('declared widths drive emitted bytes — small value keeps declared int32 width', () => {
+            let c = codec(),
+                h = c.defineSchema([
+                    { name: 'a', type: 'int32' },
+                    { name: 'b', type: 'int32' },
+                ]);
+
+            let buf = c.encode({ a: 5, b: 2 });
+
+            // Declared int32 → 4-byte little-endian fields, datalen 8. Inference would
+            // pick uint8 for these values (1 byte each, datalen 2) under a different hash.
+            let expected = new Uint8Array([
+                8,
+                h & 0xFF, (h >>> 8) & 0xFF, (h >>> 16) & 0xFF, (h >>> 24) & 0xFF,
+                8, 0, 0, 0,
+                5, 0, 0, 0,
+                2, 0, 0, 0,
+            ]);
+
+            expect(schemaHash(buf)).toBe(h);
+            expect([...buf]).toEqual([...expected]);
+            expect(c.decode(buf)).toEqual({ a: 5, b: 2 });
+        });
+
+        it('one registry entry after N encodes of one declared type', () => {
+            let store = makeCountingStore(),
+                c = codec({ store });
+
+            c.defineSchema([{ name: 'n', type: 'int32' }]);
+
+            for (let v of [5, 500, 70000]) {
+                c.encode({ n: v });
+            }
+
+            // Every value binds to the declared int32 schema. Inference would have minted
+            // three shapes (uint8 / uint16 / int32) across these three encodes.
+            let reg = c.serializeRegistry();
+
+            expect(reg[0]! | (reg[1]! << 8)).toBe(1);
+            expect(store.size).toBe(1);
+            expect(c.decode(c.encode({ n: 70000 }))).toEqual({ n: 70000 });
+        });
+
+        it('README nullable example is honored for both null and non-null values', () => {
+            let c = codec(),
+                h = c.defineSchema([
+                    { name: 'bio', nullable: true, type: 'string' },
+                    { name: 'id', type: 'uint32' },
+                ]);
+
+            let withBio = c.encode({ bio: 'hi', id: 5 }),
+                noBio = c.encode({ bio: null, id: 7 });
+
+            // Both objects bind to the declared schema. Inference would mint distinct
+            // non-nullable shapes (string+uint8 vs mixed+uint8), discarding the declared hash.
+            expect(schemaHash(withBio)).toBe(h);
+            expect(schemaHash(noBio)).toBe(h);
+            expect(c.decode(withBio)).toEqual({ bio: 'hi', id: 5 });
+            expect(c.decode(noBio)).toEqual({ bio: null, id: 7 });
+        });
+
+        it('encode with an unknown numeric schema hint throws', () => {
+            let c = codec();
+
+            expect(() => c.encode({ a: 1 }, { schema: 0xdeadbeef })).toThrow('Codec2: unknown schema hash 3735928559');
+        });
+
+        it('decode with an unknown numeric schema hint still throws (D4 symmetry)', () => {
+            let c = codec(),
+                buf = new Uint8Array([8, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+            expect(() => c.decode(buf, { schema: 0xdeadbeef })).toThrow('Codec2: unknown schema hash');
         });
     });
 });

@@ -160,7 +160,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'bigint':
-                body += `_wBI64.call(b,${val},p);p+=8;\n`;
+                body += `if(${val}<-9223372036854775808n||${val}>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,${val},p);p+=8;\n`;
                 break;
 
             case 'date':
@@ -226,7 +226,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                                 body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}`;
                                 break;
                             case 'bigint':
-                                body += `for(let i=0;i<l;i++){_wBI64.call(b,a[i],p);p+=8;}`;
+                                body += `for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}`;
                                 break;
                         }
 
@@ -304,8 +304,6 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
                 break;
 
-            case 'map':
-            case 'set':
             case 'typedarray':
 
                 body += `p=_enc(${val},b,p);\n`;
@@ -431,7 +429,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'bytes':
-                body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('Codec2: truncated bytes');f${i}=b.slice(p,p+l);p+=l;}\n`;
+                body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('Codec2: truncated bytes');f${i}=new Uint8Array(b.subarray(p,p+l));p+=l;}\n`;
                 break;
 
             case 'array':
@@ -505,7 +503,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}if(p+bl>b.length)throw new Error('SBC: truncated');a[i]=b.slice(p,p+bl);p+=bl;}`;
+                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}if(p+bl>b.length)throw new Error('SBC: truncated');a[i]=new Uint8Array(b.subarray(p,p+bl));p+=bl;}`;
                         body += `f${i}=a;}\n`;
                     }
                     else if (et.base === 'object' && et.hash !== undefined) {
@@ -589,8 +587,6 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
                 break;
 
-            case 'map':
-            case 'set':
             case 'typedarray':
                 body += `{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}\n`;
 
@@ -728,7 +724,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                 body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('SBC: truncated');f${i}=${d.readStr('p', 'l')};p+=l;}${nc}\n`;
                 break;
             case 'bytes':
-                body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('SBC: truncated');f${i}=b.slice(p,p+l);p+=l;}${nc}\n`;
+                body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('SBC: truncated');f${i}=new Uint8Array(b.subarray(p,p+l));p+=l;}${nc}\n`;
                 break;
             case 'array':
                 if (f.elementType) {
@@ -798,7 +794,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}if(p+bl>b.length)throw new Error('SBC: truncated');a[i]=b.slice(p,p+bl);p+=bl;}`;
+                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}if(p+bl>b.length)throw new Error('SBC: truncated');a[i]=new Uint8Array(b.subarray(p,p+bl));p+=bl;}`;
                         body += `f${i}=a;}${nc}\n`;
                     }
                     else if (et.base === 'object' && et.hash !== undefined) {
@@ -863,7 +859,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                 }
 
                 break;
-            case 'map': case 'set': case 'typedarray': case 'mixed':
+            case 'typedarray': case 'mixed':
                 body += `${no}{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}${nc}\n`;
                 break;
         }
@@ -943,7 +939,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
 
-                body += `_wBI64.call(b,${v},p);p+=8;\n`;
+                body += `if(${v}<-9223372036854775808n||${v}>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,${v},p);p+=8;\n`;
 
                 if (f.nullable) {
                     body += `}\n`;
@@ -1114,7 +1110,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                                 body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}`;
                                 break;
                             case 'bigint':
-                                body += `for(let i=0;i<l;i++){_wBI64.call(b,a[i],p);p+=8;}`;
+                                body += `for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}`;
                                 break;
                         }
 
@@ -1185,7 +1181,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                 }
 
                 break;
-            case 'map': case 'set': case 'typedarray': case 'mixed':
+            case 'typedarray': case 'mixed':
                 if (f.nullable) {
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
