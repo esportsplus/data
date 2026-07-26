@@ -4,6 +4,7 @@ allowBuilds:
   protobufjs: true
 
 overrides:
+  '@esportsplus/typescript': link:../typescript
   picomatch@<2.3.2: '>=2.3.2'
   picomatch@<4.0.4: '>=4.0.4'
   rollup@<4.59.0: '>=4.59.0'

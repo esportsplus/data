@@ -61,7 +61,7 @@
         "url": "https://github.com/esportsplus/data"
     },
     "scripts": {
-        "build": "tsc",
+        "build": "tsc -p tsconfig.build.json",
         "build:test": "pnpm build && pnpm test",
         "-": "-",
         "prepare": "pnpm build",
