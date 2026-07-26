@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Validator } from '../../src/types';
 import { createValidator, transformCode } from '../utils';
 
 
@@ -464,6 +465,54 @@ describe('Complex Real-World Types', () => {
 
             expect(result.ok).toBe(false);
         });
+    });
+});
+
+
+const OBJECT_LITERAL_BASELINE = "import { codec } from '@esportsplus/data';\nconst schema_1rq7jfs2 = {\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"additionalProperties\":false,\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"],\"type\":\"object\"};\nconst v_1rq7jfs0 = (value, errors) => {\n                    if (!value) errors.push({ message: 'bad', path: 'name' });\n                };\nconst build_1rq7jfs3 = { toJsonSchema: () => schema_1rq7jfs2, validate: \n        (_input) => {\n            let _errors,\n                _output;\n            let _config = { path: '', push(_message) { (_errors ??= []).push({ message: _message, path: this.path }); } };\n            \n\n            if (_input === null || typeof _input !== 'object' || Array.isArray(_input)) {\n                \n        (_errors ??= []).push({\n            message: \"must be an object\",\n            path: \"\"\n        });\n    \n\n                return { ok: false, data: _input, errors: _errors };\n            }\n\n            _output = {};\n\n             \n                let c_1rq7jfs1 = _errors?.length ?? 0;\n\n                \n        {\n            \n            if (typeof _input.name !== 'string') {\n                \n        (_errors ??= []).push({\n            message: \"must be a string\",\n            path: \"name\"\n        });\n    \n            }\n            else {\n                _output.name = _input.name;\n                \n            }\n            \n        }\n    \n\n                if ((_errors?.length ?? 0) === c_1rq7jfs1) {\n                    _config.path = \"name\";\n                    v_1rq7jfs0(_output.name, _config);\n                }\n\n                \n            \n\n            if (_errors && _errors.length > 0) {\n                return { ok: false, data: _input, errors: _errors };\n            }\n\n            return { ok: true, data: _output, errors: undefined };\n        }\n     };\n\n\n            type User = { name: string };\n            build_1rq7jfs3;\n        ";
+
+
+describe('Raw-function config removal', () => {
+    // Type-level contract: build's config parameter is the weak object type ValidatorConfig<T>
+    // (every property optional), so a raw function shares no property with it and is rejected
+    // (TS2559). This never-executed typed code carries the assertion the string-compiling harness
+    // cannot; `tsc --noEmit` gates it.
+    it('rejects a raw-function config at the type level', () => {
+        let reject = (v: Validator) => {
+            // @ts-expect-error - a raw arrow-function config is not assignable to ValidatorConfig<T>
+            v.build<{ a: string }>(() => {});
+            // @ts-expect-error - a raw async-function config is not assignable to ValidatorConfig<T>
+            v.build<{ a: string }>(async () => {});
+        };
+
+        expect(typeof reject).toBe('function');
+    });
+
+    it('emits output identical to the no-config form for a raw-function config', () => {
+        let noConfig = transformCode(`
+            type User = { name: string };
+            validator.build<User>();
+        `);
+
+        let rawFunction = transformCode(`
+            type User = { name: string };
+            validator.build<User>(async (value, errors) => {});
+        `);
+
+        expect(rawFunction).toBe(noConfig);
+    });
+
+    it('emits byte-identical output for an object-literal config', () => {
+        let transformed = transformCode(`
+            type User = { name: string };
+            validator.build<User>({
+                name: (value, errors) => {
+                    if (!value) errors.push({ message: 'bad', path: 'name' });
+                }
+            });
+        `);
+
+        expect(transformed).toBe(OBJECT_LITERAL_BASELINE);
     });
 });
 

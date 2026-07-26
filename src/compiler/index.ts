@@ -102,12 +102,7 @@ function namespaceLocalName(sourceFile: ts.SourceFile): string | undefined {
 // Per-property config: parse the ValidatorConfig object literal, hoist each validator
 // expression to a module-level const (factory calls run once at module eval), and record
 // the hoisted name + AST-derived asyncness so the generator can invoke it per property.
-// A raw-function config is the legacy (never-invoked) form kept only for async detection.
 function parseConfig(configArg: ts.Expression, analyzed: AnalyzedType, sourceFile: ts.SourceFile): ParsedConfig {
-    if (ts.isArrowFunction(configArg) || ts.isFunctionExpression(configArg)) {
-        return { hasAsync: isAsyncFunction(configArg), hoisted: [] };
-    }
-
     if (!ts.isObjectLiteralExpression(configArg)) {
         return { hasAsync: false, hoisted: [] };
     }

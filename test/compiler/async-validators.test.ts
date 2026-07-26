@@ -7,8 +7,10 @@ describe('Async Validators', () => {
         it('generates async function when async config is provided', () => {
             let code = transformCode(`
                 type User = { name: string };
-                validator.build<User>(async (data, errors) => {
-                    // async validation logic
+                validator.build<User>({
+                    name: async (value, errors) => {
+                        // async validation logic
+                    }
                 });
             `);
 
@@ -18,8 +20,10 @@ describe('Async Validators', () => {
         it('generates async function when await keyword is in config body', () => {
             let code = transformCode(`
                 type User = { name: string };
-                validator.build<User>((data, errors) => {
-                    let result = await fetch('/api');
+                validator.build<User>({
+                    name: (value, errors) => {
+                        let result = await fetch('/api');
+                    }
                 });
             `);
 
@@ -29,8 +33,10 @@ describe('Async Validators', () => {
         it('generates sync function when no async/await in config', () => {
             let code = transformCode(`
                 type User = { name: string };
-                validator.build<User>((data, errors) => {
-                    if (!data.name) errors.push({ message: 'bad', path: 'name' });
+                validator.build<User>({
+                    name: (value, errors) => {
+                        if (!value) errors.push({ message: 'bad', path: 'name' });
+                    }
                 });
             `);
 
@@ -53,8 +59,10 @@ describe('Async Validators', () => {
         it('generated code includes async prefix before (_input)', () => {
             let code = transformCode(`
                 type User = { name: string };
-                validator.build<User>(async (data, errors) => {
-                    // async validation
+                validator.build<User>({
+                    name: async (value, errors) => {
+                        // async validation
+                    }
                 });
             `);
 
@@ -67,8 +75,10 @@ describe('Async Validators', () => {
         it('generated async validator includes custom validation code', () => {
             let code = transformCode(`
                 type User = { name: string };
-                validator.build<User>(async (data, errors) => {
-                    // async validation logic here
+                validator.build<User>({
+                    name: async (value, errors) => {
+                        // async validation logic here
+                    }
                 });
             `);
 
@@ -82,8 +92,10 @@ describe('Async Validators', () => {
             // but field validation logic is identical
             let validate = createValidator(`
                 type User = { name: string };
-                validator.build<User>(async (data, errors) => {
-                    // async validation passes
+                validator.build<User>({
+                    name: async (value, errors) => {
+                        // async validation passes
+                    }
                 });
             `);
 
