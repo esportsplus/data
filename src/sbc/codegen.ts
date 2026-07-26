@@ -157,15 +157,15 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'float64':
-                body += `${d.writeF64('p', val)};p+=8;\n`;
+                body += `if(p+8<=b.length){${d.writeF64('p', val)};}p+=8;\n`;
                 break;
 
             case 'int64':
-                body += `if(${val}<-9223372036854775808n||${val}>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,${val},p);p+=8;\n`;
+                body += `if(${val}<-9223372036854775808n||${val}>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');if(p+8<=b.length){_wBI64.call(b,${val},p);}p+=8;\n`;
                 break;
 
             case 'date':
-                body += `${d.writeF64('p', `${val}.getTime()`)};p+=8;\n`;
+                body += `if(p+8<=b.length){${d.writeF64('p', `${val}.getTime()`)};}p+=8;\n`;
                 break;
 
             case 'string':
@@ -176,15 +176,15 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 body += `b[p]=sl;p+=1;`;
                 body += `let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}`;
                 body += `if(_ok){p+=sl;}`;
-                body += `else{p-=1;let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}`;
-                body += `else{let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}\n`;
+                body += `else{p-=1;let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}`;
+                body += `else{let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}\n`;
                 break;
 
             case 'bytes':
 
                 body += `{let v=${val},l=v.length;`;
                 body += `p=_wv(b,p,l);`;
-                body += `b.set(v,p);p+=l;}\n`;
+                body += `if(p+l<=b.length){b.set(v,p);}p+=l;}\n`;
                 break;
 
             case 'array':
@@ -221,13 +221,13 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                                 body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
                                 break;
                             case 'float64':
-                                body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}`;
+                                body += `if(p+l*8<=b.length){for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}else{p+=l*8;}`;
                                 break;
                             case 'date':
-                                body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}`;
+                                body += `if(p+l*8<=b.length){for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}}else{p+=l*8;}`;
                                 break;
                             case 'int64':
-                                body += `for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}`;
+                                body += `if(p+l*8<=b.length){for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}}else{p+=l*8;}`;
                                 break;
                         }
 
@@ -236,12 +236,12 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     else if (et.base === 'string') {
                         // Typed array<string>: varint count + per-element [varint len][utf8 data]
                         body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let s=a[i],sl=s.length;`;
-                        body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}`;
-                        body += `else{let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}}\n`;
+                        body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}`;
+                        body += `else{let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}}\n`;
                     }
                     else if (et.base === 'bytes') {
                         // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
-                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let v=a[i],vl=v.length;p=_wv(b,p,vl);b.set(v,p);p+=vl;}}\n`;
+                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let v=a[i],vl=v.length;p=_wv(b,p,vl);if(p+vl<=b.length){b.set(v,p);}p+=vl;}}\n`;
                     }
                     else if (et.base === 'object' && et.hash !== undefined) {
                         // Typed array<object(hash)>: varint count + per-element [varint payloadLen][fields]
@@ -277,7 +277,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     // packed int32: flag=2, u32 count, 4 bytes each
                     body += `else if(_an&&_i32){_pk=1;b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
                     // packed float64: flag=3, u32 count, 8 bytes each
-                    body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}}`;
+                    body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;if(p+l*8<=b.length){for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}else{p+=l*8;}}}`;
                     // generic: flag=0, u32 count, tagged elements
                     body += `if(!_pk){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
                 }
@@ -940,7 +940,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
 
-                body += `if(${v}<-9223372036854775808n||${v}>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,${v},p);p+=8;\n`;
+                body += `if(${v}<-9223372036854775808n||${v}>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');if(p+8<=b.length){_wBI64.call(b,${v},p);}p+=8;\n`;
 
                 if (f.nullable) {
                     body += `}\n`;
@@ -952,7 +952,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
 
-                body += `${d.writeF64('p', `${v}.getTime()`)};p+=8;\n`;
+                body += `if(p+8<=b.length){${d.writeF64('p', `${v}.getTime()`)};}p+=8;\n`;
 
                 if (f.nullable) {
                     body += `}\n`;
@@ -1027,7 +1027,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                 body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
             }
 
-            body += `{let _v=${v};if(Number.isInteger(_v)&&_v>=-2147483648&&_v<=2147483647){b[p++]=0;p=_wz(b,p,_v);}else{b[p++]=1;${d.writeF64('p', '_v')};p+=8;}}\n`;
+            body += `{let _v=${v};if(Number.isInteger(_v)&&_v>=-2147483648&&_v<=2147483647){b[p++]=0;p=_wz(b,p,_v);}else{b[p++]=1;if(p+8<=b.length){${d.writeF64('p', '_v')};}p+=8;}}\n`;
 
             if (f.nullable) {
                 body += `}\n`;
@@ -1048,8 +1048,8 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                 }
 
                 body += `{let s=${v},sl=s.length;`;
-                body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}`;
-                body += `else{let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}\n`;
+                body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}`;
+                body += `else{let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}\n`;
 
                 if (f.nullable) {
                     body += `}\n`;
@@ -1061,7 +1061,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
 
-                body += `{let _v=${v},l=_v.length;p=_wv(b,p,l);b.set(_v,p);p+=l;}\n`;
+                body += `{let _v=${v},l=_v.length;p=_wv(b,p,l);if(p+l<=b.length){b.set(_v,p);}p+=l;}\n`;
 
                 if (f.nullable) {
                     body += `}\n`;
@@ -1105,13 +1105,13 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                                 body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
                                 break;
                             case 'float64':
-                                body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}`;
+                                body += `if(p+l*8<=b.length){for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}else{p+=l*8;}`;
                                 break;
                             case 'date':
-                                body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}`;
+                                body += `if(p+l*8<=b.length){for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}}else{p+=l*8;}`;
                                 break;
                             case 'int64':
-                                body += `for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}`;
+                                body += `if(p+l*8<=b.length){for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}}else{p+=l*8;}`;
                                 break;
                         }
 
@@ -1119,11 +1119,11 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     }
                     else if (et.base === 'string') {
                         body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let s=a[i],sl=s.length;`;
-                        body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}`;
-                        body += `else{let l=_bl(s);p=_wv(b,p,l);${d.writeStr('s', 'p', 'l')};p+=l;}}}\n`;
+                        body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}`;
+                        body += `else{let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}}\n`;
                     }
                     else if (et.base === 'bytes') {
-                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let v=a[i],vl=v.length;p=_wv(b,p,vl);b.set(v,p);p+=vl;}}\n`;
+                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let v=a[i],vl=v.length;p=_wv(b,p,vl);if(p+vl<=b.length){b.set(v,p);}p+=vl;}}\n`;
                     }
                     else if (et.base === 'object' && et.hash !== undefined) {
                         let refParam = refHashes.get(et.hash);
@@ -1147,7 +1147,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     body += `if(l>0&&typeof a[0]==='number'){let _u8=1,_i32=1,_an=1;for(let i=0;i<l;i++){let v=a[i];if(typeof v!=='number'){_an=0;break;}if(Object.is(v,-0)){_u8=0;_i32=0;continue;}if(v!==((v&0xFF)>>>0)){_u8=0;}if(v!==(v|0)){_i32=0;}}`;
                     body += `if(_an&&_u8){_pk=1;b[p]=1;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;}`;
                     body += `else if(_an&&_i32){_pk=1;b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
-                    body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}}`;
+                    body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;if(p+l*8<=b.length){for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}else{p+=l*8;}}}`;
                     body += `if(!_pk){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
                 }
 
