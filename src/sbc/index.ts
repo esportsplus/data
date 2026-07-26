@@ -144,11 +144,8 @@ function validateHintedInt(name: string, value: unknown, type: string): void {
 // 9 = bigint (8 bytes)
 // 10 = date (f64)
 // 11 = int32 (4 bytes)
-// 12 = packed uint8 array (u32 count + raw bytes)
-// 13 = packed float64 array (u32 count + raw f64s)
-// 14 = packed int32 array (u32 count + raw i32s)
-// 15 = map (u32 count + key/value pairs)
-// 16 = set (u32 count + elements)
+// 12 = packed number[] (u8 typeId + u32 byteLen + raw LE elements) — decodes to a plain number[]
+// 13/14 = retired (never reassign; decode throws unknown tag)
 // 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
 const codec = (options?: CodecOptions): {
