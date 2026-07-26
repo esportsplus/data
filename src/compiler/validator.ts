@@ -275,6 +275,7 @@ function generateMapValidation(
     context: GeneratorContext
 ): string {
     let e = uid('e'),
+        fresh = uid('m'),
         key = uid('k'),
         keyOut = uid('ko'),
         value = uid('v'),
@@ -286,12 +287,14 @@ function generateMapValidation(
         }
         ${prop.nullable ? `else if (${source} === null) { ${target} = null; }` : ''}
         else {
-            let ${e} = ${ERRORS_VARIABLE}?.length ?? 0,
-                ${keyOut},
-                ${valueOut};
+            let ${fresh} = new Map(),
+                ${e} = ${ERRORS_VARIABLE}?.length ?? 0;
 
             for (let [${key}, ${value}] of ${source}) {
-                ${generateTypeValidation(
+                let ${keyOut},
+                    ${valueOut};
+
+                ${validateOrCopy(
                     prop.keyType || { name: 'key', optional: false, type: 'unknown' },
                     key,
                     keyOut,
@@ -299,7 +302,7 @@ function generateMapValidation(
                     context
                 )}
 
-                ${generateTypeValidation(
+                ${validateOrCopy(
                     prop.valueType || { name: 'value', optional: false, type: 'unknown' },
                     value,
                     valueOut,
@@ -310,9 +313,11 @@ function generateMapValidation(
                 if ((${ERRORS_VARIABLE}?.length ?? 0) > ${e}) {
                     break;
                 }
+
+                ${fresh}.set(${keyOut}, ${valueOut});
             }
 
-            ${target} = ${source};
+            ${target} = ${fresh};
         }
     `;
 }
@@ -462,7 +467,7 @@ function generateRecordValidation(
                 ${e} = ${ERRORS_VARIABLE}?.length ?? 0,
                 ${out};
 
-            for (let ${key} in ${source}) {
+            for (let ${key} of Object.keys(${source})) {
                 ${out} = ${source}[${key}];
 
                 ${body}
@@ -492,6 +497,7 @@ function generateSetValidation(
     context: GeneratorContext
 ): string {
     let e = uid('e'),
+        fresh = uid('s'),
         i = uid('i'),
         value = uid('v'),
         valueOut = uid('vo');
@@ -502,12 +508,14 @@ function generateSetValidation(
         }
         ${prop.nullable ? `else if (${source} === null) { ${target} = null; }` : ''}
         else {
-            let ${e} = ${ERRORS_VARIABLE}?.length ?? 0,
-                ${i} = 0,
-                ${valueOut};
+            let ${fresh} = new Set(),
+                ${e} = ${ERRORS_VARIABLE}?.length ?? 0,
+                ${i} = 0;
 
             for (let ${value} of ${source}) {
-                ${generateTypeValidation(
+                let ${valueOut};
+
+                ${validateOrCopy(
                     prop.valueType || { name: 'value', optional: false, type: 'unknown' },
                     value,
                     valueOut,
@@ -519,10 +527,12 @@ function generateSetValidation(
                     break;
                 }
 
+                ${fresh}.add(${valueOut});
+
                 ${i}++;
             }
 
-            ${target} = ${source};
+            ${target} = ${fresh};
         }
     `;
 }
