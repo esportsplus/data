@@ -2,7 +2,7 @@
 // Extracted from codec() closure; state threaded via ExtractContext
 
 import { FIELD_SIZES, MAX_ARRAY_COUNT } from './constants';
-import { _vr, readStr, readVarint } from './platform';
+import { _vr, readStr, readVarint, TYPED_ARRAY_BPE } from './platform';
 import { readFixedField } from './schema';
 import { decodeTagEnd } from './tagged';
 
@@ -179,22 +179,8 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
                         throw new Error('Codec2: array count ' + count + ' exceeds limit');
                     }
 
-                    if (flag === 1) {
-                        pos += count;
-
-                        if (pos > buffer.length) {
-                            throw new Error('Codec2: buffer too short for field at offset ' + pos);
-                        }
-                    }
-                    else if (flag === 2) {
-                        pos += count * 4;
-
-                        if (pos > buffer.length) {
-                            throw new Error('Codec2: buffer too short for field at offset ' + pos);
-                        }
-                    }
-                    else if (flag === 3) {
-                        pos += count * 8;
+                    if (flag > 0) {
+                        pos += count * TYPED_ARRAY_BPE[flag - 1]!;
 
                         if (pos > buffer.length) {
                             throw new Error('Codec2: buffer too short for field at offset ' + pos);

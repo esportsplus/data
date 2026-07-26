@@ -41,8 +41,9 @@ describe('Codec2 extractField count limits', () => {
         let c = codec(),
             hash = c.defineSchema([{ name: 'a', type: 'array' }, { name: 'z', type: 'uint32' }]);
 
-        // Generic array field: [flag=1 (packed uint8)][u32 count > 2^20] — the cap must fire before pos math.
-        let buf = objBuf(hash, new Uint8Array([1, 0x80, 0x84, 0x1E, 0x00]));
+        // Generic array field: [flag=6 (uint8, typeId+1)][u32 count > 2^20] — the count cap must
+        // fire before the flag-driven skip math (pos += count * TYPED_ARRAY_BPE[flag - 1]).
+        let buf = objBuf(hash, new Uint8Array([6, 0x80, 0x84, 0x1E, 0x00]));
 
         expect(() => c.extractField(buf, 'z')).toThrow('Codec2: array count ' + HOSTILE_COUNT + ' exceeds limit');
     });
@@ -53,4 +54,28 @@ describe('Codec2 extractField count limits', () => {
 
         expect(c.extractField(encoded, 'z')).toBe(9);
     });
+});
+
+
+describe('Codec2 extractField packed-array skip widths', () => {
+    // flag = typeId + 1; extraction skips count * TYPED_ARRAY_BPE[flag - 1] bytes to reach the
+    // following field, so the classifier's narrowest lossless width must be honoured per case.
+    let cases: { a: number[], name: string }[] = [
+        { a: [0, 128, 255], name: 'uint8 (1 B/element)' },
+        { a: [-5, 5], name: 'int8 (1 B/element)' },
+        { a: [0, 65535], name: 'uint16 (2 B/element)' },
+        { a: [256, 1000, -1], name: 'int16 (2 B/element)' },
+        { a: [70000, 4294967295], name: 'uint32 (4 B/element)' },
+        { a: [-2147483648, 2147483647], name: 'int32 (4 B/element)' },
+        { a: [1.5, -0.25], name: 'float64 (8 B/element)' },
+    ];
+
+    for (let { a, name } of cases) {
+        it('skips a packed ' + name + ' array to reach the following field', () => {
+            let c = codec(),
+                encoded = c.encode({ a, z: 9 });
+
+            expect(c.extractField(encoded, 'z')).toBe(9);
+        });
+    }
 });
