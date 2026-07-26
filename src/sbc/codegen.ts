@@ -1,6 +1,7 @@
 // Codec2 Codegen — Compile type-specific encode/decode functions via new Function()
 // Zero per-field branching: all type checks happen at compile time
 
+import { MAX_ARRAY_COUNT } from './constants';
 import { _vr, codegenDriver, readVarint, readZigzag, writeVarint, writeZigzag } from './platform';
 import type { CodegenDriver } from './platform';
 
@@ -443,7 +444,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
                         // Typed array: varint count + raw fixed-size elements
                         body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
 
                         if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8') {
@@ -494,7 +495,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     else if (et.base === 'string') {
                         // Typed array<string>: varint count + per-element [varint len][utf8 data]
                         body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
                         body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{_rv(b,p);sl=_vrs.v;p=_vrs.p;}if(p+sl>b.length)throw new Error('SBC: truncated');a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
                         body += `f${i}=a;}\n`;
@@ -502,7 +503,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     else if (et.base === 'bytes') {
                         // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
                         body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
                         body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}if(p+bl>b.length)throw new Error('SBC: truncated');a[i]=b.slice(p,p+bl);p+=bl;}`;
                         body += `f${i}=a;}\n`;
@@ -513,7 +514,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
                         if (refParam) {
                             body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                            body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                             body += `let a=new Array(l);`;
                             body += `for(let i=0;i<l;i++){let _dl=b[p];`;
                             body += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
@@ -523,7 +524,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         else {
                             // Referenced schema not compiled — tagged fallback
                             body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                            body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                             body += `let a=new Array(l);`;
                             body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
                             body += `f${i}=a;}\n`;
@@ -532,7 +533,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     else {
                         // Container element types: varint count + tagged elements
                         body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
                         body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
                         body += `f${i}=a;}\n`;
@@ -540,7 +541,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 }
                 else {
                     // Existing generic path — flag byte + u32 count
-                    body += `{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
+                    body += `{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
                     // flag=0: generic tagged elements
                     body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
                     // flag=1: packed uint8
@@ -738,7 +739,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         et.base === 'uint32' || et.base === 'int32' ||
                         et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
                         body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
 
                         if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8') {
@@ -788,14 +789,14 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     }
                     else if (et.base === 'string') {
                         body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
                         body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{_rv(b,p);sl=_vrs.v;p=_vrs.p;}if(p+sl>b.length)throw new Error('SBC: truncated');a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
                         body += `f${i}=a;}${nc}\n`;
                     }
                     else if (et.base === 'bytes') {
                         body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
                         body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}if(p+bl>b.length)throw new Error('SBC: truncated');a[i]=b.slice(p,p+bl);p+=bl;}`;
                         body += `f${i}=a;}${nc}\n`;
@@ -805,7 +806,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
 
                         if (refParam) {
                             body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                            body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                             body += `let a=new Array(l);`;
                             body += `for(let i=0;i<l;i++){let _dl=b[p];`;
                             body += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
@@ -814,7 +815,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         }
                         else {
                             body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                            body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                             body += `let a=new Array(l);`;
                             body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
                             body += `f${i}=a;}${nc}\n`;
@@ -822,14 +823,14 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     }
                     else {
                         body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
                         body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
                         body += `f${i}=a;}${nc}\n`;
                     }
                 }
                 else {
-                    body += `${no}{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>1048576)throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
+                    body += `${no}{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
                     body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
                     body += `else if(_f===1){if(p+l>b.length)throw new Error('Codec2: truncated array');for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
                     body += `else if(_f===2){if(p+l*4>b.length)throw new Error('Codec2: truncated array');for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;

@@ -1,7 +1,7 @@
 // Field extraction — extract a single field from an encoded buffer without full decode
 // Extracted from codec() closure; state threaded via ExtractContext
 
-import { FIELD_SIZES } from './constants';
+import { FIELD_SIZES, MAX_ARRAY_COUNT } from './constants';
 import { _vr, readStr, readVarint } from './platform';
 import { readFixedField } from './schema';
 import { decodeTagEnd } from './tagged';
@@ -130,10 +130,18 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
 
                     pos = _vr.p;
 
+                    if (count > MAX_ARRAY_COUNT) {
+                        throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                    }
+
                     let elemSize = f.elementType.base ? FIELD_SIZES[f.elementType.base] : 0;
 
                     if (elemSize > 0) {
                         pos += count * elemSize;
+
+                        if (pos > buffer.length) {
+                            throw new Error('Codec2: buffer too short for field at offset ' + pos);
+                        }
                     }
                     else if (f.elementType.base === 'string' || f.elementType.base === 'bytes') {
                         for (let j = 0; j < count; j++) {
@@ -167,14 +175,30 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
 
                     pos += 5;
 
+                    if (count > MAX_ARRAY_COUNT) {
+                        throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                    }
+
                     if (flag === 1) {
                         pos += count;
+
+                        if (pos > buffer.length) {
+                            throw new Error('Codec2: buffer too short for field at offset ' + pos);
+                        }
                     }
                     else if (flag === 2) {
                         pos += count * 4;
+
+                        if (pos > buffer.length) {
+                            throw new Error('Codec2: buffer too short for field at offset ' + pos);
+                        }
                     }
                     else if (flag === 3) {
                         pos += count * 8;
+
+                        if (pos > buffer.length) {
+                            throw new Error('Codec2: buffer too short for field at offset ' + pos);
+                        }
                     }
                     else {
                         for (let j = 0; j < count; j++) {
