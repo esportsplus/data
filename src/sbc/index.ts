@@ -189,7 +189,7 @@ const codec = (options?: CodecOptions): {
 
         let keyCount = 0;
 
-        for (let _ in obj) { keyCount++; }
+        for (let k in obj) { if (Object.hasOwn(obj, k)) { keyCount++; } }
 
         for (let i = 0; i < 16; i++) {
             let schema = cacheSchemas[i];
@@ -344,7 +344,7 @@ const codec = (options?: CodecOptions): {
             keyCount = 0,
             n = fields.length;
 
-        for (let _ in obj) { keyCount++; }
+        for (let k in obj) { if (Object.hasOwn(obj, k)) { keyCount++; } }
 
         if (keyCount !== n) {
             return false;
