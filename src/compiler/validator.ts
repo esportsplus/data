@@ -128,11 +128,7 @@ function generateArrayValidation(
                     prop.itemType || { name: 'item', optional: false, type: 'unknown' },
                     `${source}[${i}]`,
                     `${a}[${i}]`,
-                    {
-                        key: i,
-                        kind: 'dynamic',
-                        path: pathMode.path
-                    },
+                    { segments: [...pathMode.segments, { expr: i, kind: 'index' }] },
                     context
                 )}
 
@@ -299,7 +295,7 @@ function generateMapValidation(
                     prop.keyType || { name: 'key', optional: false, type: 'unknown' },
                     key,
                     keyOut,
-                    { key, kind: 'dynamic', path: pathMode.path },
+                    { segments: [...pathMode.segments, { expr: key, kind: 'record' }] },
                     context
                 )}
 
@@ -307,7 +303,7 @@ function generateMapValidation(
                     prop.valueType || { name: 'value', optional: false, type: 'unknown' },
                     value,
                     valueOut,
-                    { key, kind: 'dynamic', path: pathMode.path },
+                    { segments: [...pathMode.segments, { expr: key, kind: 'record' }] },
                     context
                 )}
 
@@ -388,7 +384,7 @@ function generateObjectValidation(
 ): string {
     let container = uid('o'),
         parts: string[] = [],
-        path = pathMode.path,
+        path = pathMode.segments,
         properties = prop.properties || [];
 
     for (let i = 0, n = properties.length; i < n; i++) {
@@ -399,7 +395,7 @@ function generateObjectValidation(
         }
 
         let access = propertyAccess(property.name, source),
-            inner = validateInto(property, access, container, { kind: 'static', path: [...path, property.name] }, context);
+            inner = validateInto(property, access, container, { segments: [...path, { kind: 'key', name: property.name }] }, context);
 
         parts.push(
             property.optional
@@ -447,7 +443,7 @@ function generateRecordValidation(
                 indexType,
                 out,
                 out,
-                { key, kind: 'record', path: pathMode.path },
+                { segments: [...pathMode.segments, { expr: key, kind: 'record' }] },
                 context
             )
             : '';
@@ -515,7 +511,7 @@ function generateSetValidation(
                     prop.valueType || { name: 'value', optional: false, type: 'unknown' },
                     value,
                     valueOut,
-                    { key: i, kind: 'dynamic', path: pathMode.path },
+                    { segments: [...pathMode.segments, { expr: i, kind: 'index' }] },
                     context
                 )}
 
@@ -575,7 +571,7 @@ function generateTupleValidation(
 ): string {
     let a = uid('a'),
         parts: string[] = [],
-        path = pathMode.path,
+        path = pathMode.segments,
         requiredCount = 0,
         restType = prop.restType,
         tupleTypes = prop.tupleTypes || [];
@@ -591,7 +587,7 @@ function generateTupleValidation(
             tupleTypes[i],
             `${source}[${i}]`,
             `${a}[${i}]`,
-            { kind: 'static', path: [...path, `[${i}]`] },
+            { segments: [...path, { expr: String(i), kind: 'index' }] },
             context
         );
 
@@ -616,7 +612,7 @@ function generateTupleValidation(
                     restType,
                     `${source}[${i}]`,
                     `${a}[${i}]`,
-                    { key: i, kind: 'dynamic', path },
+                    { segments: [...path, { expr: i, kind: 'index' }] },
                     context
                 )}
 
@@ -851,7 +847,7 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
                 let ${ERRORS_VARIABLE},
                     ${OUTPUT_VARIABLE};
 
-                ${validateOrCopy(root, INPUT_VARIABLE, OUTPUT_VARIABLE, { kind: 'static', path: [] }, context)}
+                ${validateOrCopy(root, INPUT_VARIABLE, OUTPUT_VARIABLE, { segments: [] }, context)}
 
                 if (${ERRORS_VARIABLE} && ${ERRORS_VARIABLE}.length > 0) {
                     return { ok: false, data: ${INPUT_VARIABLE}, errors: ${ERRORS_VARIABLE} };
@@ -885,9 +881,9 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
                     ? code`
                         let ${slot};
 
-                        ${validateOrCopy(property, source, slot, { kind: 'static', path: [property.name] }, context)}
+                        ${validateOrCopy(property, source, slot, { segments: [{ kind: 'key', name: property.name }] }, context)}
                     `
-                    : validateOrCopy(property, source, slot, { kind: 'static', path: [property.name] }, context);
+                    : validateOrCopy(property, source, slot, { segments: [{ kind: 'key', name: property.name }] }, context);
 
             core = code`
                 let ${count} = ${ERRORS_VARIABLE}?.length ?? 0;
@@ -903,7 +899,7 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
             `;
         }
         else {
-            core = validateInto(property, source, OUTPUT_VARIABLE, { kind: 'static', path: [property.name] }, context);
+            core = validateInto(property, source, OUTPUT_VARIABLE, { segments: [{ kind: 'key', name: property.name }] }, context);
         }
 
         if (def !== undefined) {
@@ -941,7 +937,7 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
             ${hasConfig ? `let ${CONFIG_VARIABLE} = { path: '', push(_message) { (${ERRORS_VARIABLE} ??= []).push({ message: _message, path: this.path }); } };` : ''}
 
             if (${INPUT_VARIABLE} === null || typeof ${INPUT_VARIABLE} !== 'object' || Array.isArray(${INPUT_VARIABLE})) {
-                ${error.generate('must be an object', { kind: 'static', path: [] }, context)}
+                ${error.generate('must be an object', { segments: [] }, context)}
 
                 return { ok: false, data: ${INPUT_VARIABLE}, errors: ${ERRORS_VARIABLE} };
             }
