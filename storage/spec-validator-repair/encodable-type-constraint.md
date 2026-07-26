@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P1
 depends-on: [remove-map-set-tags, unify-packed-numeric-tags]
 files-own: [src/sbc/types.ts, src/sbc/tagged.ts, test/sbc/types.test.ts]
 files-shared: [src/sbc/index.ts]
 tests: [test/sbc/types.test.ts, test/sbc/index.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Encodable constraint on encode; named throw for unrepresentable values
@@ -55,3 +56,7 @@ Test plan (`test/sbc/types.test.ts`, new mirror for `src/sbc/types.ts`, plus `te
 
 - pnpm agent:test test/sbc/types.test.ts test/sbc/index.test.ts
 - npx tsc --noEmit
+
+## Notes
+
+DEFERRED 2026-07-26T08:28:15.270Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

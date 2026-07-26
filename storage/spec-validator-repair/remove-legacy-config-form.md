@@ -1,11 +1,12 @@
 ---
 type: refactor
 recommended-model: sonnet
-status: PENDING
+status: RUN_THROUGH_SPEC_CREATE
 priority: P2
 depends-on: [relocate-tests-and-benches]
 files-own: [src/compiler/index.ts, src/types.ts, test/compiler/index.test.ts]
 tests: [test/compiler/index.test.ts]
+blocked-reason: The item's own verify-dead gate passes (confirmed via `tsc --noEmit` on a scratch file: `Validator.build`'s declared `_config?: ValidatorConfig<T>` already rejects any function argument today with TS2559 'has no properties in common' — a weak-type error — so no type-checked caller can reach the arrow/function branch of parseConfig), but deleting that branch and tightening the type as instructed empirically breaks 4 tests in test/compiler/async-validators.test.ts (verified by implementing the change and running `npx vitest run test/compiler/async-validators.test.ts test/compiler/edge-cases.test.ts`: 45/45 pass before, 41/45 pass after — the 4 failures are exactly the async-detection assertions for a raw-function config argument). That file's test harness imports `validator` from the unresolvable `@esportsplus/data` specifier (no node_modules entry, no build/ output), so `validator` types as implicit `any` there and the public-type rejection never applies — the harness exercises the compiler's AST-level branch directly, bypassing the type gate the Design relies on as its sole liveness check. async-validators.test.ts is not in this item's files-own and Test targets list (only test/compiler/index.test.ts), so I cannot update or remove its now-obsolete assertions, and the Design's verify step never accounts for tests that reach the branch through an untyped/unresolvable import. This needs a decision the spec doesn't settle: either widen files-own to include test/compiler/async-validators.test.ts (and edge-cases.test.ts) so its raw-function-config assertions can be deleted/rewritten alongside the branch removal, or descope the deletion. All edits were reverted; the working tree is clean (git status/diff empty) and no commit was made.
 ---
 
 # Delete the never-invoked raw-function validator config form

@@ -1,12 +1,13 @@
 ---
 type: refactor
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P2
 depends-on: [remove-map-set-tags]
 files-own: [src/sbc/tagged.ts, src/sbc/codegen.ts, src/sbc/size.ts, test/sbc/index.test.ts, test/sbc/codegen.test.ts]
 files-shared: [src/sbc/platform.ts]
 tests: [test/sbc/index.test.ts, test/sbc/codegen.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Unify packed numeric arrays onto one typeId-carrying tag
@@ -55,3 +56,7 @@ Test plan (`test/sbc/index.test.ts` owns the tag surface; `test/sbc/codegen.test
 
 - pnpm agent:test test/sbc/index.test.ts test/sbc/codegen.test.ts
 - npx tsc --noEmit
+
+## Notes
+
+DEFERRED 2026-07-26T08:28:15.245Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

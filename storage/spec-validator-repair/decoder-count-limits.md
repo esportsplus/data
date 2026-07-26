@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P0
 depends-on: [encode-growth-signal]
 files-own: [src/sbc/codegen.ts, src/sbc/extract.ts, test/sbc/codegen.test.ts, test/sbc/extract.test.ts]
 files-shared: [src/sbc/constants.ts]
 tests: [test/sbc/codegen.test.ts, test/sbc/extract.test.ts, test/sbc/index.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Carry MAX_ARRAY_COUNT into the compiled decoder and extractField
@@ -54,3 +55,7 @@ Test plan (`test/sbc/codegen.test.ts` and `test/sbc/extract.test.ts`, plus cross
 
 - pnpm agent:test test/sbc/codegen.test.ts test/sbc/extract.test.ts test/sbc/index.test.ts
 - npx tsc --noEmit
+
+## Notes
+
+DEFERRED 2026-07-26T08:28:15.172Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

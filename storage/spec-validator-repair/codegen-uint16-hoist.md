@@ -1,11 +1,12 @@
 ---
 type: refactor
 recommended-model: sonnet
-status: PENDING
+status: DEFERRED
 priority: P2
 depends-on: [decoder-count-limits]
 files-own: [src/sbc/codegen.ts, test/sbc/codegen.test.ts]
 tests: [test/sbc/codegen.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Hoist the uint16 property read to match its sibling width arms
@@ -52,3 +53,7 @@ Test plan (`test/sbc/codegen.test.ts`):
 
 - pnpm agent:test test/sbc/codegen.test.ts
 - npx tsc --noEmit
+
+## Notes
+
+DEFERRED 2026-07-26T08:28:15.463Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P1
 source: findings D3, D9, D12, D13, D14 (audit section D)
 depends-on: [relocate-tests-and-benches, sbc-schema-preregistration]
 files-own: [src/sbc/index.ts, src/sbc/tagged.ts, src/sbc/codegen.ts, test/sbc/encode-safety.test.ts]
 tests: [test/sbc/encode-safety.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Encode/decode fail loud: bigint ranges, hinted mismatches, non-encodables
@@ -50,3 +51,4 @@ Test plan (new `test/sbc/encode-safety.test.ts`): `2n**64n` throws `Codec2:` in 
 ## Notes
 
 src/sbc/index.ts (grow-loop catch narrowing) is deliberately shared surface with sbc-schema-preregistration — the planner welds the two items and the depends-on edge orders them; expected, not a slicing error.
+DEFERRED 2026-07-26T08:28:15.367Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

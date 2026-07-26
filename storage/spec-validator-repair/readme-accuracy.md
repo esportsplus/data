@@ -1,11 +1,12 @@
 ---
 type: docs
 recommended-model: sonnet
-status: PENDING
+status: DEFERRED
 priority: P2
 source: findings C22, D10 + doc consequences of D2, D5, D6, D9, D13, C15, E-P2 (audit sections C, D, E)
 depends-on: [compiler-annotation-extraction, output-construction-safety, plugin-self-assertion, runtime-tojsonschema, sbc-compute-size, sbc-encode-safety, sbc-schema-preregistration, repair-brand-registration, sbc-compile-time-parity, format-validators-correctness]
 files-own: [README.md]
+blocked-reason: dependency sbc-compute-size did not land — deferred
 ---
 
 # README tells the truth about the shipped surface
@@ -58,3 +59,4 @@ Every code block that claims to be compiler OUTPUT must be generated from the re
 ## Notes
 
 The README-content clauses admit no quote-free literal gate predicate (gate commands reject quoted arguments), so correction 3 is critic/review evidence rather than a `## Checks` line. Lands LAST (document order) — it documents every predecessor's final behavior. If any predecessor's discretion point resolved differently than assumed here (e.g. residue check as bin script), document the LANDED shape, not this list's phrasing.
+DEFERRED 2026-07-26T08:28:15.511Z run=f177cf28 class=dependency reason="dependency sbc-compute-size did not land — deferred" salvage=none

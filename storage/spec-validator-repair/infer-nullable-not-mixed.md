@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P1
 depends-on: [relocate-tests-and-benches]
 files-own: [src/sbc/schema.ts, src/sbc/types.ts, test/sbc/schema.test.ts]
 files-shared: [src/sbc/index.ts, src/sbc/codegen.ts]
 tests: [test/sbc/schema.test.ts, test/sbc/index.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Nullable fields defer their base type instead of collapsing to mixed
@@ -53,3 +54,7 @@ Test plan (`test/sbc/schema.test.ts`, the mirror for `src/sbc/schema.ts`, plus h
 
 - pnpm agent:test test/sbc/schema.test.ts test/sbc/index.test.ts
 - npx tsc --noEmit
+
+## Notes
+
+DEFERRED 2026-07-26T08:28:15.294Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

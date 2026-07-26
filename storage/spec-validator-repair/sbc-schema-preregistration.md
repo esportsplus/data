@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P0
 source: findings D2, D4 (audit section D)
 depends-on: relocate-tests-and-benches
 files-own: [src/sbc/index.ts, test/sbc/index.test.ts]
 tests: [test/sbc/index.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # defineSchema pre-registration is honored; unknown hints throw
@@ -50,3 +51,4 @@ Test plan (extend the moved `test/sbc/index.test.ts`, replacing the vacuous asse
 ## Notes
 
 sbc-encode-safety layers field-level error handling ON the hint path this item repairs — land this first.
+DEFERRED 2026-07-26T08:28:15.342Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

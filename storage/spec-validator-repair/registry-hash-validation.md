@@ -1,11 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P1
 depends-on: [decoder-count-limits]
 files-own: [src/sbc/registry.ts, src/sbc/schema.ts, test/sbc/registry.test.ts]
 tests: [test/sbc/registry.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Verify the registry wire hash against the fields it labels
@@ -54,3 +55,7 @@ Test plan (`test/sbc/registry.test.ts`, the mirror for `src/sbc/registry.ts`):
 
 - pnpm agent:test test/sbc/registry.test.ts
 - npx tsc --noEmit
+
+## Notes
+
+DEFERRED 2026-07-26T08:28:15.195Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

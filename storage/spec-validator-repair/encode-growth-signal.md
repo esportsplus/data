@@ -1,10 +1,11 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P0
 files-own: [src/sbc/index.ts, src/sbc/tagged.ts, src/sbc/codegen.ts, test/sbc/index.test.ts]
 tests: [test/sbc/index.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Stop reading buffer overflow out of RangeError; bound the retry loop
@@ -52,3 +53,7 @@ Test plan (`test/sbc/index.test.ts`):
 
 - pnpm agent:test test/sbc/index.test.ts
 - npx tsc --noEmit
+
+## Notes
+
+DEFERRED 2026-07-26T08:28:15.116Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

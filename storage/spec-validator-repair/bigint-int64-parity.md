@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P0
 depends-on: [relocate-tests-and-benches, encode-growth-signal]
 files-own: [src/sbc/tagged.ts, src/sbc/constants.ts, src/sbc/schema.ts, test/sbc/platform.test.ts]
 files-shared: [src/sbc/codegen.ts, src/sbc/extract.ts]
 tests: [test/sbc/platform.test.ts, test/sbc/index.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # One int64 range behavior across Node and browser; rename the vocabulary
@@ -57,3 +58,4 @@ Test plan (`test/sbc/platform.test.ts` for the bindings, `test/sbc/index.test.ts
 ## Notes
 
 2026-07-25 — SEVERITY RAISED to P0 by the deep audit. The divergence is worse than authored: on Node the out-of-range write throws ERR_OUT_OF_RANGE, which IS a RangeError, and tryEncode (src/sbc/index.ts:463-469) reads any RangeError as buffer-too-small — so encode({v: 2n**64n}) does not throw, it doubles the buffer inside while(true) until allocation fails. Hang plus OOM on the server, silent wrap to 0n in the browser (both verified by direct execution). encode-growth-signal is now a hard dependency and removes the swallowing catch; this item's call-site range check stops the value at source. Both are required — neither substitutes for the other.
+DEFERRED 2026-07-26T08:28:15.318Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

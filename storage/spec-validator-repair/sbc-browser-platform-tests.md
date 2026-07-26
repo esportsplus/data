@@ -1,12 +1,13 @@
 ---
 type: test
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P2
 source: audit section D (SBC NOT TESTED — browser platform branch)
 depends-on: relocate-tests-and-benches
 files-own: [src/sbc/platform.ts, test/sbc/platform.test.ts, vitest.config.ts]
 tests: [test/sbc/platform.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Exercise the browser branch of the SBC platform layer
@@ -45,3 +46,4 @@ Test plan (new mirror `test/sbc/platform.test.ts`): per-function round-trips at 
 ## Notes
 
 Any real divergence this suite EXPOSES in a browser impl is fixed in-scope (platform.ts is files-own for exactly that reason); a divergence whose fix would ripple beyond platform.ts becomes a follow-up, not a silent skip.
+DEFERRED 2026-07-26T08:28:15.439Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

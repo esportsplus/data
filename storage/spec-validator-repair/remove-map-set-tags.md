@@ -1,12 +1,13 @@
 ---
 type: refactor
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P1
 depends-on: [relocate-tests-and-benches]
 files-own: [src/sbc/tagged.ts, src/sbc/constants.ts, src/sbc/schema.ts, src/sbc/size.ts, src/sbc/extract.ts, test/sbc/index.test.ts]
 files-shared: [src/sbc/codegen.ts, src/sbc/index.ts]
 tests: [test/sbc/index.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Remove Map and Set value types (tags 15/16)
@@ -58,3 +59,4 @@ Test plan (`test/sbc/index.test.ts`, the suite that owns the tag surface):
 ## Notes
 
 2026-07-25 — SCOPE GUARD. src/compiler/validator.ts's TYPE_VALIDATORS carries its own 'map' and 'set' entries (:53, :58) which validate USER DATA typed as Map/Set. That is a completely separate feature from the SBC codec's tag-15/16 value types this item deletes, and it MUST survive. Do not grep for map/set across src/ and delete matches — this item's surface is src/sbc/ plus the codegen and extract switch arms named in Design, and nothing under src/compiler/. validator-container-fidelity is concurrently REPAIRING the validator's Map/Set path.
+DEFERRED 2026-07-26T08:28:15.221Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

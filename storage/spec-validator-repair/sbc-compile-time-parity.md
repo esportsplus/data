@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P0
 source: findings D1, D5 (audit section D)
 depends-on: [relocate-tests-and-benches, analyzer-structural-types, remove-map-set-tags, unify-packed-numeric-tags]
 files-own: [src/compiler/sbc/index.ts, test/compiler/sbc/index.test.ts]
 tests: [test/compiler/sbc/index.test.ts]
+blocked-reason: dependency remove-map-set-tags did not land — deferred
 ---
 
 # Compile-time SBC hints match runtime behavior byte-for-byte
@@ -53,3 +54,4 @@ README:296-304's "identical behavior" claim becomes TRUE under the parity-or-omi
 2026-07-25 — ADDITIONAL DEFECT found in the deep audit, in scope for this item and NOT covered by D1/D5 as authored. src/compiler/sbc/index.ts:84-86 maps a TypeScript Record to the SBC FieldSpec type 'map'. SBC's 'map' means a Map INSTANCE — src/sbc/schema.ts:151 returns it only for value instanceof Map — while a Record at runtime is a plain object inferring as 'object'. Compile-time and runtime therefore disagree on the same value, producing the exact hash divergence D5 describes. This also COLLIDES with remove-map-set-tags, which deletes 'map' from KNOWN_TYPES: after that item lands, this mapping emits a type the schema vocabulary no longer carries. Under the parity-or-omit rule a Record maps to 'object' or emits no hint at all. Add a test asserting a Record field's compiled hint and its runtime-inferred schema produce the SAME hash.
 TS7 migration (landed after authoring): this repo now compiles on typescript 7.0.2 through @esportsplus/typescript, whose root vends the TS surface as `ts`. Deleted APIs — `ts.TypeChecker` is `ts.Checker`; `ts.forEachChild(n, cb)` is `n.forEachChild(cb)`; `ts.getCombinedModifierFlags` and `ts.IndexKind` are gone (use a node's `modifierFlags` field and `checker.getIndexInfosOfType`); `type.isUnion/isStringLiteral/isIntersection()` are `isUnionType/isStringLiteralType/isIntersectionType()`; `symbol.getName()` is `symbol.name` and `symbol.declarations` holds NodeHandles needing `.resolve()`; `checker.getTypeAtLocation`/`getTypeOfSymbol` now return `Type | undefined`. Never import `typescript` directly — the surface is vended centrally.
 Compiler test harness (rebuilt for TS7): test/utils.ts no longer exposes `createProgram`. Use `compile(code)` → `{ checker, program, sourceFile }` (backed by `languageService.scratch`), `transformRaw(code)` for the data plugin, or `transformWith(plugins, code)` for any plugin set. `ts.createProgram`/`createCompilerHost`/`createSourceFile`/`ts.sys` no longer exist. Fixture types must not be named after DOM globals (`Node`, `Document`, `Range`): a scratch file is a script, not a module, so the name collides with the global instead of shadowing it — the harness pins `lib: ['es2020']` to keep that off the DOM type graph.
+DEFERRED 2026-07-26T08:28:15.487Z run=f177cf28 class=dependency reason="dependency remove-map-set-tags did not land — deferred" salvage=none

@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P2
 source: finding D6 (audit section D)
 depends-on: relocate-tests-and-benches
 files-own: [src/sbc/size.ts, test/sbc/size.test.ts]
 tests: [test/sbc/size.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # computeSize returns the exact encoded length, compress included
@@ -49,3 +50,4 @@ Test plan (new mirror `test/sbc/size.test.ts`): property-style corpus — primit
 ## Notes
 
 README:259's contract becomes true as written; readme-accuracy removes any sentinel language and documents the throw-on-unencodable domain.
+DEFERRED 2026-07-26T08:28:15.414Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

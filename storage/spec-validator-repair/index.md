@@ -78,41 +78,41 @@
 - emitted-code-escaping
 - output-construction-safety
 - error-path-fidelity
-- validator-recursive-types
+- validator-recursive-types — REVERTED: merge suite_red: reverted — salvage red — the narrowed selection cherry-picks onto a commit an excluded sibling owns — infeasible, nothing landed; salvage ref salvage/f177cf28-u1 @ 24af36d31a68d99e2b578d8ac4dc356d123365b8 — the unit branch tip survives as this tag; cherry-pick the item's [validator-recursive-types] commits to recover
 - validator-container-fidelity
-- validator-proto-property-reads
-- validator-boolean-coercion
-- validator-body-ast-rewrite
-- remove-legacy-config-form
+- validator-proto-property-reads — REVERTED: merge suite_red: reverted — salvage red — the narrowed selection cherry-picks onto a commit an excluded sibling owns — infeasible, nothing landed; salvage ref salvage/f177cf28-u1 @ 24af36d31a68d99e2b578d8ac4dc356d123365b8 — the unit branch tip survives as this tag; cherry-pick the item's [validator-proto-property-reads] commits to recover
+- validator-boolean-coercion — REVERTED: merge suite_red: reverted — salvage red — no parseable failing test — tail: ty - Expected + Received - true + false ❯ test/compiler/edge-cases.test.ts:267:31 265| let result = validate({ active: 'True' }); 266| 267| expect(result.ok).toBe(true); | ^ 268| expect(result.data.active).toBe(true); 269| }); ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯ Test Files 1 failed | 32 passed (33) Tests 2 failed | 1757 passed | 1 expected fail (1760) Start at 01:28:05 Duration 6.74s (transform 8.48s, setup 0ms, import 36.16s, tests 45.88s, environment 3ms) ELIFECYCLE Command failed with exit code 1.; salvage ref salvage/f177cf28-u1 @ 24af36d31a68d99e2b578d8ac4dc356d123365b8 — the unit branch tip survives as this tag; cherry-pick the item's [validator-boolean-coercion] commits to recover
+- validator-body-ast-rewrite — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- remove-legacy-config-form — RUN_THROUGH_SPEC_CREATE: The item's own verify-dead gate passes (confirmed via `tsc --noEmit` on a scratch file: `Validator.build`'s declared `_config?: ValidatorConfig<T>` already rejects any function argument today with TS2559 'has no properties in common' — a weak-type error — so no type-checked caller can reach the arrow/function branch of parseConfig), but deleting that branch and tightening the type as instructed empirically breaks 4 tests in test/compiler/async-validators.test.ts (verified by implementing the change and running `npx vitest run test/compiler/async-validators.test.ts test/compiler/edge-cases.test.ts`: 45/45 pass before, 41/45 pass after — the 4 failures are exactly the async-detection assertions for a raw-function config argument). That file's test harness imports `validator` from the unresolvable `@esportsplus/data` specifier (no node_modules entry, no build/ output), so `validator` types as implicit `any` there and the public-type rejection never applies — the harness exercises the compiler's AST-level branch directly, bypassing the type gate the Design relies on as its sole liveness check. async-validators.test.ts is not in this item's files-own and Test targets list (only test/compiler/index.test.ts), so I cannot update or remove its now-obsolete assertions, and the Design's verify step never accounts for tests that reach the branch through an untyped/unresolvable import. This needs a decision the spec doesn't settle: either widen files-own to include test/compiler/async-validators.test.ts (and edge-cases.test.ts) so its raw-function-config assertions can be deleted/rewritten alongside the branch removal, or descope the deletion. All edits were reverted; the working tree is clean (git status/diff empty) and no commit was made.
 - analyzer-structural-types
 - analyzer-schema-gaps
 - format-validators-p0
 - format-validators-correctness
 - numeric-constraint-validators
-- encode-growth-signal
-- sbc-key-enumeration-parity
+- encode-growth-signal — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- sbc-key-enumeration-parity — DEFERRED: dependency validator-boolean-coercion did not land — reverted
 - residue-codec-false-positive
-- decoder-count-limits
-- registry-hash-validation
-- codegen-uint16-hoist
-- remove-map-set-tags
-- unify-packed-numeric-tags
-- encodable-type-constraint
-- infer-nullable-not-mixed
-- bigint-int64-parity
-- sbc-compile-time-parity
-- sbc-schema-preregistration
-- sbc-encode-safety
-- sbc-cache-isolation
-- sbc-compute-size
+- decoder-count-limits — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- registry-hash-validation — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- codegen-uint16-hoist — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- remove-map-set-tags — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- unify-packed-numeric-tags — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- encodable-type-constraint — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- infer-nullable-not-mixed — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- bigint-int64-parity — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- sbc-compile-time-parity — DEFERRED: dependency remove-map-set-tags did not land — deferred
+- sbc-schema-preregistration — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- sbc-encode-safety — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- sbc-cache-isolation — DEFERRED: dependency validator-boolean-coercion did not land — reverted
+- sbc-compute-size — DEFERRED: dependency validator-boolean-coercion did not land — reverted
 - remove-typed-array-codec
-- sbc-browser-platform-tests
+- sbc-browser-platform-tests — DEFERRED: dependency validator-boolean-coercion did not land — reverted
 - annotated-validator-types
 - compiler-annotation-extraction
 - plugin-self-assertion
 - runtime-tojsonschema
 - build-pipeline-e2e-tests
-- readme-accuracy
+- readme-accuracy — DEFERRED: dependency sbc-compute-size did not land — deferred
 
 ## Feed
 run,scope,unit,ordinal,slug,event,state,detail,elapsed_ms,ts
@@ -167,3 +167,29 @@ aa871fa6,run,,,,run-end,RUN END,"applied: 0 completed, 17 rejected, 34 status-ac
 ,item,mutator,,sbc-schema-preregistration,requeued,REQUEUED,,,2026-07-25T18:43:24-07:00
 ,item,mutator,,sbc-browser-platform-tests,requeued,REQUEUED,,,2026-07-25T18:43:24-07:00
 ,item,mutator,,readme-accuracy,requeued,REQUEUED,,,2026-07-25T18:43:24-07:00
+f177cf28,item,u3,3.1,remove-typed-array-codec,complete,COMPLETE,,,2026-07-26T00:06:29-07:00
+f177cf28,item,u2,2.1,remove-legacy-config-form,deferred,DEFERRED,,,2026-07-26T00:12:14-07:00
+f177cf28,item,u1,1.2,validator-container-fidelity,complete,COMPLETE,,,2026-07-26T01:28:14-07:00
+f177cf28,item,u1,1.3,validator-proto-property-reads,reverted,REVERTED,,,2026-07-26T01:28:14-07:00
+f177cf28,item,u1,1.4,validator-boolean-coercion,reverted,REVERTED,,,2026-07-26T01:28:14-07:00
+f177cf28,item,u1,1.1,validator-recursive-types,reverted,REVERTED,,,2026-07-26T01:28:14-07:00
+f177cf28,item,u4,4.1,validator-body-ast-rewrite,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.108Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.2,encode-growth-signal,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.116Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.3,sbc-key-enumeration-parity,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.143Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.4,decoder-count-limits,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.172Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.5,registry-hash-validation,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.195Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.6,remove-map-set-tags,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.221Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.7,unify-packed-numeric-tags,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.245Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.8,encodable-type-constraint,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.270Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.9,infer-nullable-not-mixed,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.294Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.10,bigint-int64-parity,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.318Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.11,sbc-schema-preregistration,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.342Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.12,sbc-encode-safety,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.367Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.13,sbc-cache-isolation,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.391Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.14,sbc-compute-size,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.414Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.15,sbc-browser-platform-tests,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.439Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u4,4.16,codegen-uint16-hoist,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.463Z run=f177cf28 class=dependency reason=""dependency validator-boolean-coercion did not land — reverted"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u6,6.1,sbc-compile-time-parity,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.487Z run=f177cf28 class=dependency reason=""dependency remove-map-set-tags did not land — deferred"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u7,7.1,readme-accuracy,deferred,DEFERRED,"DEFERRED 2026-07-26T08:28:15.511Z run=f177cf28 class=dependency reason=""dependency sbc-compute-size did not land — deferred"" salvage=none",,2026-07-26T01:28:15-07:00
+f177cf28,item,u5,5.1,residue-codec-false-positive,complete,COMPLETE,,,2026-07-26T01:32:35-07:00
+f177cf28,run,,,,run-end,RUN END,"applied: 3 completed, 4 rejected, 4 status-actions, 6 changelog-rows",,2026-07-26T01:32:35-07:00

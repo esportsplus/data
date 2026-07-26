@@ -1,11 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P1
 depends-on: [validator-boolean-coercion]
 files-own: [src/compiler/validators.ts, test/compiler/validators.test.ts]
 tests: [test/compiler/validators.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Rewrite validator bodies through the AST, not a regex
@@ -63,3 +64,4 @@ Test plan (`test/compiler/validators.test.ts`, the mirror for `src/compiler/vali
 
 TS7 migration (landed after authoring): this repo now compiles on typescript 7.0.2 through @esportsplus/typescript, whose root vends the TS surface as `ts`. Deleted APIs — `ts.TypeChecker` is `ts.Checker`; `ts.forEachChild(n, cb)` is `n.forEachChild(cb)`; `ts.getCombinedModifierFlags` and `ts.IndexKind` are gone (use a node's `modifierFlags` field and `checker.getIndexInfosOfType`); `type.isUnion/isStringLiteral/isIntersection()` are `isUnionType/isStringLiteralType/isIntersectionType()`; `symbol.getName()` is `symbol.name` and `symbol.declarations` holds NodeHandles needing `.resolve()`; `checker.getTypeAtLocation`/`getTypeOfSymbol` now return `Type | undefined`. Never import `typescript` directly — the surface is vended centrally.
 Compiler test harness (rebuilt for TS7): test/utils.ts no longer exposes `createProgram`. Use `compile(code)` → `{ checker, program, sourceFile }` (backed by `languageService.scratch`), `transformRaw(code)` for the data plugin, or `transformWith(plugins, code)` for any plugin set. `ts.createProgram`/`createCompilerHost`/`createSourceFile`/`ts.sys` no longer exist. Fixture types must not be named after DOM globals (`Node`, `Document`, `Range`): a scratch file is a script, not a module, so the name collides with the global instead of shadowing it — the harness pins `lib: ['es2020']` to keep that off the DOM type graph.
+DEFERRED 2026-07-26T08:28:15.108Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

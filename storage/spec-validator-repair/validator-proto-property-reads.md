@@ -1,11 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: REVERTED
 priority: P1
 depends-on: [validator-container-fidelity]
 files-own: [src/compiler/validator.ts, test/compiler/validator.test.ts]
 tests: [test/compiler/validator.test.ts]
+blocked-reason: merge suite_red: reverted — salvage red — the narrowed selection cherry-picks onto a commit an excluded sibling owns — infeasible, nothing landed; salvage ref salvage/f177cf28-u1 @ 24af36d31a68d99e2b578d8ac4dc356d123365b8 — the unit branch tip survives as this tag; cherry-pick the item's [validator-proto-property-reads] commits to recover
 ---
 
 # Read a __proto__ property through an own-property probe

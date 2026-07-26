@@ -1,11 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: DEFERRED
 priority: P1
 depends-on: [encode-growth-signal]
 files-own: [src/sbc/index.ts, test/sbc/index.test.ts]
 tests: [test/sbc/index.test.ts]
+blocked-reason: dependency validator-boolean-coercion did not land — reverted
 ---
 
 # Count own keys only, matching the rest of the encode pipeline
@@ -53,3 +54,7 @@ Test plan (`test/sbc/index.test.ts`):
 
 - pnpm agent:test test/sbc/index.test.ts
 - npx tsc --noEmit
+
+## Notes
+
+DEFERRED 2026-07-26T08:28:15.143Z run=f177cf28 class=dependency reason="dependency validator-boolean-coercion did not land — reverted" salvage=none

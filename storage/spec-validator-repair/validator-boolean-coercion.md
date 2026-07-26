@@ -1,11 +1,12 @@
 ---
 type: fix
 recommended-model: sonnet
-status: PENDING
+status: REVERTED
 priority: P2
 depends-on: [validator-proto-property-reads]
 files-own: [src/compiler/validator.ts, test/compiler/primitives.test.ts]
 tests: [test/compiler/primitives.test.ts]
+blocked-reason: merge suite_red: reverted — salvage red — no parseable failing test — tail: ty - Expected + Received - true + false ❯ test/compiler/edge-cases.test.ts:267:31 265| let result = validate({ active: 'True' }); 266| 267| expect(result.ok).toBe(true); | ^ 268| expect(result.data.active).toBe(true); 269| }); ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯ Test Files 1 failed | 32 passed (33) Tests 2 failed | 1757 passed | 1 expected fail (1760) Start at 01:28:05 Duration 6.74s (transform 8.48s, setup 0ms, import 36.16s, tests 45.88s, environment 3ms) ELIFECYCLE Command failed with exit code 1.; salvage ref salvage/f177cf28-u1 @ 24af36d31a68d99e2b578d8ac4dc356d123365b8 — the unit branch tip survives as this tag; cherry-pick the item's [validator-boolean-coercion] commits to recover
 ---
 
 # Narrow boolean coercion to the documented forms

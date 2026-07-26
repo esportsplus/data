@@ -1,11 +1,12 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: REVERTED
 priority: P0
 files-own: [src/compiler/validator.ts, test/compiler/recursive-types.test.ts]
 files-shared: [src/compiler/type-analyzer.ts]
 tests: [test/compiler/recursive-types.test.ts]
+blocked-reason: merge suite_red: reverted — salvage red — the narrowed selection cherry-picks onto a commit an excluded sibling owns — infeasible, nothing landed; salvage ref salvage/f177cf28-u1 @ 24af36d31a68d99e2b578d8ac4dc356d123365b8 — the unit branch tip survives as this tag; cherry-pick the item's [validator-recursive-types] commits to recover
 ---
 
 # Generated validator recurses through named functions instead of dropping ref nodes
