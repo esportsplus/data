@@ -1,5 +1,42 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { codec } from '../../src/sbc';
+
+import type { PersistentStore } from '../../src/sbc';
+
+
+type CountingStore = PersistentStore & {
+    readonly sets: number;
+    readonly size: number;
+};
+
+type Stored = Parameters<PersistentStore['set']>[1];
+
+
+const POLLUTION_KEY = '__sbcInheritedEnumerableProbe';
+
+
+function makeCountingStore(): CountingStore {
+    let map = new Map<number, Stored>(),
+        sets = 0;
+
+    return {
+        get: (hash: number) => map.get(hash) ?? null,
+        set(hash: number, schema: Stored) {
+            sets++;
+            map.set(hash, schema);
+        },
+        get sets() {
+            return sets;
+        },
+        get size() {
+            return map.size;
+        },
+    };
+}
+
+function schemaHash(buf: Uint8Array): number {
+    return (buf[1]! | (buf[2]! << 8) | (buf[3]! << 16) | (buf[4]! << 24)) >>> 0;
+}
 
 
 describe('Codec2', () => {
@@ -4522,6 +4559,105 @@ describe('Codec2', () => {
             let b = codec();
 
             expect(b.extractField(buf, 'label')).toBe('hello');
+        });
+    });
+
+    describe('sbc-key-enumeration-parity: own-key counting matches Object.keys', () => {
+        afterEach(() => {
+            delete (Object.prototype as Record<string, unknown>)[POLLUTION_KEY];
+        });
+
+        it('own-key guard executes on the encode counting path under prototype pollution', () => {
+            let objA = { a: 1, b: 2 },
+                objB = { a: 3, b: 4 },
+                c = codec();
+
+            // Warm the caches BEFORE pollution: registers the schema, seeds weakCache + ring.
+            c.encode(objA);
+
+            (Object.prototype as Record<string, unknown>)[POLLUTION_KEY] = 1;
+
+            let ownChecks = 0,
+                realHasOwn = Object.hasOwn;
+
+            Object.hasOwn = (target: object, key: PropertyKey): boolean => {
+                if (target === objA || target === objB) {
+                    ownChecks++;
+                }
+
+                return realHasOwn(target, key);
+            };
+
+            try {
+                c.encode(objA);            // same reference → revalidateCached counts own keys
+                c.encode(objB);            // fresh same-shape ref → matchSchema counts own keys
+            }
+            finally {
+                Object.hasOwn = realHasOwn;
+            }
+
+            // Both counting loops now guard with Object.hasOwn on the encoded object.
+            // A bare for-in (the pre-fix loop) never calls Object.hasOwn — this is 0 then.
+            expect(ownChecks).toBeGreaterThan(0);
+        });
+
+        it('re-encoding a reference under pollution stays on the cached path and keeps the same schema hash', () => {
+            let store = makeCountingStore(),
+                c = codec({ store });
+
+            (Object.prototype as Record<string, unknown>)[POLLUTION_KEY] = 1;
+
+            let obj = { a: 1, b: 2 },
+                first = c.encode(obj).slice(),
+                setsAfterFirst = store.sets,
+                sizeAfterFirst = store.size,
+                second = c.encode(obj).slice();
+
+            expect(schemaHash(second)).toBe(schemaHash(first));
+            expect(store.sets).toBe(setsAfterFirst);
+            expect(store.size).toBe(sizeAfterFirst);
+            expect(c.decode(second)).toEqual({ a: 1, b: 2 });
+        });
+
+        it('Object.create with a data-carrying prototype encodes only own fields and drops the inherited key', () => {
+            let c = codec(),
+                obj = Object.create({ inherited: 99 }) as Record<string, unknown>;
+
+            obj.own1 = 'x';
+            obj.own2 = 7;
+
+            let decoded = c.decode(c.encode(obj)) as Record<string, unknown>;
+
+            expect(decoded).toEqual({ own1: 'x', own2: 7 });
+            expect('inherited' in decoded).toBe(false);
+        });
+
+        it('revalidateCached still invalidates when an own key is added or removed between encodes', () => {
+            let c = codec(),
+                obj: Record<string, unknown> = { a: 1, b: 2 };
+
+            expect(c.decode(c.encode(obj))).toEqual({ a: 1, b: 2 });
+
+            obj.cee = 3;
+            expect(c.decode(c.encode(obj))).toEqual({ a: 1, b: 2, cee: 3 });
+
+            delete obj.b;
+            expect(c.decode(c.encode(obj))).toEqual({ a: 1, cee: 3 });
+        });
+
+        it('a plain object literal round-trips deterministically and repeated encodes do not re-infer', () => {
+            let store = makeCountingStore(),
+                c = codec({ store }),
+                obj = { name: 'Alice', score: 42 },
+                snapshot = c.encode(obj).slice(),
+                setsAfterFirst = store.sets;
+
+            for (let i = 0; i < 8; i++) {
+                expect([...c.encode(obj).slice()]).toEqual([...snapshot]);
+            }
+
+            expect(store.sets).toBe(setsAfterFirst);
+            expect(c.decode(snapshot)).toEqual(obj);
         });
     });
 });
