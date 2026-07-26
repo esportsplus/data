@@ -34,6 +34,11 @@ type TypeValidator = (prop: AnalyzedProperty, source: string, target: string, pa
 
 const CONFIG_VARIABLE = '_config';
 
+// Every property name Object.prototype shadows-in (constructor, toString, __proto__, ...). A
+// read of one of these off a plain input returns the INHERITED value, so presence/default tests
+// must go through an own-property probe instead of a bare `input.name` read.
+const INHERITED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype));
+
 const INPUT_VARIABLE = '_input';
 
 // A cyclic INPUT value (an object that points back at itself) makes the type graph finite but
@@ -467,13 +472,14 @@ function generateObjectValidation(
             continue;
         }
 
-        let access = propertyAccess(property.name, source),
+        let probe = propertyAccess(property.name, source),
+            access = probe.expr,
             inner = validateInto(property, access, container, { segments: [...path, { kind: 'key', name: property.name }] }, context);
 
         parts.push(
             property.optional
-                ? code`if (${access} !== undefined) { ${inner} }`
-                : inner
+                ? code`${probe.seed} if (${access} !== undefined) { ${inner} }`
+                : code`${probe.seed} ${inner}`
         );
     }
 
@@ -570,13 +576,14 @@ function generateRecursiveBody(properties: AnalyzedProperty[], context: Generato
             continue;
         }
 
-        let access = propertyAccess(property.name, '_src'),
+        let probe = propertyAccess(property.name, '_src'),
+            access = probe.expr,
             inner = validateInto(property, access, '_o', { segments: [{ expr: '_path', kind: 'record' }, { kind: 'key', name: property.name }] }, context);
 
         parts.push(
             property.optional
-                ? code`if (${access} !== undefined) { ${inner} }`
-                : inner
+                ? code`${probe.seed} if (${access} !== undefined) { ${inner} }`
+                : code`${probe.seed} ${inner}`
         );
     }
 
@@ -980,12 +987,24 @@ function prepareRecursion(analyzed: AnalyzedType, context: GeneratorContext): st
     return decls.join('\n');
 }
 
-function propertyAccess(prop: string, varname: string): string {
-    if (VALID_IDENTIFIER.test(prop) && !RESERVED_WORDS.has(prop)) {
-        return `${varname}.${prop}`;
+// The twin of outputAccess for READS. A name Object.prototype shadows-in - PROTO_KEY and every
+// other inherited key - is read through a hoisted local seeded via Object.hasOwn so an inherited
+// value never masquerades as the input's own property; the seed feeds the presence test, the
+// default test and the validation source. Every other name keeps its bare dot/bracket spelling
+// with an empty seed, so its generated code is unchanged.
+function propertyAccess(prop: string, varname: string): { expr: string; seed: string } {
+    if (prop === PROTO_KEY || INHERITED_KEYS.has(prop)) {
+        let key = emitString(prop),
+            local = uid('own');
+
+        return { expr: local, seed: `let ${local} = Object.hasOwn(${varname}, ${key}) ? ${varname}[${key}] : undefined;` };
     }
 
-    return `${varname}[${emitString(prop)}]`;
+    if (VALID_IDENTIFIER.test(prop) && !RESERVED_WORDS.has(prop)) {
+        return { expr: `${varname}.${prop}`, seed: '' };
+    }
+
+    return { expr: `${varname}[${emitString(prop)}]`, seed: '' };
 }
 
 // The runtime path expression a recursive CALL threads as its `_path` argument. Mirrors
@@ -1108,7 +1127,8 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
 
         let configValidators = config?.get(property.name),
             def = defaults?.get(property.name),
-            source = propertyAccess(property.name, INPUT_VARIABLE),
+            probe = propertyAccess(property.name, INPUT_VARIABLE),
+            source = probe.expr,
             core: string;
 
         if (configValidators !== undefined && configValidators.length > 0) {
@@ -1143,6 +1163,8 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
         if (def !== undefined) {
             parts.push(
                 code`
+                    ${probe.seed}
+
                     if (${source} === undefined) {
                         ${emitWrite(OUTPUT_VARIABLE, property.name, def.fresh ? `${def.name}()` : def.name)}
                     }
@@ -1155,6 +1177,8 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
         else if (property.optional) {
             parts.push(
                 code`
+                    ${probe.seed}
+
                     if (${source} !== undefined) {
                         ${core}
                     }
@@ -1162,7 +1186,7 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
             );
         }
         else {
-            parts.push(core);
+            parts.push(code`${probe.seed} ${core}`);
         }
     }
 
