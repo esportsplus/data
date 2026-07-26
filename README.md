@@ -85,16 +85,16 @@ c.encode(new Float64Array([1.1, 2.2]));
 | `int64` | 9 | 8 bytes |
 | `Date` | 10 | f64 (timestamp) |
 | `int32` | 11 | 4 bytes |
-| packed array of `uint8` numbers | 12 | u32 count + raw bytes |
-| packed array of `float64` numbers | 13 | u32 count + raw f64s |
-| packed array of `int32` numbers | 14 | u32 count + raw i32s |
+| packed `number[]` | 12 | u8 typeId + u32 byteLen + raw little-endian elements |
 | typed array | 17 | u8 typeId + u32 byteLen + raw bytes |
 | compressed object | 18 | u32 hash + u32 length + packed fields |
 
-Tags 12–14 are an internal encoder optimization for a plain JS `Array` whose every element is a
-number in that tag's width — not a typed array. A real `Uint8Array[]` (array of `Uint8Array`
-instances) encodes as tag 7 (`Array`) with each element as a tag-6 `Uint8Array`. `Map` and `Set`
-have no wire tag: they are not encodable (see below).
+Tag 12 is an internal encoder optimization for a plain JS `Array` whose every element is a number:
+the classifier picks the narrowest lossless element width (uint8/int8/uint16/int16/uint32/int32/
+float64) and packs the elements at that width, decoding back to a plain `number[]` — not a typed
+array. A real `Uint8Array[]` (array of `Uint8Array` instances) encodes as tag 7 (`Array`) with each
+element as a tag-6 `Uint8Array`. `Map` and `Set` have no wire tag: they are not encodable (see
+below).
 
 `undefined` values and array holes both encode as tag 0 (`null`) and decode back as `null`, never
 `undefined`. A value with no representable tag (`Map`, `Set`, a function, a symbol, a class

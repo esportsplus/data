@@ -244,20 +244,45 @@ describe('Codec2', () => {
         });
 
         it('packed uint8 array', () => {
-            let data = [0, 1, 127, 255];
+            let data = [0, 1, 127, 255],
+                encoded = c.encode(data);
 
-            expect(c.decode(c.encode(data))).toEqual(data);
+            // [12][typeId 5 = uint8][u32 byteLen = 4]
+            expect(encoded[0]).toBe(12);
+            expect(encoded[1]).toBe(5);
+            expect(encoded[2]! | (encoded[3]! << 8) | (encoded[4]! << 16) | (encoded[5]! << 24)).toBe(4);
+
+            let decoded = c.decode(encoded) as number[];
+
+            expect(Array.isArray(decoded)).toBe(true);
+            expect(decoded).toEqual(data);
         });
 
         it('packed int32 array', () => {
-            let data = [256, 1000, -1, 2147483647, -2147483648];
+            let data = [256, 1000, -1, 2147483647, -2147483648],
+                encoded = c.encode(data);
 
-            expect(c.decode(c.encode(data))).toEqual(data);
+            // [12][typeId 4 = int32][u32 byteLen = 20]
+            expect(encoded[0]).toBe(12);
+            expect(encoded[1]).toBe(4);
+            expect(encoded[2]! | (encoded[3]! << 8) | (encoded[4]! << 16) | (encoded[5]! << 24)).toBe(20);
+
+            let decoded = c.decode(encoded) as number[];
+
+            expect(Array.isArray(decoded)).toBe(true);
+            expect(decoded).toEqual(data);
         });
 
         it('packed float64 array', () => {
-            let data = [1.1, 2.2, 3.3, NaN, Infinity];
-            let decoded = c.decode(c.encode(data)) as number[];
+            let data = [1.1, 2.2, 3.3, NaN, Infinity],
+                encoded = c.encode(data);
+
+            // [12][typeId 1 = float64][u32 byteLen = 40]
+            expect(encoded[0]).toBe(12);
+            expect(encoded[1]).toBe(1);
+            expect(encoded[2]! | (encoded[3]! << 8) | (encoded[4]! << 16) | (encoded[5]! << 24)).toBe(40);
+
+            let decoded = c.decode(encoded) as number[];
 
             expect(decoded[0]).toBe(1.1);
             expect(decoded[1]).toBe(2.2);
@@ -1059,8 +1084,9 @@ describe('Codec2', () => {
             expect(() => c.decode(buf)).toThrow('array count');
         });
 
-        it('huge packed uint8 count throws', () => {
-            let buf = new Uint8Array([12, 0xFF, 0xFF, 0xFF, 0x7F]);
+        it('huge packed count (byteLen/bpe derived) throws', () => {
+            // [12][typeId 5 = uint8, bpe 1][u32 byteLen = 0x7FFFFFFF] -> count 2^31-1 > MAX
+            let buf = new Uint8Array([12, 5, 0xFF, 0xFF, 0xFF, 0x7F]);
 
             expect(() => c.decode(buf)).toThrow('array count');
         });
@@ -1127,21 +1153,42 @@ describe('Codec2', () => {
 
 
     describe('packed array truncation (F-TEST-3)', () => {
-        it('truncated packed uint8 array (tag 12) throws via decodeTagEnd', () => {
-            // tag 12 + u32 LE count=5 + only 2 payload bytes (need 5)
+        it('truncated packed array (tag 12) payload throws via decodeTagEnd', () => {
+            // [12][typeId 5 = uint8][u32 byteLen = 5] + only 2 payload bytes (need 5)
             // Wrap in tag 7 (generic array, count=1) so decodeTagEnd is called
-            let inner = new Uint8Array([12, 5, 0, 0, 0, 0xAA, 0xBB]),
+            let inner = new Uint8Array([12, 5, 5, 0, 0, 0, 0xAA, 0xBB]),
                 buf = new Uint8Array(5 + inner.length);
 
             buf[0] = 7; // tag 7 = generic array
             buf[1] = 1; buf[2] = 0; buf[3] = 0; buf[4] = 0; // count = 1
             buf.set(inner, 5);
 
-            expect(() => c.decode(buf)).toThrow('truncated');
+            expect(() => c.decode(buf)).toThrow('truncated packed array');
         });
 
-        it('truncated packed float64 array (tag 13) throws via decodeTagEnd', () => {
-            // tag 13 + u32 LE count=3 + only 8 payload bytes (need 24)
+        it('truncated packed array (tag 12) header throws via direct decodeSbc', () => {
+            let c = codec();
+
+            // [12][typeId 5] — only 2 bytes, 6-byte header cannot be read
+            expect(() => c.decode(new Uint8Array([12, 5]))).toThrow('truncated packed array');
+        });
+
+        it('truncated packed array (tag 12) payload throws via direct decodeSbc', () => {
+            let c = codec();
+
+            // [12][typeId 5 = uint8][u32 byteLen = 5] + only 2 payload bytes — no tag-7 wrapper
+            expect(() => c.decode(new Uint8Array([12, 5, 5, 0, 0, 0, 0xAA, 0xBB]))).toThrow('truncated packed array');
+        });
+
+        it('misaligned packed byteLen (tag 12) throws', () => {
+            let c = codec();
+
+            // [12][typeId 3 = int16, bpe 2][u32 byteLen = 5] — 5 % 2 !== 0
+            expect(() => c.decode(new Uint8Array([12, 3, 5, 0, 0, 0]))).toThrow('not aligned');
+        });
+
+        it('retired tag 13 throws unknown tag via decodeTagEnd', () => {
+            // tag 13 wrapped in a tag-7 generic array so decodeTagEnd sees it
             let inner = new Uint8Array([13, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
                 buf = new Uint8Array(5 + inner.length);
 
@@ -1149,11 +1196,16 @@ describe('Codec2', () => {
             buf[1] = 1; buf[2] = 0; buf[3] = 0; buf[4] = 0;
             buf.set(inner, 5);
 
-            expect(() => c.decode(buf)).toThrow('truncated');
+            expect(() => c.decode(buf)).toThrow('unknown tag 13');
         });
 
-        it('truncated packed int32 array (tag 14) throws via decodeTagEnd', () => {
-            // tag 14 + u32 LE count=3 + only 4 payload bytes (need 12)
+        it('retired tag 13 throws unknown tag via direct decodeSbc', () => {
+            let c = codec();
+
+            expect(() => c.decode(new Uint8Array([13, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))).toThrow('unknown tag 13');
+        });
+
+        it('retired tag 14 throws unknown tag via decodeTagEnd', () => {
             let inner = new Uint8Array([14, 3, 0, 0, 0, 0, 0, 0, 0]),
                 buf = new Uint8Array(5 + inner.length);
 
@@ -1161,28 +1213,13 @@ describe('Codec2', () => {
             buf[1] = 1; buf[2] = 0; buf[3] = 0; buf[4] = 0;
             buf.set(inner, 5);
 
-            expect(() => c.decode(buf)).toThrow('truncated');
+            expect(() => c.decode(buf)).toThrow('unknown tag 14');
         });
 
-        it('truncated packed uint8 (tag 12) throws via direct decodeSbc', () => {
+        it('retired tag 14 throws unknown tag via direct decodeSbc', () => {
             let c = codec();
 
-            // tag 12 + u32 LE count=5 + only 2 payload bytes — no tag-7 wrapper
-            expect(() => c.decode(new Uint8Array([12, 5, 0, 0, 0, 0xAA, 0xBB]))).toThrow('truncated packed uint8');
-        });
-
-        it('truncated packed float64 (tag 13) throws via direct decodeSbc', () => {
-            let c = codec();
-
-            // tag 13 + u32 LE count=3 + only 8 payload bytes (need 24)
-            expect(() => c.decode(new Uint8Array([13, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))).toThrow('truncated packed float64');
-        });
-
-        it('truncated packed int32 (tag 14) throws via direct decodeSbc', () => {
-            let c = codec();
-
-            // tag 14 + u32 LE count=3 + only 4 payload bytes (need 12)
-            expect(() => c.decode(new Uint8Array([14, 3, 0, 0, 0, 0, 0, 0, 0]))).toThrow('truncated packed int32');
+            expect(() => c.decode(new Uint8Array([14, 3, 0, 0, 0, 0, 0, 0, 0]))).toThrow('unknown tag 14');
         });
     });
 
@@ -4025,44 +4062,37 @@ describe('Codec2', () => {
     });
 
 
-    describe('tiered array classification phases (F-PERF-5)', () => {
-        it('phase 2+3: uint8 fails at 300, int32 fails at 3.14 -> float64 (tag 13)', () => {
-            let c = codec(),
-                data = [0, 300, 3.14],
-                encoded = c.encode(data);
+    describe('single-pass packed array classifier (F-PERF-5)', () => {
+        // typeId: 1 float64, 2 int8, 3 int16, 4 int32, 5 uint8, 7 uint16, 8 uint32 — bpe from
+        // the shared TYPED_ARRAY tables. Every packed number[] decodes to a plain Array.
+        let cases: { data: number[]; bpe: number; typeId: number }[] = [
+            { data: [0, 255], bpe: 1, typeId: 5 },
+            { data: [-5, 5], bpe: 1, typeId: 2 },
+            { data: [0, 65535], bpe: 2, typeId: 7 },
+            { data: [256, 1000, -1], bpe: 2, typeId: 3 },
+            { data: [0, 300, 2147483648], bpe: 4, typeId: 8 },
+            { data: [-1, -2147483648], bpe: 4, typeId: 4 },
+            { data: [1.5], bpe: 8, typeId: 1 },
+            { data: [2 ** 40], bpe: 8, typeId: 1 },
+            { data: [0, 300, 3.14], bpe: 8, typeId: 1 },
+        ];
 
-            // Tag 13 = packed float64: first byte is 13
-            expect(encoded[0]).toBe(13);
+        for (let tc of cases) {
+            it('packs ' + JSON.stringify(tc.data) + ' as typeId ' + tc.typeId + ' (' + tc.bpe + ' B/element)', () => {
+                let c = codec(),
+                    encoded = c.encode(tc.data),
+                    byteLen = (encoded[2]! | (encoded[3]! << 8) | (encoded[4]! << 16) | (encoded[5]! << 24)) >>> 0;
 
-            let decoded = c.decode(encoded) as number[];
+                expect(encoded[0]).toBe(12);
+                expect(encoded[1]).toBe(tc.typeId);
+                expect(byteLen).toBe(tc.data.length * tc.bpe);
 
-            expect(decoded).toEqual(data);
-        });
+                let decoded = c.decode(encoded) as number[];
 
-        it('phase 2+3: uint8 fails at 300, int32 fails at 2147483648 -> float64 (tag 13)', () => {
-            let c = codec(),
-                data = [0, 300, 2147483648],
-                encoded = c.encode(data);
-
-            expect(encoded[0]).toBe(13);
-
-            let decoded = c.decode(encoded) as number[];
-
-            expect(decoded).toEqual(data);
-        });
-
-        it('phase 2: uint8 fails immediately -> int32 path (tag 14)', () => {
-            let c = codec(),
-                data = [256, 1000, -1],
-                encoded = c.encode(data);
-
-            // Tag 14 = packed int32
-            expect(encoded[0]).toBe(14);
-
-            let decoded = c.decode(encoded) as number[];
-
-            expect(decoded).toEqual(data);
-        });
+                expect(Array.isArray(decoded)).toBe(true);
+                expect(decoded).toEqual(tc.data);
+            });
+        }
     });
 
 

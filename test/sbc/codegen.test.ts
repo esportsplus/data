@@ -145,7 +145,7 @@ const STUB_HELPERS: SbcHelpers = {
     registry: new Map(),
 };
 
-function buildSchema(fields: Array<{ name: string; type: string }>): Schema {
+function buildSchema(fields: Array<{ name: string; type: string }>, compressible = false): Schema {
     let fieldDefs: FieldDef[] = fields.map(f => {
         let parsed = parseFieldType(f.type);
 
@@ -168,7 +168,7 @@ function buildSchema(fields: Array<{ name: string; type: string }>): Schema {
         compFixedSize: 0,
         compressedDecodeFn: null,
         compressedEncodeFn: null,
-        compressible: false,
+        compressible,
         decodeFn: null,
         encodeFn: null,
         fields: fieldDefs,
@@ -248,5 +248,106 @@ describe('Codec2 uint16 encoder arm — property-read hoist', () => {
         let decoded = schema.decodeFn!(buf.subarray(0, end), 0, 0) as { v: number[] };
 
         expect(decoded.v).toEqual(value.v);
+    });
+});
+
+
+// Generic-array (untyped `array`) compiled path — the classifier-driven typeId+1 flag replacing
+// the retired 1/2/3 width enumeration. bpe/flag pairs are the narrowest lossless width per input.
+const PACKED_CASES: Array<{ bpe: number; flag: number; input: number[]; name: string }> = [
+    { bpe: 1, flag: 6, input: [0, 1, 255], name: 'uint8' },
+    { bpe: 1, flag: 3, input: [-5, 5, -128, 127], name: 'int8' },
+    { bpe: 2, flag: 8, input: [0, 300, 65535], name: 'uint16' },
+    { bpe: 2, flag: 4, input: [256, 1000, -1], name: 'int16' },
+    { bpe: 4, flag: 9, input: [0, 70000, 4294967295], name: 'uint32' },
+    { bpe: 4, flag: 5, input: [-2000000000, 2000000000], name: 'int32' },
+    { bpe: 8, flag: 2, input: [1.5, 2.25, -0.5], name: 'float64' },
+];
+
+
+describe('Codec2 compiled generic-array packed path — typeId+1 flag', () => {
+    for (let { flag, input, name } of PACKED_CASES) {
+        it(`round-trips a ${name} number[] through the compiled encoder/decoder at flag ${flag}`, () => {
+            let schema = buildSchema([{ name: 'f', type: 'array' }]),
+                buf = new Uint8Array(1024);
+
+            let end = schema.encodeFn!({ f: input }, buf, 0),
+                decoded = schema.decodeFn!(buf.subarray(0, end), 0, 0) as { f: number[] };
+
+            expect(buf[0]).toBe(flag);
+            expect(Array.isArray(decoded.f)).toBe(true);
+            expect(decoded.f).toEqual(input);
+        });
+
+        it(`round-trips a ${name} number[] through the compressed encoder/decoder at flag ${flag}`, () => {
+            let schema = buildSchema([{ name: 'f', type: 'array' }], true),
+                buf = new Uint8Array(1024);
+
+            let end = schema.compressedEncodeFn!({ f: input }, buf, 0),
+                decoded = schema.compressedDecodeFn!(buf.subarray(0, end), 0, 0) as { f: number[] };
+
+            expect(buf[0]).toBe(flag);
+            expect(decoded.f).toEqual(input);
+        });
+
+        it(`compiled ${name} element payload bytes equal the tagged path's for the same data`, () => {
+            let schema = buildSchema([{ name: 'f', type: 'array' }]),
+                buf = new Uint8Array(1024);
+
+            let end = schema.encodeFn!({ f: input }, buf, 0),
+                tagged = codec().encode(input),
+                payloadLen = input.length * PACKED_CASES.find(c => c.name === name)!.bpe;
+
+            // Compiled field header is [flag u8][count u32] (5 bytes); tag 12 header is
+            // [12][typeId u8][byteLen u32] (6 bytes). Element payloads must be byte-identical.
+            expect(tagged[0]).toBe(12);
+            expect(tagged[1]).toBe(flag - 1);
+            expect(buf[0]! - 1).toBe(tagged[1]);
+            expect(Array.from(buf.subarray(5, 5 + payloadLen))).toEqual(Array.from(tagged.subarray(6, 6 + payloadLen)));
+            expect(end).toBe(5 + payloadLen);
+        });
+    }
+
+    it('emits no retired 1/2/3 flag width literals in any compiled or compressed array function', () => {
+        let plain = buildSchema([{ name: 'f', type: 'array' }]),
+            compressed = buildSchema([{ name: 'f', type: 'array' }], true);
+
+        let encoders = [plain.encodeFn!.toString(), compressed.compressedEncodeFn!.toString()],
+            decoders = [plain.decodeFn!.toString(), compressed.compressedDecodeFn!.toString()];
+
+        for (let src of encoders) {
+            expect(src).not.toMatch(/b\[p\]=[123];/);
+            expect(src).toContain('_cpa(');
+        }
+
+        for (let src of decoders) {
+            expect(src).not.toMatch(/_f===[123]/);
+            expect(src).toContain('_f-1');
+        }
+    });
+
+    it('routes an empty untyped array to the generic flag 0, never a spurious numeric width', () => {
+        let schema = buildSchema([{ name: 'f', type: 'array' }]),
+            buf = new Uint8Array(1024);
+
+        let end = schema.encodeFn!({ f: [] }, buf, 0),
+            decoded = schema.decodeFn!(buf.subarray(0, end), 0, 0) as { f: number[] };
+
+        // classifyPackedArray([]) is not-packable (-1), so the compiled path takes the generic
+        // branch (flag 0) — matching the tagged path's len>0 packing guard, one shared authority.
+        expect(buf[0]).toBe(0);
+        expect(Array.isArray(decoded.f)).toBe(true);
+        expect(decoded.f).toEqual([]);
+    });
+
+    it('decodes a plain array as a plain number[], never a TypedArray — the tag-17 fidelity split', () => {
+        let schema = buildSchema([{ name: 'f', type: 'array' }]),
+            buf = new Uint8Array(1024);
+
+        let end = schema.encodeFn!({ f: [0, 1, 255] }, buf, 0),
+            decoded = schema.decodeFn!(buf.subarray(0, end), 0, 0) as { f: unknown };
+
+        expect(Array.isArray(decoded.f)).toBe(true);
+        expect(ArrayBuffer.isView(decoded.f)).toBe(false);
     });
 });

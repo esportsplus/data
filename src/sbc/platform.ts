@@ -375,12 +375,88 @@ for (let i = 0, n = TYPED_ARRAY_CTORS.length; i < n; i++) {
 }
 
 
+// Narrowest lossless element width for a plain number[] — returns a TYPED_ARRAY_IDS typeId,
+// or -1 for not-packable. float32 is excluded (lossy for JS doubles), bigint arrays never apply.
+function classifyPackedArray(a: number[]): number {
+    let n = a.length;
+
+    // An empty array carries no width to classify — not-packable, so both consumers route it to
+    // the generic path. Without this guard min/max keep their ±Infinity sentinels and the range
+    // ladder below would leak a spurious uint8 typeId (Infinity >= 0 && -Infinity <= 255).
+    if (n === 0) {
+        return -1;
+    }
+
+    let allInteger = true,
+        max = -Infinity,
+        min = Infinity;
+
+    for (let i = 0; i < n; i++) {
+        let v = a[i]!;
+
+        if (typeof v !== 'number') {
+            return -1;
+        }
+
+        // -0 is an integer to Number.isInteger but its sign only survives float64 — treat it as
+        // non-integer so a -0-bearing array packs losslessly instead of collapsing to +0.
+        if (Number.isInteger(v) && !Object.is(v, -0)) {
+            if (v < min) {
+                min = v;
+            }
+
+            if (v > max) {
+                max = v;
+            }
+        }
+        else {
+            allInteger = false;
+        }
+    }
+
+    if (!allInteger) {
+        return 1;
+    }
+
+    if (min >= 0) {
+        if (max <= 255) {
+            return 5;
+        }
+
+        if (max <= 65535) {
+            return 7;
+        }
+
+        if (max <= 4294967295) {
+            return 8;
+        }
+
+        return 1;
+    }
+
+    if (min >= -128 && max <= 127) {
+        return 2;
+    }
+
+    if (min >= -32768 && max <= 32767) {
+        return 3;
+    }
+
+    if (min >= -2147483648 && max <= 2147483647) {
+        return 4;
+    }
+
+    return 1;
+}
+
+
 export {
     _vr,
     allocBuf,
     allocUnsafe,
     browser,
     byteLen,
+    classifyPackedArray,
     codegenDriver,
     copyBuf,
     isNode,
