@@ -60,7 +60,7 @@ function validateHinted(schema: Schema, obj: Record<string, unknown>): void {
         }
 
         switch (f.type) {
-            case 'bigint':
+            case 'int64':
                 if (typeof value !== 'bigint') {
                     throw new Error("Codec2: field '" + name + "' expected bigint, got " + typeof value);
                 }
@@ -164,6 +164,7 @@ const codec = (options?: CodecOptions): {
     let compress = options?.compress ?? false,
         encodeBuf = allocBuf(65536),
         registry: SchemaRegistry = {
+            byNameHash: new Map(),
             nextId: 1,
             schemas: new Map(),
         };
@@ -426,7 +427,7 @@ const codec = (options?: CodecOptions): {
     // as needed — but strict across type families (number vs string vs object).
     function primitiveMatches(value: unknown, type: string): boolean {
         switch (type) {
-            case 'bigint': return typeof value === 'bigint';
+            case 'int64': return typeof value === 'bigint';
             case 'boolean': return typeof value === 'boolean';
             case 'bytes': return value instanceof Uint8Array;
             case 'date': return value instanceof Date;
@@ -764,7 +765,13 @@ const codec = (options?: CodecOptions): {
             types[i] = sorted[i]!.type;
         }
 
-        let hash = computeShapeHash(keys, types);
+        let hashTypes: string[] = new Array(sorted.length);
+
+        for (let i = 0, n = sorted.length; i < n; i++) {
+            hashTypes[i] = sorted[i]!.nullable ? types[i]! + '?' : types[i]!;
+        }
+
+        let hash = computeShapeHash(keys, hashTypes);
 
         // Already registered?
         if (registry.schemas.has(hash)) {
@@ -812,7 +819,7 @@ const codec = (options?: CodecOptions): {
             else if (t === 'int16' || t === 'int32' || t === 'uint16' || t === 'uint32') {
                 intFields.push(i);
             }
-            else if (t === 'bigint' || t === 'date') {
+            else if (t === 'int64' || t === 'date') {
                 compFixedSize += 8;
             }
             else if (t === 'int8' || t === 'uint8') {
@@ -836,6 +843,7 @@ const codec = (options?: CodecOptions): {
             id: registry.nextId++,
             intFields,
             nullableCount,
+            provisional: false,
         };
 
         compileSchema(schema, helpers);

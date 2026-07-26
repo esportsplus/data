@@ -89,7 +89,7 @@ function classifyCore(type: ts.Type, checker: ts.Checker): string | null {
     }
 
     if (flags & (ts.TypeFlags.BigInt | ts.TypeFlags.BigIntLiteral)) {
-        return 'bigint';
+        return 'int64';
     }
 
     if (flags & (ts.TypeFlags.String | ts.TypeFlags.StringLiteral | ts.TypeFlags.TemplateLiteral)) {
