@@ -809,19 +809,16 @@ describe('Codec2', () => {
             expect(Array.from(enc1)).toEqual(Array.from(enc2));
         });
 
-        it('DataView falls through to object encoder (F-TEST-4)', () => {
+        it('DataView throws the unrepresentable error (F-TEST-4)', () => {
             let ab = new ArrayBuffer(8),
                 dv = new DataView(ab);
 
             dv.setFloat64(0, 3.14);
 
-            // DataView is not handled by the typed array branch (explicitly excluded)
-            // It falls through to the plain-object encoder path
-            let encoded = c.encode(dv);
-
-            // Should not throw — documents current behavior
-            expect(encoded).toBeInstanceOf(Uint8Array);
-            expect(encoded.length).toBeGreaterThan(0);
+            // DataView is excluded from the typed-array branch and is not a plain
+            // record, so the encoder rejects it with a named throw rather than
+            // silently emitting tag 0 (null).
+            expect(() => c.encode(dv)).toThrow('Codec2: unrepresentable value of type DataView');
         });
     });
 

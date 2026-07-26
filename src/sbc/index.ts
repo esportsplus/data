@@ -10,7 +10,7 @@ import { computeNameHash, computeShapeHash, inferAndRegister, inferType, parseFi
 import { computeSize } from './size';
 import { decodeSbc, decodeTagEnd, encodeSbc } from './tagged';
 
-import type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, SchemaRegistry } from './types';
+import type { CodecOptions, DecodeOptions, Encodable, EncodeOptions, FieldSpec, SchemaRegistry } from './types';
 import type { DecodeContext, EncodeContext } from './tagged';
 import type { ExtractContext } from './extract';
 import type { SizeContext } from './size';
@@ -39,12 +39,12 @@ import cache from './cache';
 // 17 = typed array (u8 typeId + u32 byteLen + raw bytes)
 
 const codec = (options?: CodecOptions): {
-    computeSize(value: unknown): number;
+    computeSize<T>(value: T & Encodable<T>): number;
     decode<T = unknown>(buffer: Uint8Array, lengthOrOptions?: number | DecodeOptions): T;
     decodeAt<T = unknown>(buffer: Uint8Array, offset: number): T;
     defineSchema(fields: FieldSpec[]): number;
     deserializeRegistry(data: Uint8Array): void;
-    encode<T>(value: T, viewOrOptions?: boolean | EncodeOptions): Uint8Array;
+    encode<T>(value: T & Encodable<T>, viewOrOptions?: boolean | EncodeOptions): Uint8Array;
     extractField<T = unknown>(buffer: Uint8Array, fieldName: string): T;
     serializeRegistry(): Uint8Array
 } => {
@@ -801,6 +801,6 @@ const codec = (options?: CodecOptions): {
 
 
 export { codec };
-export type { CodecOptions, DecodeOptions, EncodeOptions, FieldSpec, PersistentStore, SchemaRegistry } from './types';
+export type { CodecOptions, DecodeOptions, Encodable, EncodeOptions, FieldSpec, PersistentStore, SchemaRegistry } from './types';
 export type { Schema } from './codegen';
 export type { StoredSchema } from './cache';

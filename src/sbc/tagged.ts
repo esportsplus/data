@@ -377,6 +377,13 @@ function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
 }
 
 
+function unrepresentable(value: unknown): never {
+    let ctor = value == null ? undefined : (value as { constructor?: { name?: string } }).constructor;
+
+    throw new Error('Codec2: unrepresentable value of type ' + (ctor?.name ?? typeof value));
+}
+
+
 function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: number): number {
     if (value === null || value === undefined) {
         buf[pos] = 0;
@@ -493,8 +500,7 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 let typeId = TYPED_ARRAY_IDS.get(ta.constructor);
 
                 if (typeId === undefined) {
-                    buf[pos] = 0;
-                    return pos + 1;
+                    unrepresentable(value);
                 }
 
                 let bLen = ta.byteLength,
@@ -642,6 +648,16 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 return p;
             }
 
+            // Runtime backstop for the Encodable constraint: reject any object that is
+            // not a plain record (Map, Set, WeakMap, RegExp, Promise, class instances).
+            // The TypeScript constraint is the primary gate; this catches `any`-typed and
+            // plain-JS call sites the compiler never saw.
+            let ctor = (value as { constructor?: unknown }).constructor;
+
+            if (ctor !== Object && ctor !== undefined) {
+                unrepresentable(value);
+            }
+
             // Plain object → schema-compiled path
             let obj = value as Record<string, unknown>,
                 schema = ectx.weakCache.get(obj) ?? null;
@@ -687,9 +703,12 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
             return end;
         }
 
+        case 'function':
+        case 'symbol':
+            return unrepresentable(value);
+
         default:
-            buf[pos] = 0;
-            return pos + 1;
+            return unrepresentable(value);
     }
 }
 
