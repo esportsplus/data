@@ -71,7 +71,7 @@ describe('codec2 compiler plugin transformations', () => {
         expect(result).toContain('"type":"uint8"');
         expect(result).toContain('"type":"string"');
         expect(result).toContain('"type":"date"');
-        expect(result).toContain('"type":"bigint"');
+        expect(result).toContain('"type":"int64"');
     });
 
     test('nullable field — string | null has nullable true', () => {

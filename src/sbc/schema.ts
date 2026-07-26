@@ -113,7 +113,7 @@ function inferType(value: unknown): string {
     }
 
     switch (typeof value) {
-        case 'bigint': return 'bigint';
+        case 'bigint': return 'int64';
         case 'boolean': return 'boolean';
         case 'number': {
             let n = value as number;
@@ -223,7 +223,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         else if (t === 'int16' || t === 'int32' || t === 'uint16' || t === 'uint32') {
             intFields.push(i);
         }
-        else if (t === 'bigint' || t === 'date') {
+        else if (t === 'int64' || t === 'date') {
             compFixedSize += 8;
         }
         else if (t === 'int8' || t === 'uint8') {
@@ -270,7 +270,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
 
 function readFixedField(buf: Uint8Array, pos: number, type: string): unknown {
     switch (type) {
-        case 'bigint': return readBI64.call(buf, pos);
+        case 'int64': return readBI64.call(buf, pos);
         case 'boolean': return !!buf[pos]!;
         case 'date': return new Date(readF64.call(buf, pos));
         case 'float64': return readF64.call(buf, pos);

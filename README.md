@@ -82,7 +82,7 @@ c.encode(new Float64Array([1.1, 2.2]));
 | `Uint8Array` | 6 | u32 length + raw bytes (decodes to a fresh copy, never a view into the source buffer) |
 | `Array` | 7 | u32 count + tagged elements |
 | `object` | 8 | u32 hash + u32 length + compiled fields |
-| `bigint` | 9 | 8 bytes |
+| `int64` | 9 | 8 bytes |
 | `Date` | 10 | f64 (timestamp) |
 | `int32` | 11 | 4 bytes |
 | packed array of `uint8` numbers | 12 | u32 count + raw bytes |
@@ -135,7 +135,7 @@ guarantees the fast path regardless of call order.
 | `int16` | -32768–32767 |
 | `int32` | -2147483648–2147483647 |
 | `float64` | 64-bit float |
-| `bigint` | 64-bit signed |
+| `int64` | 64-bit signed |
 | `string` | UTF-8 string |
 | `bytes` | Raw bytes (Uint8Array) |
 | `date` | Date object (stored as f64) |

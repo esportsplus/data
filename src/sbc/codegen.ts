@@ -159,7 +159,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 body += `${d.writeF64('p', val)};p+=8;\n`;
                 break;
 
-            case 'bigint':
+            case 'int64':
                 body += `if(${val}<-9223372036854775808n||${val}>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,${val},p);p+=8;\n`;
                 break;
 
@@ -193,7 +193,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
                         et.base === 'uint16' || et.base === 'int16' ||
                         et.base === 'uint32' || et.base === 'int32' ||
-                        et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
+                        et.base === 'float64' || et.base === 'date' || et.base === 'int64') {
                         // Typed array: varint count + raw fixed-size elements
                         body += `{let a=${val},l=a.length;p=_wv(b,p,l);`;
 
@@ -225,7 +225,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                             case 'date':
                                 body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}`;
                                 break;
-                            case 'bigint':
+                            case 'int64':
                                 body += `for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}`;
                                 break;
                         }
@@ -415,7 +415,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 body += `f${i}=${d.readF64('p')};p+=8;\n`;
                 break;
 
-            case 'bigint':
+            case 'int64':
                 body += `f${i}=_rBI64.call(b,p);p+=8;\n`;
                 break;
 
@@ -439,7 +439,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
                         et.base === 'uint16' || et.base === 'int16' ||
                         et.base === 'uint32' || et.base === 'int32' ||
-                        et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
+                        et.base === 'float64' || et.base === 'date' || et.base === 'int64') {
                         // Typed array: varint count + raw fixed-size elements
                         body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
@@ -483,7 +483,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                             case 'date':
                                 body += `for(let i=0;i<l;i++){a[i]=new Date(${d.readF64('p')});p+=8;}`;
                                 break;
-                            case 'bigint':
+                            case 'int64':
                                 body += `for(let i=0;i<l;i++){a[i]=_rBI64.call(b,p);p+=8;}`;
                                 break;
                         }
@@ -660,7 +660,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
         body += boolBitmapBytes === 1 ? `let _bb=b[p];p+=1;\n` : `let _bb=b[p]|(b[p+1]<<8);p+=2;\n`;
     }
 
-    // Pass 1: Booleans, bigint, date, uint8, int8
+    // Pass 1: Booleans, int64, date, uint8, int8
     for (let i = 0; i < n; i++) {
         let f = fields[i]!,
             no = f.nullable ? `if(_bm&${1 << f.nullIndex}){` : '',
@@ -673,7 +673,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                 body += `${no}f${i}=!!(_bb&${1 << bi});${nc}\n`;
                 break;
             }
-            case 'bigint':
+            case 'int64':
                 body += `${no}f${i}=_rBI64.call(b,p);p+=8;${nc}\n`;
                 break;
             case 'date':
@@ -733,7 +733,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
                         et.base === 'uint16' || et.base === 'int16' ||
                         et.base === 'uint32' || et.base === 'int32' ||
-                        et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
+                        et.base === 'float64' || et.base === 'date' || et.base === 'int64') {
                         body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
@@ -776,7 +776,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                             case 'date':
                                 body += `for(let i=0;i<l;i++){a[i]=new Date(${d.readF64('p')});p+=8;}`;
                                 break;
-                            case 'bigint':
+                            case 'int64':
                                 body += `for(let i=0;i<l;i++){a[i]=_rBI64.call(b,p);p+=8;}`;
                                 break;
                         }
@@ -915,7 +915,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
         body += `let _bb=0,_bbp=p;p+=${boolBitmapBytes};\n`;
     }
 
-    // Pass 1: Booleans (into bitmap), bigint, date, uint8, int8
+    // Pass 1: Booleans (into bitmap), int64, date, uint8, int8
     for (let i = 0; i < n; i++) {
         let f = fields[i]!,
             sk = JSON.stringify(f.name),
@@ -934,7 +934,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
 
                 break;
             }
-            case 'bigint':
+            case 'int64':
                 if (f.nullable) {
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
@@ -1078,7 +1078,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
                         et.base === 'uint16' || et.base === 'int16' ||
                         et.base === 'uint32' || et.base === 'int32' ||
-                        et.base === 'float64' || et.base === 'date' || et.base === 'bigint') {
+                        et.base === 'float64' || et.base === 'date' || et.base === 'int64') {
                         body += `{let a=${v},l=a.length;p=_wv(b,p,l);`;
 
                         switch (et.base) {
@@ -1109,7 +1109,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                             case 'date':
                                 body += `for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}`;
                                 break;
-                            case 'bigint':
+                            case 'int64':
                                 body += `for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}`;
                                 break;
                         }

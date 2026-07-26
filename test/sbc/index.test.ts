@@ -2257,7 +2257,7 @@ describe('Codec2', () => {
 
             c.defineSchema([
                 { name: 'active', type: 'boolean' },
-                { name: 'big', type: 'bigint' },
+                { name: 'big', type: 'int64' },
                 { name: 'data', type: 'bytes' },
                 { name: 'f', type: 'float64' },
                 { name: 'i', type: 'int32' },
@@ -2582,12 +2582,12 @@ describe('Codec2', () => {
             });
         });
 
-        describe('array<bigint>', () => {
+        describe('array<int64>', () => {
             it('round-trips', () => {
                 let c = codec();
 
                 c.defineSchema([
-                    { name: 'data', type: 'array<bigint>' },
+                    { name: 'data', type: 'array<int64>' },
                 ]);
 
                 let obj = { data: [0n, 1n, -1n, 9007199254740993n] };
@@ -3390,6 +3390,34 @@ describe('Codec2', () => {
             let c = codec();
 
             expect(() => c.defineSchema([{ name: 'tags', type: 'set' }])).toThrow('unknown field type: set');
+        });
+
+        it('defineSchema refuses a field typed bigint (renamed to int64)', () => {
+            let c = codec();
+
+            expect(() => c.defineSchema([{ name: 'big', type: 'bigint' }])).toThrow('Codec2: unknown field type: bigint');
+        });
+
+        it('int64 (KNOWN_TYPES sanity): round-trips through tagged, compiled, compressed, and hinted paths', () => {
+            let value = 123456789012345678n;
+
+            let tagged = codec();
+
+            expect(tagged.decode(tagged.encode(value))).toBe(value);
+
+            let compiled = codec();
+
+            compiled.defineSchema([{ name: 'big', type: 'int64' }]);
+            expect(compiled.decode(compiled.encode({ big: value }))).toEqual({ big: value });
+
+            let compressed = codec({ compress: true });
+
+            compressed.defineSchema([{ name: 'big', type: 'int64' }, { name: 'n', type: 'int32' }]);
+            expect(compressed.decode(compressed.encode({ big: value, n: 7 }))).toEqual({ big: value, n: 7 });
+
+            let hinted = codec();
+
+            expect(hinted.decode(hinted.encode({ big: value }, { schema: [{ name: 'big', type: 'int64' }] }))).toEqual({ big: value });
         });
     });
 
