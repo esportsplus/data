@@ -140,7 +140,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'uint16':
-                body += `b[p]=${val}&0xFF;b[p+1]=(${val}>>>8)&0xFF;p+=2;\n`;
+                body += `{let v=${val};b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}\n`;
                 break;
 
             case 'int16':

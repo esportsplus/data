@@ -3,6 +3,11 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 import { codec } from '../../src/sbc';
+import { compileSchema } from '../../src/sbc/codegen';
+import { FIELD_SIZES } from '../../src/sbc/constants';
+import { parseFieldType } from '../../src/sbc/schema';
+
+import type { FieldDef, Schema, SbcHelpers } from '../../src/sbc/codegen';
 
 
 const HOSTILE_COUNT = 2_000_000; // > 2^20; encodes to the LEB128 varint below
@@ -125,5 +130,123 @@ describe('Codec2 compiled-decoder count limits', () => {
         }
 
         expect(offenders).toEqual(['constants.ts']);
+    });
+});
+
+
+// Unit-level harness for the encoder/decoder arms — bypasses the codec() registry so the
+// generated function source is directly inspectable via encodeFn.toString().
+const STUB_HELPERS: SbcHelpers = {
+    decodeSbc: () => { throw new Error('Codec2: unexpected decodeSbc call in unit test'); },
+    decodeTagEnd: () => { throw new Error('Codec2: unexpected decodeTagEnd call in unit test'); },
+    encodeObj: () => { throw new Error('Codec2: unexpected encodeObj call in unit test'); },
+    encodeSbc: () => { throw new Error('Codec2: unexpected encodeSbc call in unit test'); },
+    lookupSchema: () => null,
+    registry: new Map(),
+};
+
+function buildSchema(fields: Array<{ name: string; type: string }>): Schema {
+    let fieldDefs: FieldDef[] = fields.map(f => {
+        let parsed = parseFieldType(f.type);
+
+        return {
+            elementType: parsed.elementType,
+            fixedSize: FIELD_SIZES[parsed.base] ?? 0,
+            name: f.name,
+            nullable: false,
+            nullIndex: -1,
+            offset: 0,
+            rawType: f.type,
+            refHash: parsed.hash,
+            type: parsed.base,
+        };
+    });
+
+    let schema: Schema = {
+        bitmapBytes: 0,
+        boolFields: [],
+        compFixedSize: 0,
+        compressedDecodeFn: null,
+        compressedEncodeFn: null,
+        compressible: false,
+        decodeFn: null,
+        encodeFn: null,
+        fields: fieldDefs,
+        fixedSize: 0,
+        float64Fields: [],
+        hash: 0,
+        id: 0,
+        intFields: [],
+        nullableCount: 0,
+    };
+
+    compileSchema(schema, STUB_HELPERS);
+
+    return schema;
+}
+
+
+describe('Codec2 uint16 encoder arm — property-read hoist', () => {
+    it('encodes a uint16 field to byte-identical output, matching the pre-hoist arm exactly', () => {
+        let schema = buildSchema([{ name: 'v', type: 'uint16' }]),
+            buf = new Uint8Array(2);
+
+        schema.encodeFn!({ v: 300 }, buf, 0);
+
+        expect(Array.from(buf)).toEqual([44, 1]);
+    });
+
+    it('round-trips boundary values 0 and 65535 exactly, and truncates 65536 to 0 unchanged', () => {
+        let schema = buildSchema([{ name: 'v', type: 'uint16' }]),
+            cases: Array<[number, number]> = [[0, 0], [65535, 65535], [65536, 0]];
+
+        for (let [input, expected] of cases) {
+            let buf = new Uint8Array(2);
+
+            schema.encodeFn!({ v: input }, buf, 0);
+
+            let decoded = schema.decodeFn!(buf, 0, 0) as { v: number };
+
+            expect(decoded.v).toBe(expected);
+        }
+    });
+
+    it('composes with sibling int16, uint32 and int32 arms in one schema', () => {
+        let schema = buildSchema([
+            { name: 'a', type: 'uint16' },
+            { name: 'b', type: 'int16' },
+            { name: 'c', type: 'uint32' },
+            { name: 'd', type: 'int32' },
+        ]);
+
+        let buf = new Uint8Array(2 + 2 + 4 + 4),
+            value = { a: 65000, b: -12345, c: 4000000000, d: -2000000000 };
+
+        schema.encodeFn!(value, buf, 0);
+
+        let decoded = schema.decodeFn!(buf, 0, 0) as typeof value;
+
+        expect(decoded).toEqual(value);
+    });
+
+    it('emits the field property expression exactly once in the generated encoder body', () => {
+        let schema = buildSchema([{ name: 'v', type: 'uint16' }]),
+            src = schema.encodeFn!.toString(),
+            matches = src.match(/o\["v"\]/g);
+
+        expect(matches).not.toBeNull();
+        expect(matches!.length).toBe(1);
+    });
+
+    it('leaves the array<uint16> element-loop arm unchanged — still round-trips', () => {
+        let schema = buildSchema([{ name: 'v', type: 'array<uint16>' }]),
+            value = { v: [0, 1, 300, 65535, 0] },
+            buf = new Uint8Array(64);
+
+        let end = schema.encodeFn!(value, buf, 0);
+
+        let decoded = schema.decodeFn!(buf.subarray(0, end), 0, 0) as { v: number[] };
+
+        expect(decoded.v).toEqual(value.v);
     });
 });
