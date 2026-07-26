@@ -1434,17 +1434,20 @@ describe('Codec2', () => {
     // === DEFINE SCHEMA ===
 
     describe('defineSchema', () => {
-        it('pre-registered schema encodes/decodes', () => {
+        it('pre-registered schema encodes/decodes with its declared widths', () => {
             let c = codec();
-
-            c.defineSchema([
+            let h = c.defineSchema([
+                { name: 'age', type: 'int32' },
                 { name: 'name', type: 'string' },
-                { name: 'age', type: 'uint8' },
             ]);
 
-            let obj = { age: 25, name: 'Alice' };
+            let obj = { age: 25, name: 'Alice' },
+                buf = c.encode(obj);
 
-            expect(c.decode(c.encode(obj))).toEqual(obj);
+            // Declared int32 is honored over the uint8 inference would pick for 25 —
+            // the emitted hash is the declared hash, not an inferred one.
+            expect(schemaHash(buf)).toBe(h);
+            expect(c.decode(buf)).toEqual(obj);
         });
 
         it('returns consistent hash for same fields', () => {
@@ -1478,14 +1481,17 @@ describe('Codec2', () => {
             let c = codec();
             let obj = { active: true, name: 'Bob' };
 
-            c.encode(obj);
+            let inferred = c.encode(obj).slice();
 
             let hash = c.defineSchema([
                 { name: 'active', type: 'boolean' },
                 { name: 'name', type: 'string' },
             ]);
 
-            expect(typeof hash).toBe('number');
+            // The declared shape hash equals the hash inference already minted for
+            // this object — declaring after inferring is idempotent.
+            expect(hash).toBe(schemaHash(inferred));
+            expect(schemaHash(c.encode(obj))).toBe(hash);
             expect(c.decode(c.encode(obj))).toEqual(obj);
         });
 
@@ -3179,7 +3185,7 @@ describe('Codec2', () => {
                 expect(c.extractField(encoded, 'id')).toBe(42);
             });
 
-            it.fails('BUG: test schema mismatch — inferred uint8 !== defined int32, encode never produces tag-18', () => {
+            it('declared int32-nullable schema is honored and compresses to tag-18', () => {
                 let c = codec({ compress: true });
 
                 c.defineSchema([
@@ -3189,8 +3195,11 @@ describe('Codec2', () => {
 
                 let encoded = c.encode({ id: 5, optional: 123 });
 
+                // Declared int32 is compressible → tag-18; the uint8 inference would
+                // pick for 123 is not, so pre-fix this emitted tag-8.
                 expect(encoded[0]).toBe(18);
                 expect(c.extractField(encoded, 'optional')).toBe(123);
+                expect(c.decode(encoded)).toEqual({ id: 5, optional: 123 });
             });
         });
 
@@ -4400,6 +4409,82 @@ describe('Codec2', () => {
 
             expect(store.sets).toBe(setsAfterFirst);
             expect(c.decode(snapshot)).toEqual(obj);
+        });
+    });
+
+    describe('sbc-schema-preregistration: declared schemas honored, unknown hints throw (D2/D4)', () => {
+        it('declared widths drive emitted bytes — small value keeps declared int32 width', () => {
+            let c = codec(),
+                h = c.defineSchema([
+                    { name: 'a', type: 'int32' },
+                    { name: 'b', type: 'int32' },
+                ]);
+
+            let buf = c.encode({ a: 5, b: 2 });
+
+            // Declared int32 → 4-byte little-endian fields, datalen 8. Inference would
+            // pick uint8 for these values (1 byte each, datalen 2) under a different hash.
+            let expected = new Uint8Array([
+                8,
+                h & 0xFF, (h >>> 8) & 0xFF, (h >>> 16) & 0xFF, (h >>> 24) & 0xFF,
+                8, 0, 0, 0,
+                5, 0, 0, 0,
+                2, 0, 0, 0,
+            ]);
+
+            expect(schemaHash(buf)).toBe(h);
+            expect([...buf]).toEqual([...expected]);
+            expect(c.decode(buf)).toEqual({ a: 5, b: 2 });
+        });
+
+        it('one registry entry after N encodes of one declared type', () => {
+            let store = makeCountingStore(),
+                c = codec({ store });
+
+            c.defineSchema([{ name: 'n', type: 'int32' }]);
+
+            for (let v of [5, 500, 70000]) {
+                c.encode({ n: v });
+            }
+
+            // Every value binds to the declared int32 schema. Inference would have minted
+            // three shapes (uint8 / uint16 / int32) across these three encodes.
+            let reg = c.serializeRegistry();
+
+            expect(reg[0]! | (reg[1]! << 8)).toBe(1);
+            expect(store.size).toBe(1);
+            expect(c.decode(c.encode({ n: 70000 }))).toEqual({ n: 70000 });
+        });
+
+        it('README nullable example is honored for both null and non-null values', () => {
+            let c = codec(),
+                h = c.defineSchema([
+                    { name: 'bio', nullable: true, type: 'string' },
+                    { name: 'id', type: 'uint32' },
+                ]);
+
+            let withBio = c.encode({ bio: 'hi', id: 5 }),
+                noBio = c.encode({ bio: null, id: 7 });
+
+            // Both objects bind to the declared schema. Inference would mint distinct
+            // non-nullable shapes (string+uint8 vs mixed+uint8), discarding the declared hash.
+            expect(schemaHash(withBio)).toBe(h);
+            expect(schemaHash(noBio)).toBe(h);
+            expect(c.decode(withBio)).toEqual({ bio: 'hi', id: 5 });
+            expect(c.decode(noBio)).toEqual({ bio: null, id: 7 });
+        });
+
+        it('encode with an unknown numeric schema hint throws', () => {
+            let c = codec();
+
+            expect(() => c.encode({ a: 1 }, { schema: 0xdeadbeef })).toThrow('Codec2: unknown schema hash 3735928559');
+        });
+
+        it('decode with an unknown numeric schema hint still throws (D4 symmetry)', () => {
+            let c = codec(),
+                buf = new Uint8Array([8, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+            expect(() => c.decode(buf, { schema: 0xdeadbeef })).toThrow('Codec2: unknown schema hash');
         });
     });
 });

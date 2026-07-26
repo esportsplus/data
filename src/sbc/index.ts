@@ -64,7 +64,7 @@ const codec = (options?: CodecOptions): {
         cacheSchemas: (Schema | null)[] = [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
         lastSortedKeys: string[] | null = null,
         typedSchemaFieldCounts = new Set<number>(),
-        typedSchemas = new Map<number, Schema>(),  // nameHash → schema for defineSchema with structural types
+        typedSchemas = new Map<number, Schema>(),  // nameHash → schema for every declared schema (matchSchema lookup)
         weakCache = new WeakMap<object, Schema>();
 
     function setCache(schema: Schema, obj: object): void {
@@ -710,27 +710,18 @@ const codec = (options?: CodecOptions): {
             store.set(hash, { fields: sorted, hash });
         }
 
-        // Index typed schemas by name hash for matchSchema lookup
-        let hasStructural = false;
+        // Index every declared schema by name hash so matchSchema honors declared
+        // widths and nullable flags ahead of inference (D2) — not just structural ones.
+        // A same-names/different-types collision drops the entry to avoid a wrong bind.
+        let nameHash = computeNameHash(keys),
+            existing = typedSchemas.get(nameHash);
 
-        for (let i = 0, m = fieldDefs.length; i < m; i++) {
-            if (fieldDefs[i]!.elementType || fieldDefs[i]!.refHash !== undefined) {
-                hasStructural = true;
-                break;
-            }
+        if (existing && existing.hash !== schema.hash) {
+            typedSchemas.delete(nameHash);
         }
-
-        if (hasStructural) {
-            let nameHash = computeNameHash(keys),
-                existing = typedSchemas.get(nameHash);
-
-            if (existing && existing.hash !== schema.hash) {
-                typedSchemas.delete(nameHash);
-            }
-            else {
-                typedSchemas.set(nameHash, schema);
-                typedSchemaFieldCounts.add(schema.fields.length);
-            }
+        else {
+            typedSchemas.set(nameHash, schema);
+            typedSchemaFieldCounts.add(schema.fields.length);
         }
 
         return hash;
@@ -754,9 +745,15 @@ const codec = (options?: CodecOptions): {
     }
 
 
-    function resolveSchemaForEncode(hint: number | FieldSpec[]): Schema | null {
+    function resolveSchemaForEncode(hint: number | FieldSpec[]): Schema {
         if (typeof hint === 'number') {
-            return registry.schemas.get(hint) ?? null;
+            let s = registry.schemas.get(hint);
+
+            if (!s) {
+                throw new Error('Codec2: unknown schema hash ' + hint);
+            }
+
+            return s;
         }
 
         let hash = defineSchema(hint);
