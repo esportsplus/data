@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { min } from '../../src/validators';
 import { createValidator, transformCode } from '../utils';
 
@@ -216,6 +216,94 @@ describe('__proto__ property lands as an own key (C16)', () => {
         expect(result.ok).toBe(true);
         expect(Object.keys(result.data)).toContain('__proto__');
         expect(Object.getPrototypeOf(result.data)).toBe(Object.prototype);
+    });
+});
+
+
+describe('Map validation builds a fresh, own-key container', () => {
+    let validate = createValidator(`
+        type Data = { m: Map<string, number> };
+        validator.build<Data>();
+    `);
+
+    it('coerces values into the fresh Map', () => {
+        let result = validate({ m: new Map([['a', '30']]) });
+
+        expect(result.ok).toBe(true);
+        expect((result.data.m as Map<string, number>).get('a')).toBe(30);
+        expect(typeof (result.data.m as Map<string, number>).get('a')).toBe('number');
+    });
+
+    it('returns a Map that is not the input Map and does not alias it', () => {
+        let inputMap = new Map([['a', '30']]);
+        let result = validate({ m: inputMap });
+
+        expect(result.ok).toBe(true);
+        expect(result.data.m).not.toBe(inputMap);
+
+        (result.data.m as Map<string, number>).set('b', 99);
+        expect(inputMap.has('b')).toBe(false);
+    });
+
+    it('reports an invalid Map value with the key in its path', () => {
+        let result = validate({ m: new Map([['a', 'not-a-number']]) });
+
+        expect(result.ok).toBe(false);
+        expect(result.errors!.length).toBeGreaterThan(0);
+        expect(result.errors![0].path).toContain('a');
+    });
+});
+
+
+describe('Set validation builds a fresh, own-value container', () => {
+    let validate = createValidator(`
+        type Data = { s: Set<number> };
+        validator.build<Data>();
+    `);
+
+    it('coerces values into a fresh Set that is not the input Set', () => {
+        let inputSet = new Set(['1', '2']);
+        let result = validate({ s: inputSet });
+
+        expect(result.ok).toBe(true);
+        expect(result.data.s).not.toBe(inputSet);
+        expect([...(result.data.s as Set<number>)]).toEqual([1, 2]);
+    });
+});
+
+
+describe('Record validation copies own keys only', () => {
+    let poison = '__poison__';
+
+    afterEach(() => {
+        delete (Object.prototype as Record<string, unknown>)[poison];
+    });
+
+    it('omits an enumerable property inherited from Object.prototype', () => {
+        let validate = createValidator(`
+            type Data = { r: Record<string, number> };
+            validator.build<Data>();
+        `);
+
+        (Object.prototype as Record<string, unknown>)[poison] = 1;
+
+        let result = validate({ r: { a: 1 } });
+
+        expect(result.ok).toBe(true);
+        expect(Object.keys(result.data.r as object)).toEqual(['a']);
+    });
+
+    it('places an own __proto__ key via defineProperty without mutating the prototype', () => {
+        let validate = createValidator(`
+            type Data = { r: Record<string, { a: number }> };
+            validator.build<Data>();
+        `);
+
+        let result = validate({ r: JSON.parse('{"__proto__": {"a": 1}}') });
+
+        expect(result.ok).toBe(true);
+        expect(Object.keys(result.data.r as object)).toContain('__proto__');
+        expect(Object.getPrototypeOf(result.data.r)).toBe(Object.prototype);
     });
 });
 
