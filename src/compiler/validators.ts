@@ -3,7 +3,7 @@ import { ts } from '@esportsplus/typescript';
 import { PACKAGE_NAME } from '../constants';
 import { resolveBrandedType } from './type-analyzer';
 import { PathMode } from './types';
-import error from './error';
+import error, { emitString } from './error';
 
 
 interface BrandedValidator {
@@ -18,22 +18,55 @@ type Registrations = {
 };
 
 
-const DISALLOWED_BODY_REGEX = /\b(eval|Function)\s*\(/;
+// Sentinels are control characters that cannot occur in user source: the value parameter and
+// each `errors.push(...)` call are AST-resolved in parse() and replaced with a sentinel that
+// inline() maps back once the target variable name and error path are known.
+const ERROR_SENTINEL = String.fromCharCode(1);
 
-const ERRORS_PUSH_REGEX = /errors\.push\((['"`])(.+?)\1\)/g;
+const MESSAGE_PLACEHOLDER = String.fromCharCode(2) + '__DYNAMIC_MESSAGE__' + String.fromCharCode(2);
 
-const VALUE_SENTINEL = '\0';
+const VALUE_SENTINEL = String.fromCharCode(0);
 
 
 let cache = new WeakMap<ts.SourceFile, Map<string, BrandedValidator>>();
 
 
-function collectParamRefs(node: ts.Node, paramSymbol: ts.Symbol | undefined, checker: ts.Checker, bodyStart: number, spans: [number, number][]): void {
+function collectParamRefs(node: ts.Node, paramSymbol: ts.Symbol | undefined, checker: ts.Checker, base: number, spans: [number, number][]): void {
     if (paramSymbol && ts.isIdentifier(node) && checker.getSymbolAtLocation(node) === paramSymbol) {
-        spans.push([node.getStart() - bodyStart, node.getEnd() - bodyStart]);
+        spans.push([node.getStart() - base, node.getEnd() - base]);
     }
 
-    node.forEachChild((child) => collectParamRefs(child, paramSymbol, checker, bodyStart, spans));
+    node.forEachChild((child) => collectParamRefs(child, paramSymbol, checker, base, spans));
+}
+
+// Collect every `<errorsParam>.push(...)` call, resolving the receiver against the second
+// parameter's symbol (AST, never text). A matched call is not descended into, so a push nested
+// inside another push's argument is left to that outer push's marker.
+function collectPushCalls(node: ts.Node, errorsSymbol: ts.Symbol | undefined, checker: ts.Checker, calls: ts.CallExpression[]): void {
+    if (errorsSymbol && ts.isCallExpression(node)) {
+        let expr = node.expression;
+
+        if (
+            ts.isPropertyAccessExpression(expr) &&
+            expr.name.text === 'push' &&
+            ts.isIdentifier(expr.expression) &&
+            checker.getSymbolAtLocation(expr.expression) === errorsSymbol &&
+            node.arguments.length >= 1
+        ) {
+            calls.push(node);
+
+            return;
+        }
+    }
+
+    node.forEachChild((child) => collectPushCalls(child, errorsSymbol, checker, calls));
+}
+
+// Emit a push against the real `_errors` binding for a non-static argument: reuse error.generate
+// for the `??=`/path rendering, then swap its placeholder message for the raw argument expression
+// (a function replacer so `$` in a template literal is not treated as a replacement token).
+function dynamicPush(expr: string, path: PathMode): string {
+    return error.generate(MESSAGE_PLACEHOLDER, path).replace(emitString(MESSAGE_PLACEHOLDER), () => expr);
 }
 
 // Source files directly imported by `file` - the registration scope: a build site consumes
@@ -130,21 +163,74 @@ function parse(node: ts.CallExpression, checker: ts.Checker, name: string): Bran
     }
 
     let bodyStart = fn.body.getStart(),
-        paramSymbol = checker.getSymbolAtLocation(param.name),
-        spans: [number, number][] = [];
+        errorsParam = fn.parameters[1],
+        errorsSymbol = errorsParam ? checker.getSymbolAtLocation(errorsParam.name) : undefined,
+        paramSymbol = checker.getSymbolAtLocation(param.name);
 
-    collectParamRefs(fn.body, paramSymbol, checker, bodyStart, spans);
+    let pushCalls: ts.CallExpression[] = [];
+
+    collectPushCalls(fn.body, errorsSymbol, checker, pushCalls);
+
+    let valueSpans: [number, number][] = [];
+
+    collectParamRefs(fn.body, paramSymbol, checker, bodyStart, valueSpans);
+
+    // Both rewrites are AST-resolved. A value reference (bound to the value parameter, never
+    // textual `value` inside a string literal or property name) becomes a sentinel inline()
+    // maps to varname; an `errors.push(...)` call becomes an error marker inline() maps to an
+    // error record. Splice last-to-first so earlier offsets stay valid; a value reference nested
+    // inside a push argument is carried by that push's marker, so drop it from the top-level splice.
+    let edits: { end: number; start: number; text: string }[] = [];
+
+    for (let i = 0, n = pushCalls.length; i < n; i++) {
+        let call = pushCalls[i]!;
+
+        edits.push({ end: call.getEnd() - bodyStart, start: call.getStart() - bodyStart, text: pushMarker(call, paramSymbol, checker) });
+    }
+
+    for (let i = 0, n = valueSpans.length; i < n; i++) {
+        let span = valueSpans[i]!;
+
+        if (pushCalls.some((call) => span[0] >= call.getStart() - bodyStart && span[1] <= call.getEnd() - bodyStart)) {
+            continue;
+        }
+
+        edits.push({ end: span[1], start: span[0], text: VALUE_SENTINEL });
+    }
+
+    edits.sort((a, b) => b.start - a.start);
 
     let body = fn.body.getText();
 
-    // Rename only identifier references bound to the value parameter (AST-resolved),
-    // never textual `value` inside string literals or property names. Splice a sentinel
-    // last-to-first so earlier offsets stay valid; inline() maps the sentinel to varname.
-    for (let i = spans.length - 1; i >= 0; i--) {
-        body = body.slice(0, spans[i]![0]) + VALUE_SENTINEL + body.slice(spans[i]![1]);
+    for (let i = 0, n = edits.length; i < n; i++) {
+        body = body.slice(0, edits[i]!.start) + edits[i]!.text + body.slice(edits[i]!.end);
     }
 
     return { async: isAsync, body, brand };
+}
+
+// Build the sentinel that replaces an `errors.push(...)` call. A static string argument carries
+// its cooked text ('S'); every other argument carries its value-substituted source expression
+// ('D') for a live push. inline() splits on ERROR_SENTINEL, so both markers wrap in it.
+function pushMarker(call: ts.CallExpression, paramSymbol: ts.Symbol | undefined, checker: ts.Checker): string {
+    let arg = call.arguments[0]!;
+
+    if (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) {
+        return ERROR_SENTINEL + 'S' + arg.text + ERROR_SENTINEL;
+    }
+
+    let argStart = arg.getStart(),
+        spans: [number, number][] = [],
+        text = arg.getText();
+
+    collectParamRefs(arg, paramSymbol, checker, argStart, spans);
+    spans.sort((a, b) => b[0] - a[0]);
+
+    for (let i = 0, n = spans.length; i < n; i++) {
+        text = text.slice(0, spans[i]![0]) + VALUE_SENTINEL + text.slice(spans[i]![1]);
+    }
+
+    return ERROR_SENTINEL + 'D' + text + ERROR_SENTINEL;
 }
 
 function visit(node: ts.Node, checker: ts.Checker, name: string, registrations: Registrations): void {
@@ -208,26 +294,30 @@ const collect = (sourceFile: ts.SourceFile, checker: ts.Checker): Registrations 
     return registrations;
 };
 
-// Inline validator body into generated code - input is compile-time source only.
-// Trust boundary: the body originates from the user's own TypeScript AST via
-// `fn.body.getText()`. Supply-chain risk (compromised dependency injecting
-// malicious validator bodies) is mitigated by rejecting bodies that contain
-// obvious code-generation escape patterns.
+// Inline validator body into generated code. Trust boundary: the body is the user's own
+// TypeScript source (spliced from `fn.body.getText()`), compiled as written.
 const inline = (body: string, path: PathMode, varname: string): string => {
     body = body.trim();
-
-    if (DISALLOWED_BODY_REGEX.test(body)) {
-        throw new Error('Validator: body contains disallowed pattern (eval/Function)');
-    }
 
     if (body.startsWith('{') && body.endsWith('}')) {
         body = body.slice(1, -1).trim();
     }
 
-    return body
-        .split(VALUE_SENTINEL)
-        .join(varname)
-        .replace(ERRORS_PUSH_REGEX, (_match, _quote, msg) => error.generate(msg, path));
+    body = body.split(VALUE_SENTINEL).join(varname);
+
+    let parts = body.split(ERROR_SENTINEL),
+        result = parts[0]!;
+
+    // Split on ERROR_SENTINEL yields [text, marker, text, marker, ...]: odd entries are markers
+    // (kind char + payload), even entries the literal source between them.
+    for (let i = 1, n = parts.length; i < n; i += 2) {
+        let marker = parts[i]!,
+            payload = marker.slice(1);
+
+        result += (marker[0] === 'S' ? error.generate(payload, path) : dynamicPush(payload, path)) + (parts[i + 1] ?? '');
+    }
+
+    return result;
 }
 
 
