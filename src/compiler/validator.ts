@@ -357,14 +357,17 @@ function generateNumberValidation(
         }
     }
 
+    // Unary + throws a TypeError on bigint and symbol, so coerce only once the value is
+    // known numeric (number or decimal/scientific string); otherwise n is NaN and the
+    // finite gate rejects it - keeping coercion total (never throwing) per finding C15.
     let numeric = `typeof ${source} === 'number' || (typeof ${source} === 'string' && ${NUMBER_STRING.toString()}.test(${source}))`;
 
     return code`
         {
             ${prop.nullable ? `if (${source} === null) { ${target} = null; } else {` : ''}
-            let ${n} = +${source};
+            let ${n} = (${numeric}) ? +${source} : NaN;
 
-            if (!((${numeric}) && isFinite(${n}))${prop.brand === 'integer' ? ` || ${n} % 1 !== 0` : ''}) {
+            if (!isFinite(${n})${prop.brand === 'integer' ? ` || ${n} % 1 !== 0` : ''}) {
                 ${error.generate(prop.brand === 'integer' ? 'must be an integer' : 'must be a number', pathMode, context)}
             }
             else {

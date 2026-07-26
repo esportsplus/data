@@ -132,6 +132,21 @@ describe('Strict number coercion (C15)', () => {
         expect(validate({ n: NaN }).ok).toBe(false);
         expect(validate({ n: Infinity }).ok).toBe(false);
     });
+
+    it('rejects a bigint without throwing (unary + would throw)', () => {
+        let result: Result | undefined;
+
+        expect(() => { result = validate({ n: 10n }); }).not.toThrow();
+        expect(result!.ok).toBe(false);
+        expect(result!.errors![0].message).toBe('must be a number');
+    });
+
+    it('rejects a symbol without throwing (unary + would throw)', () => {
+        let result: Result | undefined;
+
+        expect(() => { result = validate({ n: Symbol('x') }); }).not.toThrow();
+        expect(result!.ok).toBe(false);
+    });
 });
 
 
