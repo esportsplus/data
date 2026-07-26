@@ -326,6 +326,20 @@ describe('Codec2 compiled generic-array packed path — typeId+1 flag', () => {
         }
     });
 
+    it('routes an empty untyped array to the generic flag 0, never a spurious numeric width', () => {
+        let schema = buildSchema([{ name: 'f', type: 'array' }]),
+            buf = new Uint8Array(1024);
+
+        let end = schema.encodeFn!({ f: [] }, buf, 0),
+            decoded = schema.decodeFn!(buf.subarray(0, end), 0, 0) as { f: number[] };
+
+        // classifyPackedArray([]) is not-packable (-1), so the compiled path takes the generic
+        // branch (flag 0) — matching the tagged path's len>0 packing guard, one shared authority.
+        expect(buf[0]).toBe(0);
+        expect(Array.isArray(decoded.f)).toBe(true);
+        expect(decoded.f).toEqual([]);
+    });
+
     it('decodes a plain array as a plain number[], never a TypedArray — the tag-17 fidelity split', () => {
         let schema = buildSchema([{ name: 'f', type: 'array' }]),
             buf = new Uint8Array(1024);
