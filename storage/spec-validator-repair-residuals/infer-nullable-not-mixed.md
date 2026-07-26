@@ -1,12 +1,13 @@
 ---
 type: fix
 recommended-model: opus
-status: PENDING
+status: REVERTED
 priority: P1
 depends-on: none
 files-own: [src/sbc/codegen.ts, src/sbc/schema.ts, test/sbc/index.test.ts, test/sbc/schema.test.ts]
 files-shared: [src/sbc/index.ts, src/sbc/types.ts]
 tests: [test/sbc/schema.test.ts, test/sbc/index.test.ts, test/sbc/schema-store.test.ts, test/sbc/registry.test.ts]
+blocked-reason: merge refused: reverted — salvage red — the narrowed selection cherry-picks onto a commit an excluded sibling owns — infeasible, nothing landed; salvage ref salvage/8f60bc49-u1 @ 7990c423d65b517dd3503d95126e14bffa958b2e — the unit branch tip survives as this tag; cherry-pick the item's [infer-nullable-not-mixed] commits to recover
 ---
 
 # Nullable fields defer their base type instead of collapsing to mixed

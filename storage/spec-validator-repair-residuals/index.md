@@ -62,6 +62,7 @@ Carried from the predecessor `spec-validator-repair` (settled — never re-asked
   `typescript` directly; compiler items import the TS surface as `ts` from `@esportsplus/typescript`.
   The dependency currently resolves through a LOCAL LINK (`pnpm-workspace.yaml` override →
   `D:\typescript`); changes there need `pnpm build` in that repo before this repo consumes them.
+- **Spec UUID**: 857a0e51-f3be-4acb-8f64-5b39cc7b4eb4
 
 ## Baseline
 - **Commit**: HEAD at authoring, clean tree (sha unrecorded — the synthesizer seat runs without
@@ -99,10 +100,17 @@ updated to landed truth:
 
 - encode-growth-signal
 - bigint-int64-parity
-- infer-nullable-not-mixed
+- infer-nullable-not-mixed — REVERTED: merge refused: reverted — salvage red — the narrowed selection cherry-picks onto a commit an excluded sibling owns — infeasible, nothing landed; salvage ref salvage/8f60bc49-u1 @ 7990c423d65b517dd3503d95126e14bffa958b2e — the unit branch tip survives as this tag; cherry-pick the item's [infer-nullable-not-mixed] commits to recover
 - unify-packed-numeric-tags
 - sbc-compute-size
 - remove-legacy-config-form
 
 ## Feed
 run,scope,unit,ordinal,slug,event,state,detail,elapsed_ms,ts
+8f60bc49,item,u2,2.1,remove-legacy-config-form,complete,COMPLETE,,,2026-07-26T13:41:56-07:00
+8f60bc49,item,u1,1.1,encode-growth-signal,complete,COMPLETE,,,2026-07-26T15:24:35-07:00
+8f60bc49,item,u1,1.2,bigint-int64-parity,complete,COMPLETE,,,2026-07-26T15:24:35-07:00
+8f60bc49,item,u1,1.4,unify-packed-numeric-tags,complete,COMPLETE,,,2026-07-26T15:24:35-07:00
+8f60bc49,item,u1,1.3,infer-nullable-not-mixed,reverted,REVERTED,,,2026-07-26T15:24:35-07:00
+8f60bc49,item,u1,1.5,sbc-compute-size,complete,COMPLETE,,,2026-07-26T15:24:35-07:00
+8f60bc49,run,,,,run-end,RUN END,"applied: 5 completed, 1 rejected, 1 status-actions, 8 changelog-rows",,2026-07-26T15:24:36-07:00
