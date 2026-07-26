@@ -49,55 +49,74 @@ function readShortStrAscii(buf: Uint8Array, start: number, len: number): string 
 }
 
 
+// Browser dual-path implementations — named module-level so they stay directly
+// importable (via `browser` below) and testable under the Node test environment,
+// while the isNode ternaries pick the hot-path binding once at module load.
+function browserAllocBuf(n: number): Uint8Array {
+    return new Uint8Array(n);
+}
+
+function browserByteLen(str: string): number {
+    let len = 0;
+
+    for (let i = 0, n = str.length; i < n; i++) {
+        let c = str.charCodeAt(i);
+
+        if (c < 0x80) {
+            len++;
+        }
+        else if (c < 0x800) {
+            len += 2;
+        }
+        else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n) {
+            len += 4;
+            i++;
+        }
+        else {
+            len += 3;
+        }
+    }
+
+    return len;
+}
+
+function browserCopyBuf(src: Uint8Array, dst: Uint8Array, dstOff: number, srcStart: number, srcEnd: number): void {
+    dst.set(src.subarray(srcStart, srcEnd), dstOff);
+}
+
+function browserReadStr(buf: Uint8Array, start: number, len: number): string {
+    return readShortStrAscii(buf, start, len) ?? textDecoder.decode(buf.subarray(start, start + len));
+}
+
+
 let readStr: (buf: Uint8Array, start: number, len: number) => string = isNode
     ? (buf, start, len) => readShortStrAscii(buf, start, len) ?? (buf as BufferInternal).utf8Slice(start, start + len)
-    : (buf, start, len) => readShortStrAscii(buf, start, len) ?? textDecoder.decode(buf.subarray(start, start + len));
+    : browserReadStr;
 
 
 let allocBuf: (n: number) => Uint8Array = isNode
     ? Buffer.alloc.bind(Buffer) as (n: number) => Uint8Array
-    : (n) => new Uint8Array(n);
+    : browserAllocBuf;
 
 
 let allocUnsafe: (n: number) => Uint8Array = isNode
     ? Buffer.allocUnsafe.bind(Buffer) as (n: number) => Uint8Array
-    : (n) => new Uint8Array(n);
+    : browserAllocBuf;
 
 
 let byteLen: (str: string) => number = isNode
     ? Buffer.byteLength.bind(Buffer) as (str: string) => number
-    : (str) => {
-        let len = 0;
-
-        for (let i = 0, n = str.length; i < n; i++) {
-            let c = str.charCodeAt(i);
-
-            if (c < 0x80) {
-                len++;
-            }
-            else if (c < 0x800) {
-                len += 2;
-            }
-            else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n) {
-                len += 4;
-                i++;
-            }
-            else {
-                len += 3;
-            }
-        }
-
-        return len;
-    };
+    : browserByteLen;
 
 
 let copyBuf: (src: Uint8Array, dst: Uint8Array, dstOff: number, srcStart: number, srcEnd: number) => void = isNode
     ? (src, dst, dstOff, srcStart, srcEnd) => (src as Buffer).copy(dst as Buffer, dstOff, srcStart, srcEnd)
-    : (src, dst, dstOff, srcStart, srcEnd) => dst.set(src.subarray(srcStart, srcEnd), dstOff);
+    : browserCopyBuf;
 
 
-// Instance methods — use .call(buf, ...) on hot path
-let dvCache: WeakMap<ArrayBuffer, DataView>;
+// Constructed unconditionally so the browser DataView bindings stay exercisable under the Node
+// test environment; getDv is browser-only on the hot path, so Node pays no per-call cost.
+let dvCache = new WeakMap<ArrayBuffer, DataView>();
 
 function getDv(buf: Uint8Array): DataView {
     let ab = buf.buffer as ArrayBuffer,
@@ -111,34 +130,69 @@ function getDv(buf: Uint8Array): DataView {
     return dv;
 }
 
-if (!isNode) {
-    dvCache = new WeakMap();
+function browserReadBI64(this: Uint8Array, off: number): bigint {
+    return getDv(this).getBigInt64(this.byteOffset + off, true);
+}
+
+function browserReadF64(this: Uint8Array, off: number): number {
+    return getDv(this).getFloat64(this.byteOffset + off, true);
+}
+
+function browserWriteBI64(this: Uint8Array, value: bigint, off: number): number {
+    getDv(this).setBigInt64(this.byteOffset + off, value, true);
+
+    return off + 8;
+}
+
+function browserWriteF64(this: Uint8Array, value: number, off: number): number {
+    getDv(this).setFloat64(this.byteOffset + off, value, true);
+
+    return off + 8;
+}
+
+function browserWriteUtf8(this: Uint8Array, str: string, off: number, _len: number): number {
+    let result = textEncoder.encodeInto(str, this.subarray(off));
+
+    return result.written!;
 }
 
 
 let readBI64: ((off: number) => bigint) = isNode
     ? Buffer.prototype.readBigInt64LE
-    : function (this: Uint8Array, off: number) { return getDv(this).getBigInt64(this.byteOffset + off, true); };
+    : browserReadBI64;
 
 let readF64: ((off: number) => number) = isNode
     ? Buffer.prototype.readDoubleLE
-    : function (this: Uint8Array, off: number) { return getDv(this).getFloat64(this.byteOffset + off, true); };
+    : browserReadF64;
 
 let writeBI64: ((value: bigint, off: number) => number) = isNode
     ? Buffer.prototype.writeBigInt64LE
-    : function (this: Uint8Array, value: bigint, off: number) { getDv(this).setBigInt64(this.byteOffset + off, value, true); return off + 8; };
+    : browserWriteBI64;
 
 let writeF64: ((value: number, off: number) => number) = isNode
     ? Buffer.prototype.writeDoubleLE
-    : function (this: Uint8Array, value: number, off: number) { getDv(this).setFloat64(this.byteOffset + off, value, true); return off + 8; };
+    : browserWriteF64;
 
 let writeUtf8: ((str: string, off: number, len: number) => number) = isNode
     ? (Buffer.prototype as unknown as BufferInternal).utf8Write
-    : function (this: Uint8Array, str: string, off: number, _len: number) {
-        let result = textEncoder.encodeInto(str, this.subarray(off));
+    : browserWriteUtf8;
 
-        return result.written!;
-    };
+
+// Browser binding set — direct handle on the non-Buffer implementations for tests,
+// independent of which branch isNode selected for the module-level exports above.
+let browser = {
+    allocBuf: browserAllocBuf,
+    allocUnsafe: browserAllocBuf,
+    byteLen: browserByteLen,
+    copyBuf: browserCopyBuf,
+    getDv,
+    readBI64: browserReadBI64,
+    readF64: browserReadF64,
+    readStr: browserReadStr,
+    writeBI64: browserWriteBI64,
+    writeF64: browserWriteF64,
+    writeUtf8: browserWriteUtf8,
+};
 
 
 // Codegen driver — emits environment-specific code strings
@@ -325,6 +379,7 @@ export {
     _vr,
     allocBuf,
     allocUnsafe,
+    browser,
     byteLen,
     codegenDriver,
     copyBuf,
