@@ -261,28 +261,27 @@ let view2 = c.encode({ x: 1 }, { view: true });
 
 ### Computing Encoded Size
 
-`computeSize(value)` returns the exact encoded byte length, without encoding, for primitives
-(`null`, `boolean`, `number`, `bigint`, `string`, `Date`, `Uint8Array`) and for plain objects
-matching a registered schema:
+`computeSize(value)` returns the exact encoded byte length, without encoding. It is total over
+`encode`'s domain: for every value `encode()` accepts, `computeSize(value) === encode(value).length`
+— primitives (`null`, `boolean`, `number`, `bigint`, `string`, `Date`, `Uint8Array`), every other
+`TypedArray`, arrays (packed and generic), and plain objects (registered or inferred, nested and
+nullable fields included), under both uncompressed and compressed (`{ compress: true }`) codecs.
 
 ```typescript
 let c = codec();
 
 c.computeSize({ name: 'Alice', age: 30 }); // exact byte length, no encode() call
+c.computeSize([1, 2, 3]);                  // exact byte length
+c.computeSize(new Float32Array(3));        // exact byte length
 ```
 
-It returns `-1` — a sentinel, not an estimate — for arrays, non-`Uint8Array` typed arrays, and
-any object containing one of them; call `encode()` and read `.length` to size those.
+For every value `encode()` rejects, `computeSize` throws the SAME `Codec2:` error `encode()` would
+throw — `Map`, `Set`, `RegExp`, class instances, functions, symbols, and out-of-int64 `bigint`
+values are all non-encodable and raise rather than returning a bogus number.
 
 ```typescript
-c.computeSize([1, 2, 3]); // -1
+c.computeSize(new Map()); // throws: Codec2: unrepresentable value of type Map
 ```
-
-`Map` and `Set` are not currently special-cased by `computeSize` the way `encode()` special-cases
-them (`encode()` rejects both with a `Codec2:` error) — a `Map`/`Set` value returns a positive
-number that does not correspond to any real encoding, so don't rely on `computeSize` for either.
-Compressed (`{ compress: true }`) sizing is also not always exact. Treat the exact-size guarantee
-as scoped to the uncompressed, primitive / schema-registered-object case above.
 
 ### Codec API Reference
 

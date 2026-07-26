@@ -1922,11 +1922,7 @@ describe('Codec2', () => {
             let values: unknown[] = [null, true, false, 0, 255, 256, -1, 3.14, 'hello', '', 123n, new Date(0), new Uint8Array([1, 2, 3])];
 
             for (let v of values) {
-                let size = c.computeSize(v);
-
-                if (size !== -1) {
-                    expect(size).toBe(c.encode(v).length);
-                }
+                expect(c.computeSize(v)).toBe(c.encode(v).length);
             }
         });
 
@@ -1944,12 +1940,17 @@ describe('Codec2', () => {
             expect(size).toBe(c.encode(obj).length);
         });
 
-        it('returns -1 for typed array', () => {
-            expect(c.computeSize(new Float32Array(3))).toBe(-1);
+        it('typed array sizes exactly (6 + byteLength)', () => {
+            let arr = new Float32Array(3);
+
+            expect(c.computeSize(arr)).toBe(6 + arr.byteLength);
+            expect(c.computeSize(arr)).toBe(c.encode(arr).length);
         });
 
-        it('returns -1 for array', () => {
-            expect(c.computeSize([1, 2, 3])).toBe(-1);
+        it('array sizes exactly', () => {
+            let arr = [1, 2, 3];
+
+            expect(c.computeSize(arr)).toBe(c.encode(arr).length);
         });
 
         it('object with a first-sample-null field sizes exactly (nullable inference, not the -1 sentinel)', () => {
