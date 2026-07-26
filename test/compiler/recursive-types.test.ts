@@ -1,0 +1,160 @@
+import { describe, expect, it } from 'vitest';
+import { createValidator, transformCode } from '../utils';
+
+
+type Result = { data: any; errors?: Array<{ message: string; path: string }>; ok: boolean };
+
+
+const DRAFT = 'https://json-schema.org/draft/2020-12/schema';
+
+
+// Fixture types avoid DOM globals (Node/Document/Range): a scratch file is a script, so those
+// names collide with the global type instead of shadowing it.
+function build(source: string): (input: unknown) => Result {
+    return createValidator(source) as (input: unknown) => Result;
+}
+
+function schemaOf(source: string): Record<string, unknown> {
+    let line = transformCode(source)
+        .split('\n')
+        .find((l) => /const schema_\w+ =/.test(l));
+
+    if (line === undefined) {
+        throw new Error('recursive-types: no schema const emitted for source');
+    }
+
+    return JSON.parse(line.replace(/^\s*const schema_\w+ = /, '').replace(/;\s*$/, ''));
+}
+
+
+describe('recursive types recurse through named functions', () => {
+    describe('self-recursion via the root # back-edge', () => {
+        let validate = build(`
+            type Rec = { value: number; next?: Rec };
+            validator.build<Rec>();
+        `);
+
+        it('preserves a recursive sub-object instead of replacing it with {}', () => {
+            let input = { next: { value: 2 }, value: 1 },
+                result = validate(input);
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual(input);
+        });
+
+        it('round-trips three levels deep with every level intact', () => {
+            let input = { next: { next: { value: 3 }, value: 2 }, value: 1 },
+                result = validate(input);
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual(input);
+        });
+
+        it('validates the back-edge rather than copying: an invalid leaf reports at next.value', () => {
+            let result = validate({ next: { value: 'not-a-number' }, value: 1 });
+
+            expect(result.ok).toBe(false);
+            expect(result.errors).toEqual([{ message: 'must be a number', path: 'next.value' }]);
+        });
+    });
+
+    describe('mutual recursion', () => {
+        it('round-trips both directions through the root # path', () => {
+            let validate = build(`
+                type A = { tag: string; b?: B };
+                type B = { id: number; a?: A };
+                validator.build<A>();
+            `),
+                input = { b: { a: { b: { id: 7 }, tag: 'deep' }, id: 5 }, tag: 'root' },
+                result = validate(input);
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual(input);
+        });
+
+        it('round-trips through the $defs path when a non-root type recurses', () => {
+            let validate = build(`
+                type A = { tag: string; b?: B };
+                type B = { id: number; a?: A };
+                type Root = { a: A };
+                validator.build<Root>();
+            `),
+                input = { a: { b: { a: { tag: 'leaf' }, id: 5 }, tag: 'top' } },
+                result = validate(input);
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual(input);
+        });
+
+        it('reports an invalid leaf beneath the $defs path', () => {
+            let validate = build(`
+                type A = { tag: string; b?: B };
+                type B = { id: number; a?: A };
+                type Root = { a: A };
+                validator.build<Root>();
+            `),
+                result = validate({ a: { b: { id: 'nope' }, tag: 'top' } });
+
+            expect(result.ok).toBe(false);
+            expect(result.errors?.[0]?.message).toBe('must be a number');
+        });
+    });
+
+    describe('cyclic INPUT termination', () => {
+        it('stops with a named depth error instead of hanging', () => {
+            let validate = build(`
+                type Rec = { value: number; next?: Rec };
+                validator.build<Rec>();
+            `),
+                cyclic: any = { value: 1 };
+
+            cyclic.next = cyclic;
+
+            let result = validate(cyclic);
+
+            expect(result.ok).toBe(false);
+            expect(result.errors?.some((e) => e.message === 'exceeds maximum validation depth')).toBe(true);
+        }, 2000);
+    });
+
+    describe('JSON Schema is untouched by the validator change', () => {
+        it('a root self-recursive type still emits $ref "#"', () => {
+            expect(schemaOf(`
+                type Rec = { value: number; next?: Rec };
+                validator.build<Rec>();
+            `)).toEqual({
+                '$schema': DRAFT,
+                additionalProperties: false,
+                properties: { next: { '$ref': '#' }, value: { type: 'number' } },
+                required: ['value'],
+                type: 'object'
+            });
+        });
+
+        it('a non-root recursive type still emits a $defs anchor', () => {
+            let schema = schemaOf(`
+                type A = { tag: string; b?: B };
+                type B = { id: number; a?: A };
+                type Root = { a: A };
+                validator.build<Root>();
+            `);
+
+            expect(schema['$defs']).toEqual({
+                A: {
+                    additionalProperties: false,
+                    properties: {
+                        b: {
+                            additionalProperties: false,
+                            properties: { a: { '$ref': '#/$defs/A' }, id: { type: 'number' } },
+                            required: ['id'],
+                            type: 'object'
+                        },
+                        tag: { type: 'string' }
+                    },
+                    required: ['tag'],
+                    type: 'object'
+                }
+            });
+        });
+    });
+});
