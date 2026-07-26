@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { codec } from '../../src/sbc';
+import { FIELD_SIZES, KNOWN_TYPES } from '../../src/sbc/constants';
+import { inferType } from '../../src/sbc/schema';
 
 import type { PersistentStore } from '../../src/sbc';
 
@@ -3459,6 +3461,14 @@ describe('Codec2', () => {
             let hinted = codec();
 
             expect(hinted.decode(hinted.encode({ big: value }, { schema: [{ name: 'big', type: 'int64' }] }))).toEqual({ big: value });
+        });
+
+        it('int64 vocabulary pins: constants tables and inferType name int64, never bigint', () => {
+            expect(FIELD_SIZES['int64']).toBe(8);
+            expect(KNOWN_TYPES['int64']).toBe(1);
+            expect('bigint' in FIELD_SIZES).toBe(false);
+            expect('bigint' in KNOWN_TYPES).toBe(false);
+            expect(inferType(123n)).toBe('int64');
         });
     });
 
