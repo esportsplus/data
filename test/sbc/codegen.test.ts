@@ -66,3 +66,66 @@ describe('decoder-count-limits — MAX_ARRAY_COUNT carried into the compiled dec
         expect(decoded.v).toEqual(['x', 'y', 'z']);
     });
 });
+
+
+// === unify-packed-numeric-tags ===
+// Tag 12 becomes the single typeId-carrying packed-numeric tag (tag-17 payload layout);
+// tags 13/14 retire; the classifier widens to the narrowest lossless width; codegen's
+// duplicate flag=1/2/3 enumeration is replaced by the shared TYPED_ARRAY_IDS table.
+describe('unify-packed-numeric-tags — packed numeric arrays onto one typeId tag', () => {
+    // Per-element cost measured as a length DELTA so the header/tag overhead cancels
+    // and the assertion survives the header growing 5 -> 6 bytes.
+    function bytesPerElement(input2: number[], input4: number[]): number {
+        let c = codec();
+
+        return (c.encode(input4).length - c.encode(input2).length) / (input4.length - input2.length);
+    }
+
+    it('packs a number[] at the narrowest lossless width', () => {
+        // uint16 range: 2 bytes/element (today int32 packs it at 4 -> red)
+        expect(bytesPerElement([0, 65535], [0, 65535, 0, 65535])).toBe(2);
+        // int8 range: 1 byte/element (today int32 packs it at 4 -> red)
+        expect(bytesPerElement([-5, 5], [-5, 5, -5, 5])).toBe(1);
+        // float64: 8 bytes/element (unchanged)
+        expect(bytesPerElement([1.5, 2.5], [1.5, 2.5, 3.5, 4.5])).toBe(8);
+    });
+
+    it('round-trips each narrowed width back to a plain number[]', () => {
+        let c = codec();
+
+        for (let input of [[0, 65535], [-5, 5], [1.5, 2.5]]) {
+            let decoded = c.decode(c.encode(input));
+
+            expect(Array.isArray(decoded)).toBe(true);
+            expect(decoded).toEqual(input);
+        }
+    });
+
+    it('retires tags 13 and 14 — decoding either throws unknown tag', () => {
+        let c = codec();
+
+        expect(() => c.decode(new Uint8Array([13, 0, 0, 0, 0]))).toThrow(/unknown tag/);
+        expect(() => c.decode(new Uint8Array([14, 0, 0, 0, 0]))).toThrow(/unknown tag/);
+    });
+
+    it('keeps tag 17 typed arrays returning a TypedArray', () => {
+        let c = codec(),
+            decoded = c.decode(c.encode(new Int16Array([1, 2, 3])));
+
+        expect(decoded).toBeInstanceOf(Int16Array);
+        expect(Array.from(decoded as Int16Array)).toEqual([1, 2, 3]);
+    });
+
+    it('drives packed widths from the shared TYPED_ARRAY_IDS table in codegen.ts', () => {
+        // The duplicate flag=1/2/3 enumeration is replaced by the one width authority.
+        expect(readSource('codegen.ts')).toMatch(/TYPED_ARRAY_IDS/);
+    });
+
+    it('computeSize equals the encoded length for each narrowed width', () => {
+        let c = codec();
+
+        for (let input of [[0, 65535], [-5, 5], [1.5]]) {
+            expect(c.computeSize(input)).toBe(c.encode(input).length);
+        }
+    });
+});
