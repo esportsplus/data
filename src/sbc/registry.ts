@@ -3,7 +3,7 @@
 
 import { FIELD_NAME_RE, MAX_SCHEMA_COUNT } from './constants';
 import { allocBuf, byteLen, readStr, writeUtf8 } from './platform';
-import { parseFieldType } from './schema';
+import { computeShapeHash, parseFieldType } from './schema';
 
 import type { FieldSpec } from './types';
 import type { Schema } from './codegen';
@@ -98,7 +98,22 @@ function deserializeRegistry(data: Uint8Array, defineSchemaFn: (fields: FieldSpe
             });
         }
 
-        // Skip if already registered
+        // Verify the wire hash labels the fields it carries before trusting it
+        let keys: string[] = new Array(fields.length),
+            types: string[] = new Array(fields.length);
+
+        for (let j = 0, m = fields.length; j < m; j++) {
+            keys[j] = fields[j]!.name;
+            types[j] = fields[j]!.type;
+        }
+
+        let computed = computeShapeHash(keys, types);
+
+        if (computed !== hash) {
+            throw new Error('Codec2: registry hash mismatch — declared ' + hash + ', computed ' + computed);
+        }
+
+        // Skip if already registered — now a lookup on a verified key
         if (schemas.has(hash)) {
             continue;
         }
