@@ -166,7 +166,8 @@ const codec = (options?: CodecOptions): {
             schemas: new Map(),
         };
 
-    let store = options?.store ?? null;
+    let schemaCache = options?.cache ?? cache,
+        store = options?.store ?? null;
 
     // Multi-schema cache — handles nested objects without breaking
     let cacheCounts: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -187,13 +188,13 @@ const codec = (options?: CodecOptions): {
     }
 
     function resolveSchemaFromCacheOrStore(hash: number): Schema | null {
-        let stored = cache.get(hash);
+        let stored = schemaCache.get(hash);
 
         if (!stored && store) {
             stored = store.get(hash);
 
             if (stored) {
-                cache.set(hash, stored);
+                schemaCache.set(hash, stored);
             }
         }
 
@@ -830,7 +831,7 @@ const codec = (options?: CodecOptions): {
         compileSchema(schema, helpers);
         registry.schemas.set(hash, schema);
 
-        cache.set(hash, { fields: sorted, hash });
+        schemaCache.set(hash, { fields: sorted, hash });
 
         if (store) {
             store.set(hash, { fields: sorted, hash });

@@ -1,7 +1,14 @@
-import type { StoredSchema } from './cache';
+import type { SchemaCache, StoredSchema } from './cache';
 
 
 type CodecOptions = {
+    /**
+     * Shape cache backing schema resolution. Defaults to a process-wide singleton,
+     * so codecs sharing the default also share resolved shapes. Pass a dedicated
+     * instance (`createCache()`) when codecs must stay isolated — a `store` alone
+     * does not isolate them, because a singleton hit skips the store lookup.
+     */
+    cache?: SchemaCache;
     compress?: boolean;
     store?: PersistentStore;
 };

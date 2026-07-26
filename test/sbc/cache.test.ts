@@ -2,13 +2,33 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { StoredSchema } from '../../src/sbc/cache';
 
-import cache from '../../src/sbc/cache';
+import cache, { createCache } from '../../src/sbc/cache';
+import { codec } from '../../src/sbc';
 
 
 function makeSchema(hash: number, fields?: string[]): StoredSchema {
     return {
         fields: (fields ?? ['a', 'b']).map(name => ({ name, type: 'string' })),
         hash,
+    };
+}
+
+function makeCountingStore() {
+    let entries = new Map<number, StoredSchema>(),
+        gets = 0;
+
+    return {
+        get gets() {
+            return gets;
+        },
+        get(hash: number): StoredSchema | null {
+            gets++;
+
+            return entries.get(hash) ?? null;
+        },
+        set(hash: number, schema: StoredSchema): void {
+            entries.set(hash, schema);
+        },
     };
 }
 
@@ -96,5 +116,83 @@ describe('SIEVE cache eviction', () => {
         expect(survived).not.toBe(null);
         expect(survived!.fields[0]!.name).toBe('g0');
         expect(cache.get(base + 1)).toBe(null);
+    });
+});
+
+
+describe('createCache instances', () => {
+    it('two instances do not share entries', () => {
+        let a = createCache(),
+            b = createCache();
+
+        a.set(600001, makeSchema(600001));
+
+        expect(a.get(600001)).not.toBe(null);
+        expect(b.get(600001)).toBe(null);
+    });
+
+    it('an instance does not share entries with the module default', () => {
+        let isolated = createCache();
+
+        cache.clear();
+        cache.set(600002, makeSchema(600002));
+
+        expect(isolated.get(600002)).toBe(null);
+
+        isolated.set(600003, makeSchema(600003));
+
+        expect(cache.get(600003)).toBe(null);
+    });
+
+    it('honors a caller-supplied maxSize', () => {
+        let small = createCache(2);
+
+        small.set(600004, makeSchema(600004));
+        small.set(600005, makeSchema(600005));
+        small.set(600006, makeSchema(600006));
+
+        expect(small.get(600006)).not.toBe(null);
+        expect(small.get(600004)).toBe(null);
+    });
+});
+
+
+describe('CodecOptions.cache isolation', () => {
+    beforeEach(() => {
+        cache.clear();
+    });
+
+    it('codecs on the default cache share resolved shapes without a store', () => {
+        let a = codec(),
+            b = codec();
+
+        let buf = a.encode({ id: 7, name: 'x' });
+
+        // b never saw this shape itself — it resolves through the shared module singleton.
+        expect(b.decode(buf)).toEqual({ id: 7, name: 'x' });
+    });
+
+    it('a dedicated cache stops one codec resolving another codec shape', () => {
+        let a = codec(),
+            b = codec({ cache: createCache() });
+
+        let buf = a.encode({ id: 7, name: 'x' });
+
+        // a's shape landed in the module singleton; b owns a separate cache and has
+        // no store to fall back on, so the shape is genuinely unresolvable to it.
+        expect(() => b.decode(buf)).toThrow('Codec2:');
+    });
+
+    it('an isolated codec consults its own store instead of the shared cache', () => {
+        let store = makeCountingStore(),
+            a = codec(),
+            b = codec({ cache: createCache(), store });
+
+        let buf = a.encode({ id: 7, name: 'x' });
+
+        expect(() => b.decode(buf)).toThrow('Codec2:');
+
+        // The store lookup a singleton hit would have skipped actually happened.
+        expect(store.gets).toBeGreaterThanOrEqual(1);
     });
 });
