@@ -898,6 +898,7 @@ const codec = (options?: CodecOptions): {
 
     // Size context — threads closure state to computeSize
     let sizeCtx: SizeContext = {
+        compress,
         helpers: null as unknown as SbcHelpers,
         matchSchema,
         registry,
