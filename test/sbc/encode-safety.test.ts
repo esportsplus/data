@@ -133,4 +133,82 @@ describe('sbc encode/decode safety', () => {
             expect(() => c.decode(Uint8Array.from([8, 1, 0, 0, 0]))).toThrow('Codec2: truncated');
         });
     });
+
+    // encode-growth-signal — overflow no longer rides the RangeError channel: a user RangeError
+    // propagates instead of being swallowed by a grow-and-retry catch, and growth still survives.
+    describe('encode-growth-signal — user RangeError propagates, growth stays bounded', () => {
+        it('a getter that throws RangeError once then returns a number throws the user error, not swallowed by retry', () => {
+            let c = codec(),
+                obj = {},
+                reads = 0;
+
+            Object.defineProperty(obj, 'v', {
+                enumerable: true,
+                get() {
+                    reads++;
+
+                    if (reads === 1) {
+                        throw new RangeError('user range error');
+                    }
+
+                    return 42;
+                },
+            });
+
+            expect(() => c.encode(obj)).toThrow('user range error');
+        });
+
+        it('a getter that always throws RangeError propagates it unchanged, no multi-second growth stall', () => {
+            let c = codec(),
+                obj = {},
+                start = performance.now();
+
+            Object.defineProperty(obj, 'v', {
+                enumerable: true,
+                get() {
+                    throw new RangeError('always boom');
+                },
+            });
+
+            expect(() => c.encode(obj)).toThrow('always boom');
+            expect(performance.now() - start).toBeLessThan(500);
+        });
+
+        it('a bytes field larger than the initial 64KB buffer round-trips', () => {
+            let bytes = new Uint8Array(200000),
+                c = codec();
+
+            for (let i = 0, n = bytes.length; i < n; i++) {
+                bytes[i] = i & 0xFF;
+            }
+
+            let decoded = c.decode(c.encode({ bytes })) as { bytes: Uint8Array };
+
+            expect(decoded.bytes.length).toBe(bytes.length);
+            expect(decoded.bytes[0]).toBe(0);
+            expect(decoded.bytes[255]).toBe(255);
+            expect(decoded.bytes[123456]).toBe(bytes[123456]);
+        });
+
+        it('a >1MB mixed payload (string + packed float64 array + nested objects) round-trips on the compiled path', () => {
+            let c = codec(),
+                data = {
+                    floats: Array.from({ length: 50000 }, (_, i) => i * 0.5),
+                    nested: { items: [1, 2, 3], label: 'z'.repeat(600000) },
+                    text: 'q'.repeat(600000),
+                };
+
+            expect(c.decode(c.encode(data))).toEqual(data);
+        });
+
+        it('a >1MB packed float64 payload round-trips on the tagged (generic top-level) path', () => {
+            let c = codec(),
+                data = Float64Array.from({ length: 200000 }, (_, i) => i * 1.5),
+                decoded = c.decode(c.encode(data)) as Float64Array;
+
+            expect(decoded.constructor).toBe(Float64Array);
+            expect(decoded.length).toBe(data.length);
+            expect(decoded[199999]).toBe(data[199999]);
+        });
+    });
 });
