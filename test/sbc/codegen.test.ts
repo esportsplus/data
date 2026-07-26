@@ -129,3 +129,53 @@ describe('unify-packed-numeric-tags — packed numeric arrays onto one typeId ta
         }
     });
 });
+
+
+// === codegen-uint16-hoist ===
+// The scalar uint16 encoder arm must hoist its property read into a local like its
+// int16/uint32/int32 siblings, emitting the value expression ONCE. Wire format is
+// unchanged; the regression is pinned at the codegen source, behavior is invariant.
+describe('codegen-uint16-hoist — uint16 arm hoists its property read', () => {
+    let c = codec();
+
+    it('interpolates the value expression exactly once in the scalar uint16 arm', () => {
+        let src = readSource('codegen.ts'),
+            start = src.indexOf("case 'uint16':"),
+            arm = src.slice(start, src.indexOf('break;', start));
+
+        // Pre-fix the arm reads `${val}` twice; the hoist folds it into one `let v=...`.
+        expect(arm.split('${val}').length - 1).toBe(1);
+    });
+
+    it('writes a uint16 field little-endian (explicit byte payload)', () => {
+        // 40000 = 0x9C40 -> field bytes [0x40, 0x9C] after the 9-byte tag-8 header.
+        let buf = c.encode({ k: 40000 });
+
+        expect(buf[0]).toBe(8);
+        expect(buf.length).toBe(11);
+        expect(buf[9]).toBe(0x40);
+        expect(buf[10]).toBe(0x9C);
+    });
+
+    it('round-trips uint16 boundaries and truncates 65536 to 0', () => {
+        let hash = c.defineSchema([{ name: 'k', type: 'uint16' }]);
+
+        expect((c.decode(c.encode({ k: 0 }, { schema: hash })) as { k: number }).k).toBe(0);
+        expect((c.decode(c.encode({ k: 65535 }, { schema: hash })) as { k: number }).k).toBe(65535);
+        // 65536 is out of uint16 range; the fixed-width slot truncates it to 0.
+        expect((c.decode(c.encode({ k: 65536 }, { schema: hash })) as { k: number }).k).toBe(0);
+    });
+
+    it('round-trips a schema mixing uint16 with its sibling integer widths', () => {
+        let value = { a: 40000, b: -20000, c: 4000000000, d: -2000000000 },
+            decoded = c.decode(c.encode(value)) as typeof value;
+
+        expect(decoded).toEqual(value);
+    });
+
+    it('round-trips an array-of-uint16 field unchanged', () => {
+        let decoded = c.decode(c.encode({ v: [0, 40000, 65535] })) as { v: number[] };
+
+        expect(decoded.v).toEqual([0, 40000, 65535]);
+    });
+});
