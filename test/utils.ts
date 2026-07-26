@@ -1,5 +1,5 @@
-import { coordinator } from '@esportsplus/typescript/compiler';
-import { ts } from '@esportsplus/typescript';
+import type { Plugin, ScratchResult } from '@esportsplus/typescript/compiler';
+import { coordinator, languageService } from '@esportsplus/typescript/compiler';
 import plugin from '../src/compiler/index';
 
 
@@ -9,46 +9,18 @@ const IMPORT_LINE = /^\s*import\b/;
 
 const PACKAGE_IMPORT = "import { codec, validator } from '@esportsplus/data';\n";
 
+const ROOT = process.cwd().replace(/\\/g, '/');
+
+const FILE_NAME = ROOT + '/src/__compiler-fixture.ts';
+
 const TYPE_LINE = /^\s*(export\s+)?type\b/;
 
-let compilerOptions: ts.CompilerOptions = {
-    lib: ['lib.es2020.d.ts'],
-    module: ts.ModuleKind.ESNext,
-    moduleResolution: ts.ModuleResolutionKind.Bundler,
-    strict: true,
-    target: ts.ScriptTarget.ES2020
-};
 
-
-function createProgram(code: string, filename: string = 'test.ts'): ts.Program {
-    let host = ts.createCompilerHost(compilerOptions),
-        originalGetSourceFile = host.getSourceFile.bind(host);
-
-    host.getSourceFile = (name, languageVersion) => {
-        if (name === filename) {
-            return ts.createSourceFile(name, code, languageVersion, true);
-        }
-
-        return originalGetSourceFile(name, languageVersion);
-    };
-
-    host.fileExists = (name) => {
-        if (name === filename) {
-            return true;
-        }
-
-        return ts.sys.fileExists(name);
-    };
-
-    host.readFile = (name) => {
-        if (name === filename) {
-            return code;
-        }
-
-        return ts.sys.readFile(name);
-    };
-
-    return ts.createProgram([filename], compilerOptions, host);
+// Fixtures are scripts, not modules, so a `type Node` declaration collides with the DOM global
+// instead of shadowing it. Narrowing `lib` to es2020 keeps the analyzer off the DOM type graph -
+// the same lib set this harness used before the TS7 migration.
+function compile(code: string, fileName: string = FILE_NAME): ScratchResult {
+    return languageService.scratch(fileName, code, { lib: ['es2020'], strict: true, target: 'es2020' });
 }
 
 function mightNeedTransform(code: string): boolean {
@@ -64,14 +36,20 @@ function mightNeedTransform(code: string): boolean {
 }
 
 function transformCode(code: string): string {
-    let fullCode = PACKAGE_IMPORT + code,
-        program = createProgram(fullCode),
-        shared = new Map(),
-        sourceFile = program.getSourceFile('test.ts')!;
+    return transformRaw(PACKAGE_IMPORT + code);
+}
 
-    let result = coordinator.transform([plugin], fullCode, sourceFile, program, shared);
+// Same pipeline as transformCode without the package-import prefix, for cases that supply their
+// own imports (or deliberately omit them).
+function transformRaw(code: string): string {
+    return transformWith([plugin], code);
+}
 
-    return result.code;
+function transformWith(plugins: Plugin[], code: string): string {
+    let { checker, program, sourceFile } = compile(code),
+        shared = new Map();
+
+    return coordinator.transform(plugins, code, sourceFile, { checker, program }, ROOT, shared).code;
 }
 
 // build<T>() now compiles to a hoisted plain object `{ toJsonSchema, validate }`, so unwrap
@@ -80,7 +58,7 @@ function transformCode(code: string): string {
 // default factories), so execute the emitted PRELUDE (imports dropped) up to and including the
 // build POJO literal, then return that object's `validate`; user type declarations and the
 // replaced call statement follow the POJO and are never evaluated.
-function createValidator<T>(code: string): (input: unknown) => { ok: boolean; data: unknown; errors?: Array<{ message: string; path: string }> } {
+function createValidator(code: string): (input: unknown) => { ok: boolean; data: Record<string, unknown>; errors?: Array<{ message: string; path: string }> } {
     let transformed = transformCode(code),
         match = transformed.match(/const\s+(\w+)\s*=\s*\{\s*toJsonSchema:/);
 
@@ -144,4 +122,4 @@ function evaluateModule(code: string, injected: Record<string, unknown> = {}, ex
 }
 
 
-export { createProgram, createValidator, evaluateModule, mightNeedTransform, transformCode };
+export { compile, createValidator, evaluateModule, mightNeedTransform, transformCode, transformRaw, transformWith };

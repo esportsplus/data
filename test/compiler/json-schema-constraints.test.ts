@@ -5,11 +5,11 @@ import { analyzeType } from '../../src/compiler/type-analyzer';
 import { extractConstraints } from '../../src/compiler/json-schema-constraints';
 import type { AnalyzedProperty } from '../../src/compiler/type-analyzer';
 import type { JsonSchema } from '../../src/types';
-import { createProgram } from '../utils';
+import { compile } from '../utils';
 
 
 type Setup = {
-    checker: ts.TypeChecker;
+    checker: ts.Checker;
     configArg: ts.Expression;
     root: AnalyzedProperty;
     sourceFile: ts.SourceFile;
@@ -27,17 +27,15 @@ function extract(code: string): Map<string, JsonSchema> {
 }
 
 function setup(code: string): Setup {
-    let program = createProgram(code),
-        checker = program.getTypeChecker(),
-        found: ts.CallExpression | undefined,
-        sourceFile = program.getSourceFile('test.ts')!;
+    let { checker, sourceFile } = compile(code),
+        found: ts.CallExpression | undefined;
 
     let walk = (node: ts.Node): void => {
         if (!found && ts.isCallExpression(node) && node.typeArguments && node.typeArguments.length > 0 && node.arguments.length > 0) {
             found = node;
         }
 
-        ts.forEachChild(node, walk);
+        node.forEachChild(walk);
     };
 
     walk(sourceFile);

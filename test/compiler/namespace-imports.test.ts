@@ -1,54 +1,8 @@
 import { ts } from '@esportsplus/typescript';
-import { coordinator } from '@esportsplus/typescript/compiler';
 import { describe, expect, it } from 'vitest';
 
 import plugin from '../../src/compiler/index';
-
-
-let compilerOptions: ts.CompilerOptions = {
-    lib: ['lib.es2020.d.ts'],
-    module: ts.ModuleKind.ESNext,
-    moduleResolution: ts.ModuleResolutionKind.Bundler,
-    strict: true,
-    target: ts.ScriptTarget.ES2020
-};
-
-
-function transformRaw(code: string): string {
-    let filename = 'test.ts',
-        host = ts.createCompilerHost(compilerOptions),
-        originalGetSourceFile = host.getSourceFile.bind(host);
-
-    host.getSourceFile = (name, languageVersion) => {
-        if (name === filename) {
-            return ts.createSourceFile(name, code, languageVersion, true);
-        }
-
-        return originalGetSourceFile(name, languageVersion);
-    };
-
-    host.fileExists = (name) => {
-        if (name === filename) {
-            return true;
-        }
-
-        return ts.sys.fileExists(name);
-    };
-
-    host.readFile = (name) => {
-        if (name === filename) {
-            return code;
-        }
-
-        return ts.sys.readFile(name);
-    };
-
-    let program = ts.createProgram([filename], compilerOptions, host),
-        shared = new Map(),
-        sourceFile = program.getSourceFile(filename)!;
-
-    return coordinator.transform([plugin], code, sourceFile, program, process.cwd(), shared).code;
-}
+import { compile, transformRaw } from '../utils';
 
 
 function visitValidatorBranch(node: ts.Node, state: { found: boolean }): void {
@@ -69,7 +23,7 @@ function visitValidatorBranch(node: ts.Node, state: { found: boolean }): void {
         }
     }
 
-    ts.forEachChild(node, (child) => visitValidatorBranch(child, state));
+    node.forEachChild((child) => visitValidatorBranch(child, state));
 }
 
 
@@ -105,7 +59,7 @@ describe('Namespace Imports', () => {
             // and .expression is PAE with .name = 'validator'
             // and inner .expression is Identifier
             let code = "import * as data from '@esportsplus/data';\ndata.validator.build<{name: string}>();",
-                sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ES2020, true),
+                { sourceFile } = compile(code),
                 state = { found: false };
 
             visitValidatorBranch(sourceFile, state);

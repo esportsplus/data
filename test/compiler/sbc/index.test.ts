@@ -1,18 +1,9 @@
-import { coordinator } from '@esportsplus/typescript/compiler';
-import { ts } from '@esportsplus/typescript';
 import { describe, expect, test } from 'vitest';
 
 import { codec } from '../../../src/sbc';
 import sbcPlugin from '../../../src/compiler/sbc';
+import { transformWith } from '../../utils';
 
-
-let compilerOptions: ts.CompilerOptions = {
-    lib: ['lib.es2020.d.ts'],
-    module: ts.ModuleKind.ESNext,
-    moduleResolution: ts.ModuleResolutionKind.Bundler,
-    strict: true,
-    target: ts.ScriptTarget.ES2020
-};
 
 let preamble = `
     type FieldSpec = { name: string; nullable?: boolean; type: string; };
@@ -25,40 +16,7 @@ let preamble = `
 
 
 function transformCodec2(code: string): string {
-    let filename = 'test.ts',
-        fullCode = preamble + code,
-        host = ts.createCompilerHost(compilerOptions),
-        originalGetSourceFile = host.getSourceFile.bind(host);
-
-    host.getSourceFile = (name, languageVersion) => {
-        if (name === filename) {
-            return ts.createSourceFile(name, fullCode, languageVersion, true);
-        }
-
-        return originalGetSourceFile(name, languageVersion);
-    };
-
-    host.fileExists = (name) => {
-        if (name === filename) {
-            return true;
-        }
-
-        return ts.sys.fileExists(name);
-    };
-
-    host.readFile = (name) => {
-        if (name === filename) {
-            return fullCode;
-        }
-
-        return ts.sys.readFile(name);
-    };
-
-    let program = ts.createProgram([filename], compilerOptions, host),
-        shared = new Map(),
-        sourceFile = program.getSourceFile(filename)!;
-
-    return coordinator.transform([sbcPlugin], fullCode, sourceFile, program, shared).code;
+    return transformWith([sbcPlugin], preamble + code);
 }
 
 

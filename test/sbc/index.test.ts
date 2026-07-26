@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { CodecOptions } from '../../src/sbc';
 import { codec } from '../../src/sbc';
 
 
@@ -4107,7 +4106,7 @@ describe('Codec2', () => {
         it('truncated untyped object field in target-field read returns undefined', () => {
             let c = codec();
 
-            let innerHash = c.defineSchema([
+            c.defineSchema([
                 { name: 'x', type: 'uint8' },
                 { name: 'y', type: 'int32' },
             ]);

@@ -3,7 +3,7 @@ import { ts } from '@esportsplus/typescript';
 import type { JsonSchema } from '../../src/types';
 import { analyzeRootType } from '../../src/compiler/type-analyzer';
 import { generateJsonSchema } from '../../src/json-schema';
-import { createProgram, createValidator } from '../utils';
+import { compile, createValidator } from '../utils';
 
 
 const DRAFT = 'https://json-schema.org/draft/2020-12/schema';
@@ -14,13 +14,11 @@ function findTypeArgument(node: ts.Node): ts.TypeNode | undefined {
         return node.typeArguments[0];
     }
 
-    return ts.forEachChild(node, findTypeArgument);
+    return node.forEachChild(findTypeArgument);
 }
 
 function getRoot(code: string) {
-    let program = createProgram(`declare function test<T>(): T;\n${code}`),
-        sourceFile = program.getSourceFile('test.ts')!,
-        checker = program.getTypeChecker(),
+    let { checker, sourceFile } = compile(`declare function test<T>(): T;\n${code}`),
         typeNode = findTypeArgument(sourceFile);
 
     if (!typeNode) {

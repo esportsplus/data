@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ts } from '@esportsplus/typescript';
 import { analyzeRootType, analyzeType } from '../../src/compiler/type-analyzer';
-import { createProgram } from '../utils';
+import { compile } from '../utils';
 
 
 function findTypeArgument(node: ts.Node): ts.TypeNode | undefined {
@@ -9,13 +9,11 @@ function findTypeArgument(node: ts.Node): ts.TypeNode | undefined {
         return node.typeArguments[0];
     }
 
-    return ts.forEachChild(node, findTypeArgument);
+    return node.forEachChild(findTypeArgument);
 }
 
-function getTypeNode(code: string): { checker: ts.TypeChecker; typeNode: ts.TypeNode } {
-    let program = createProgram(`declare function test<T>(): T;\n${code}`),
-        sourceFile = program.getSourceFile('test.ts')!,
-        checker = program.getTypeChecker(),
+function getTypeNode(code: string): { checker: ts.Checker; typeNode: ts.TypeNode } {
+    let { checker, sourceFile } = compile(`declare function test<T>(): T;\n${code}`),
         typeNode = findTypeArgument(sourceFile);
 
     if (!typeNode) {

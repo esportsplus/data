@@ -1,55 +1,13 @@
 import { fileURLToPath } from 'node:url';
 import { ts } from '@esportsplus/typescript';
-import { coordinator } from '@esportsplus/typescript/compiler';
 import { describe, expect, it } from 'vitest';
 
-import plugin, { findUntransformed } from '../../src/compiler/index';
+import { findUntransformed } from '../../src/compiler/index';
 import { assertNoResidue, scanBuildOutput } from '../../src/compiler/residue';
+import { compile, transformRaw } from '../utils';
 
-
-let compilerOptions: ts.CompilerOptions = {
-    lib: ['lib.es2020.d.ts'],
-    module: ts.ModuleKind.ESNext,
-    moduleResolution: ts.ModuleResolutionKind.Bundler,
-    strict: true,
-    target: ts.ScriptTarget.ES2020
-};
 
 let fixturesDir = fileURLToPath(new URL('./fixtures', import.meta.url));
-
-
-function buildHost(code: string): ts.CompilerHost {
-    let filename = 'test.ts',
-        host = ts.createCompilerHost(compilerOptions),
-        originalGetSourceFile = host.getSourceFile.bind(host);
-
-    host.getSourceFile = (name, languageVersion) => {
-        if (name === filename) {
-            return ts.createSourceFile(name, code, languageVersion, true);
-        }
-
-        return originalGetSourceFile(name, languageVersion);
-    };
-
-    host.fileExists = (name) => name === filename || ts.sys.fileExists(name);
-    host.readFile = (name) => name === filename ? code : ts.sys.readFile(name);
-
-    return host;
-}
-
-function compile(code: string): { checker: ts.TypeChecker; sourceFile: ts.SourceFile } {
-    let program = ts.createProgram(['test.ts'], compilerOptions, buildHost(code));
-
-    return { checker: program.getTypeChecker(), sourceFile: program.getSourceFile('test.ts')! };
-}
-
-function transformRaw(code: string): string {
-    let program = ts.createProgram(['test.ts'], compilerOptions, buildHost(code)),
-        shared = new Map(),
-        sourceFile = program.getSourceFile('test.ts')!;
-
-    return coordinator.transform([plugin], code, sourceFile, program, process.cwd(), shared).code;
-}
 
 
 describe('Plugin self-assertion', () => {
@@ -70,7 +28,8 @@ describe('Plugin self-assertion', () => {
             'const built = v.build();\n'
         );
 
-        expect(run).toThrow(/untransformed build call at test\.ts:2:/);
+        // Asserts the file:line:col contract, not the harness's fixture file name.
+        expect(run).toThrow(/untransformed build call at .+\.ts:2:\d+/);
         expect(run).toThrow(/@esportsplus\/data:/);
     });
 
@@ -132,5 +91,5 @@ describe('Post-build residue scan', () => {
 function visitCalls(node: ts.Node, callback: (node: ts.Node) => void): void {
     callback(node);
 
-    ts.forEachChild(node, (child) => visitCalls(child, callback));
+    node.forEachChild((child) => visitCalls(child, callback));
 }
