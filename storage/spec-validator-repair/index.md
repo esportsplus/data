@@ -131,3 +131,11 @@ aa871fa6,run,,,,run-end,RUN END,"applied: 0 completed, 17 rejected, 34 status-ac
 ,item,mutator,,numeric-constraint-validators,requeued,REQUEUED,,,2026-07-25T16:19:25-07:00
 ,item,mutator,,error-path-fidelity,requeued,REQUEUED,,,2026-07-25T16:19:25-07:00
 ,item,mutator,,build-pipeline-e2e-tests,requeued,REQUEUED,,,2026-07-25T16:19:25-07:00
+5e01222d,item,u2,2.1,numeric-constraint-validators,reverted,REVERTED,,,2026-07-25T16:31:23-07:00
+5e01222d,item,u1,1.2,error-path-fidelity,deferred,DEFERRED,,,2026-07-25T17:08:30-07:00
+5e01222d,item,u1,1.1,output-construction-safety,reverted,REVERTED,,,2026-07-25T17:08:30-07:00
+5e01222d,item,u3,3.1,build-pipeline-e2e-tests,deferred,DEFERRED,"DEFERRED 2026-07-26T00:08:30.781Z run=5e01222d class=dependency reason=""dependency output-construction-safety did not land — reverted"" salvage=none",,2026-07-25T17:08:30-07:00
+5e01222d,run,,,,run-end,RUN END,"applied: 0 completed, 3 rejected, 3 status-actions, 3 changelog-rows",,2026-07-25T17:08:31-07:00
+,item,mutator,,output-construction-safety,requeued,REQUEUED,,,2026-07-25T17:18:59-07:00
+,item,mutator,,numeric-constraint-validators,requeued,REQUEUED,,,2026-07-25T17:19:00-07:00
+,item,mutator,,error-path-fidelity,requeued,REQUEUED,,,2026-07-25T17:19:00-07:00
