@@ -40,7 +40,6 @@ const TEST_FILES = [
     'test/sbc/decode-interleave.test.ts',
     'test/sbc/index.test.ts',
     'test/sbc/schema-store.test.ts',
-    'test/typed-array-codec.test.ts',
     'test/validators/advanced.test.ts',
     'test/validators/constraints.test.ts',
     'test/validators/format.test.ts',
@@ -65,5 +64,13 @@ describe('repository layout', () => {
     it.each(HELPER_FILES)('keeps the helper %s outside discovery', (path) => {
         expect(existsSync(resolve(ROOT, path))).toBe(true);
         expect(path.includes('.test.') || path.includes('.bench.')).toBe(false);
+    });
+
+    it('has removed the orphan typed-array codec module', () => {
+        expect(existsSync(resolve(ROOT, 'src/typed-array-codec.ts'))).toBe(false);
+    });
+
+    it('has removed the orphan typed-array codec test', () => {
+        expect(existsSync(resolve(ROOT, 'test/typed-array-codec.test.ts'))).toBe(false);
     });
 });
