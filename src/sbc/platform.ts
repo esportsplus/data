@@ -389,7 +389,9 @@ function classifyPackedArray(a: number[]): number {
             return -1;
         }
 
-        if (Number.isInteger(v)) {
+        // -0 is an integer to Number.isInteger but its sign only survives float64 — treat it as
+        // non-integer so a -0-bearing array packs losslessly instead of collapsing to +0.
+        if (Number.isInteger(v) && !Object.is(v, -0)) {
             if (v < min) {
                 min = v;
             }

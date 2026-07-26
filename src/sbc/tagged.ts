@@ -2,7 +2,7 @@
 // Extracted from codec() closure; state threaded via DecodeContext / EncodeContext
 
 import { MAX_ARRAY_COUNT } from './constants';
-import { byteLen, readBI64, readF64, readStr, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
+import { byteLen, classifyPackedArray, readBI64, readF64, readStr, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 import { inferAndRegister } from './schema';
 
 import type { PersistentStore, SchemaRegistry } from './types';
@@ -166,68 +166,83 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
             return (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) | 0;
 
         case 12: {
-            // packed uint8 array
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
+            // packed number[] — [12][u8 typeId][u32 byteLen][raw LE elements], tag 17's
+            // payload layout decoded into a plain Array (never a TypedArray) at the classified width.
+            if (offset + 6 > buf.length) {
+                throw new Error('Codec2: truncated packed array at offset ' + offset);
+            }
+
+            let typeId = buf[offset + 1]!,
+                bpe = TYPED_ARRAY_BPE[typeId],
+                packedLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
+
+            if (bpe === undefined) {
+                throw new Error('Codec2: unknown packed array typeId ' + typeId);
+            }
+
+            if (packedLen % bpe !== 0) {
+                throw new Error('Codec2: packed array byteLength not aligned');
+            }
+
+            let count = packedLen / bpe;
 
             if (count > MAX_ARRAY_COUNT) {
                 throw new Error('Codec2: array count ' + count + ' exceeds limit');
             }
 
-            if (offset + 5 + count > buf.length) {
-                throw new Error('Codec2: truncated packed uint8 array at offset ' + offset);
+            if (offset + 6 + packedLen > buf.length) {
+                throw new Error('Codec2: truncated packed array at offset ' + offset);
             }
 
             let arr = new Array(count),
-                p = offset + 5;
+                p = offset + 6;
 
-            for (let i = 0; i < count; i++) {
-                arr[i] = buf[p + i]!;
-            }
-
-            return arr;
-        }
-
-        case 13: {
-            // packed float64 array
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: array count ' + count + ' exceeds limit');
-            }
-
-            if (offset + 5 + count * 8 > buf.length) {
-                throw new Error('Codec2: truncated packed float64 array at offset ' + offset);
-            }
-
-            let arr = new Array(count),
-                p = offset + 5;
-
-            for (let i = 0; i < count; i++) {
-                arr[i] = readF64.call(buf, p);
-                p += 8;
-            }
-
-            return arr;
-        }
-
-        case 14: {
-            // packed int32 array
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: array count ' + count + ' exceeds limit');
-            }
-
-            if (offset + 5 + count * 4 > buf.length) {
-                throw new Error('Codec2: truncated packed int32 array at offset ' + offset);
-            }
-
-            let arr = new Array(count),
-                p = offset + 5;
-
-            for (let i = 0; i < count; i++) {
-                arr[i] = (buf[p]! | (buf[p + 1]! << 8) | (buf[p + 2]! << 16) | (buf[p + 3]! << 24)) | 0;
-                p += 4;
+            switch (typeId) {
+                case 1:
+                    for (let i = 0; i < count; i++) {
+                        arr[i] = readF64.call(buf, p);
+                        p += 8;
+                    }
+                    break;
+                case 2:
+                    for (let i = 0; i < count; i++) {
+                        arr[i] = (buf[p]! << 24) >> 24;
+                        p += 1;
+                    }
+                    break;
+                case 3:
+                    for (let i = 0; i < count; i++) {
+                        arr[i] = ((buf[p]! | (buf[p + 1]! << 8)) << 16) >> 16;
+                        p += 2;
+                    }
+                    break;
+                case 4:
+                    for (let i = 0; i < count; i++) {
+                        arr[i] = (buf[p]! | (buf[p + 1]! << 8) | (buf[p + 2]! << 16) | (buf[p + 3]! << 24)) | 0;
+                        p += 4;
+                    }
+                    break;
+                case 5:
+                case 6:
+                    for (let i = 0; i < count; i++) {
+                        arr[i] = buf[p]!;
+                        p += 1;
+                    }
+                    break;
+                case 7:
+                    for (let i = 0; i < count; i++) {
+                        arr[i] = buf[p]! | (buf[p + 1]! << 8);
+                        p += 2;
+                    }
+                    break;
+                case 8:
+                    for (let i = 0; i < count; i++) {
+                        arr[i] = (buf[p]! | (buf[p + 1]! << 8) | (buf[p + 2]! << 16) | (buf[p + 3]! << 24)) >>> 0;
+                        p += 4;
+                    }
+                    break;
+                default:
+                    throw new Error('Codec2: unsupported packed array typeId ' + typeId);
             }
 
             return arr;
@@ -329,43 +344,17 @@ function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
         case 11:
             return offset + 5;
         case 12: {
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: array count ' + count + ' exceeds limit');
+            if (offset + 6 > buf.length) {
+                throw new Error('Codec2: truncated packed array at offset ' + offset);
             }
 
-            if (offset + 5 + count > buf.length) {
-                throw new Error('Codec2: truncated packed uint8 array at offset ' + offset);
+            let packedLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
+
+            if (offset + 6 + packedLen > buf.length) {
+                throw new Error('Codec2: truncated packed array at offset ' + offset);
             }
 
-            return offset + 5 + count;
-        }
-        case 13: {
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: array count ' + count + ' exceeds limit');
-            }
-
-            if (offset + 5 + count * 8 > buf.length) {
-                throw new Error('Codec2: truncated packed float64 array at offset ' + offset);
-            }
-
-            return offset + 5 + count * 8;
-        }
-        case 14: {
-            let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
-
-            if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: array count ' + count + ' exceeds limit');
-            }
-
-            if (offset + 5 + count * 4 > buf.length) {
-                throw new Error('Codec2: truncated packed int32 array at offset ' + offset);
-            }
-
-            return offset + 5 + count * 4;
+            return offset + 6 + packedLen;
         }
         case 17: {
             let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
@@ -541,114 +530,66 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 let len = value.length;
 
                 if (len > 0 && typeof value[0] === 'number') {
-                    // Try packed numeric array — tiered early-exit classification
-                    let allUint8 = true,
-                        allInt32 = true,
-                        allNumber = true,
-                        i = 0;
+                    // Packed number[] → tag 17's payload layout: [12][u8 typeId][u32 byteLen][raw LE
+                    // elements], one shared classifier picking the narrowest lossless width.
+                    let typeId = classifyPackedArray(value as number[]);
 
-                    // Phase 1: check uint8 eligibility
-                    for (; i < len; i++) {
-                        let v = value[i];
+                    if (typeId !== -1) {
+                        let bpe = TYPED_ARRAY_BPE[typeId]!,
+                            packedLen = len * bpe,
+                            needed = pos + 6 + packedLen;
 
-                        if (typeof v !== 'number') {
-                            allNumber = false;
-                            allUint8 = false;
-                            allInt32 = false;
-                            break;
-                        }
-
-                        if (!Number.isInteger(v) || Object.is(v, -0) || v < 0 || v > 255) {
-                            allUint8 = false;
-                            break;
-                        }
-                    }
-
-                    // Phase 2: check int32 eligibility (only if uint8 failed on non-type reason)
-                    if (!allUint8 && allNumber) {
-                        for (; i < len; i++) {
-                            let v = value[i];
-
-                            if (typeof v !== 'number') {
-                                allNumber = false;
-                                allInt32 = false;
-                                break;
-                            }
-
-                            if (!Number.isInteger(v) || Object.is(v, -0) || v < -2147483648 || v > 2147483647) {
-                                allInt32 = false;
-                                break;
-                            }
-                        }
-
-                        // Phase 3: verify remaining are numbers (only if int32 failed)
-                        if (!allInt32 && allNumber) {
-                            for (; i < len; i++) {
-                                if (typeof value[i] !== 'number') {
-                                    allNumber = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if (allUint8) {
                         buf[pos] = 12;
-                        buf[pos + 1] = len & 0xFF;
-                        buf[pos + 2] = (len >>> 8) & 0xFF;
-                        buf[pos + 3] = (len >>> 16) & 0xFF;
-                        buf[pos + 4] = (len >>> 24) & 0xFF;
+                        buf[pos + 1] = typeId;
+                        buf[pos + 2] = packedLen & 0xFF;
+                        buf[pos + 3] = (packedLen >>> 8) & 0xFF;
+                        buf[pos + 4] = (packedLen >>> 16) & 0xFF;
+                        buf[pos + 5] = (packedLen >>> 24) & 0xFF;
 
-                        let p = pos + 5;
+                        if (needed <= buf.length) {
+                            let p = pos + 6;
 
-                        for (let i = 0; i < len; i++) {
-                            buf[p + i] = value[i];
-                        }
+                            switch (typeId) {
+                                case 1:
+                                    for (let i = 0; i < len; i++) {
+                                        writeF64.call(buf, value[i], p);
+                                        p += 8;
+                                    }
+                                    break;
+                                case 2:
+                                case 5:
+                                case 6:
+                                    for (let i = 0; i < len; i++) {
+                                        buf[p] = value[i] & 0xFF;
+                                        p += 1;
+                                    }
+                                    break;
+                                case 3:
+                                case 7:
+                                    for (let i = 0; i < len; i++) {
+                                        let v = value[i];
 
-                        return p + len;
-                    }
+                                        buf[p] = v & 0xFF;
+                                        buf[p + 1] = (v >>> 8) & 0xFF;
+                                        p += 2;
+                                    }
+                                    break;
+                                case 4:
+                                case 8:
+                                    for (let i = 0; i < len; i++) {
+                                        let v = value[i];
 
-                    if (allInt32) {
-                        buf[pos] = 14;
-                        buf[pos + 1] = len & 0xFF;
-                        buf[pos + 2] = (len >>> 8) & 0xFF;
-                        buf[pos + 3] = (len >>> 16) & 0xFF;
-                        buf[pos + 4] = (len >>> 24) & 0xFF;
-
-                        let p = pos + 5;
-
-                        for (let i = 0; i < len; i++) {
-                            let v = value[i];
-
-                            buf[p] = v & 0xFF;
-                            buf[p + 1] = (v >>> 8) & 0xFF;
-                            buf[p + 2] = (v >>> 16) & 0xFF;
-                            buf[p + 3] = (v >>> 24) & 0xFF;
-                            p += 4;
-                        }
-
-                        return p;
-                    }
-
-                    if (allNumber) {
-                        buf[pos] = 13;
-                        buf[pos + 1] = len & 0xFF;
-                        buf[pos + 2] = (len >>> 8) & 0xFF;
-                        buf[pos + 3] = (len >>> 16) & 0xFF;
-                        buf[pos + 4] = (len >>> 24) & 0xFF;
-
-                        let p = pos + 5;
-
-                        if (pos + 5 + len * 8 <= buf.length) {
-                            for (let i = 0; i < len; i++) {
-                                writeF64.call(buf, value[i], p);
-                                p += 8;
+                                        buf[p] = v & 0xFF;
+                                        buf[p + 1] = (v >>> 8) & 0xFF;
+                                        buf[p + 2] = (v >>> 16) & 0xFF;
+                                        buf[p + 3] = (v >>> 24) & 0xFF;
+                                        p += 4;
+                                    }
+                                    break;
                             }
-
-                            return p;
                         }
 
-                        return pos + 5 + len * 8;
+                        return needed;
                     }
                 }
 
