@@ -1,6 +1,13 @@
 # Changelog
 
 ## Completed
+- [readme-accuracy] b080c13. Deviations: salvaged session-side; its critic FAIL was collateral — the item's own gate npx tsc -p tsconfig.build.json --noEmit was red from unlanded siblings and is green (exit 0) on the salvaged tree; ladder: 2 critic FAILs, FABLE_REPLAN budget exhausted, salvaged. · spec: spec-validator-repair
+- [sbc-cache-isolation] f6251d9. Deviations: salvaged session-side; the 'test evidence destroyed' guard blocked it on schema-store.test.ts net-removals that are in fact a RELOCATION to the mirror-named test/sbc/cache.test.ts — verified case-by-case; ladder: blocked on guard, salvaged. · spec: spec-validator-repair
+- [sbc-encode-safety] 6a97663. Deviations: salvaged session-side from salvage/5776b305-u1; ladder: 2 attempts (critic, SEVERITY_FIXER), salvaged. · spec: spec-validator-repair
+- [sbc-schema-preregistration] 126a52b. Deviations: salvaged session-side from salvage/5776b305-u1; ladder: 1 attempt, reverted, salvaged. · spec: spec-validator-repair
+- [sbc-compile-time-parity] 83a53cf. Deviations: salvaged session-side from salvage/5776b305-u1; ladder: 2 attempts (critic, FABLE_REPLAN), reverted, salvaged. · spec: spec-validator-repair
+- [encodable-type-constraint] e207b0f. Deviations: salvaged session-side from salvage/5776b305-u1 after the u1 batch merge went suite_red on unlanded siblings; ladder: 1 attempt, reverted, salvaged. · spec: spec-validator-repair
+- [remove-map-set-tags] 9d23aea. Deviations: salvaged session-side from salvage/5776b305-u1; the engine's per-file 'test evidence destroyed' guard blocked it on the 17 Map/Set cases index.test.ts net-removes, which is the retirement itself; ladder: blocked on guard, salvaged. · spec: spec-validator-repair
 - abandoned spend: ~$424.76 equivalent API cost across 12 terminal non-COMPLETED item(s) (encode-growth-signal, remove-map-set-tags, unify-packed-numeric-tags, encodable-type-constraint, infer-nullable-not-mixed, bigint-int64-parity, sbc-compile-time-parity, sbc-schema-preregistration, sbc-encode-safety, sbc-cache-isolation, sbc-compute-size, readme-accuracy); recorded, not divided into per-item costs (run 5776b305)
 - run-level spend: ~$916.41 equivalent API cost (warm implementer runs + unit-scoped + boundary seats; never divided across items; blended rate = mean(input, output, cache_read, cache_creation) per million tokens) (run 5776b305)
 - [codegen-uint16-hoist] 955b099492ab83ffb2bd59027276af8bccc2afe2. Deviations: none; ladder: 1 attempt (critic), completed. Cost: ~$21.31 equivalent API cost (blended-rate approximation). · spec: spec-validator-repair
