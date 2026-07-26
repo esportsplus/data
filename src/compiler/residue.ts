@@ -17,9 +17,10 @@ type Position = {
 };
 
 
-// Root exports that only ever resolve at compile time - the runtime stub for each throws when reached,
-// so their presence in emitted output is the signature of a plugin that never ran.
-const COMPILE_TIME_SYMBOLS = new Set(['codec', 'validator']);
+// Root exports that only ever resolve at compile time - the runtime stub throws when reached,
+// so its presence in emitted output is the signature of a plugin that never ran. `codec` is a
+// real runtime factory (src/index.ts re-exports it from ./sbc/index) and must not be listed here.
+const COMPILE_TIME_SYMBOLS = new Set(['validator']);
 
 const ESCAPE_REGEX = /[.*+?^${}()|[\]\\]/g;
 
@@ -98,10 +99,7 @@ function scanFile(file: string, text: string, findings: ResidueFinding[]): void 
 
             if (COMPILE_TIME_SYMBOLS.has(imported)) {
                 bound = true;
-
-                if (imported === 'validator') {
-                    validatorLocals.push(local);
-                }
+                validatorLocals.push(local);
             }
         }
 
