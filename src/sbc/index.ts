@@ -25,9 +25,9 @@ const INT64_MIN = -(2n ** 63n);
 
 const INT64_OVERFLOW = 2n ** 63n;
 
-// Ceiling for the encode-buffer grow-loop — a value-range RangeError (not a buffer-size
-// one) cannot be resolved by a larger buffer, so growth stops here instead of doubling
-// toward an "Array buffer allocation failed" OOM.
+// Ceiling for the encode-buffer grow-loop — overflow no longer throws (every write is a
+// guarded write-if-fits that overshoots the position past the buffer), so growth is driven
+// solely by the success-path check and stops here instead of doubling toward an OOM.
 const MAX_ENCODE_BUF = 0x7fffffff;
 
 const HINTED_INT_RANGE: Record<string, [number, number]> = {
@@ -569,60 +569,44 @@ const codec = (options?: CodecOptions): {
     }
 
 
-    // Retry-on-overflow wrappers — catch RangeError from JIT-compiled encoders
-    // and tagged encoder, grow the buffer, and retry until it fits.
+    // Grow-on-overshoot wrappers — every write that could overflow is a guarded write-if-fits
+    // that advances the position past the buffer instead of throwing, so overflow surfaces
+    // only through the success-path check below: grow and retry until it fits, bounded by
+    // MAX_ENCODE_BUF plus a hard iteration cap. A RangeError escaping now means a value error.
     function tryEncode(fn: (obj: unknown, buf: Uint8Array, pos: number) => number, obj: unknown, pos: number): number {
-        while (true) {
-            try {
-                let end = fn(obj, encodeBuf, pos);
+        for (let i = 0; i < 32; i++) {
+            let end = fn(obj, encodeBuf, pos);
 
-                if (end <= encodeBuf.length) {
-                    return end;
-                }
-
-                encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+            if (end <= encodeBuf.length) {
+                return end;
             }
-            catch (e) {
-                if (!(e instanceof RangeError)) {
-                    throw e;
-                }
 
-                let next = encodeBuf.length * 2;
-
-                if (next > MAX_ENCODE_BUF) {
-                    throw e;
-                }
-
-                encodeBuf = allocBuf(next);
+            if (end > MAX_ENCODE_BUF) {
+                throw new Error('Codec2: encode buffer growth exceeded');
             }
+
+            encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
         }
+
+        throw new Error('Codec2: encode buffer growth exceeded');
     }
 
     function tryEncodeSbc(value: unknown, pos: number): number {
-        while (true) {
-            try {
-                let end = boundEncodeSbc(value, encodeBuf, pos);
+        for (let i = 0; i < 32; i++) {
+            let end = boundEncodeSbc(value, encodeBuf, pos);
 
-                if (end <= encodeBuf.length) {
-                    return end;
-                }
-
-                encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
+            if (end <= encodeBuf.length) {
+                return end;
             }
-            catch (e) {
-                if (!(e instanceof RangeError)) {
-                    throw e;
-                }
 
-                let next = encodeBuf.length * 2;
-
-                if (next > MAX_ENCODE_BUF) {
-                    throw e;
-                }
-
-                encodeBuf = allocBuf(next);
+            if (end > MAX_ENCODE_BUF) {
+                throw new Error('Codec2: encode buffer growth exceeded');
             }
+
+            encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
         }
+
+        throw new Error('Codec2: encode buffer growth exceeded');
     }
 
 
