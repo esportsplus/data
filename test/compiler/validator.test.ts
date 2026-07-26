@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { min } from '../../src/validators';
 import { createValidator, transformCode } from '../utils';
@@ -343,5 +345,87 @@ describe('Nullable non-union property short-circuits null (E-P1)', () => {
 
         expect(validate({ value: 5 }).ok).toBe(true);
         expect(validate({ value: 1 }).ok).toBe(false);
+    });
+});
+
+
+describe('__proto__ read goes through an own-property probe (validator-proto-property-reads)', () => {
+    it('reports an optional __proto__ ABSENT when the input has no own __proto__', () => {
+        let validate = createValidator(`
+            type Data = { a: number; "__proto__"?: { x: number } };
+            validator.build<Data>();
+        `);
+
+        let result = validate({ a: 1 });
+
+        expect(result.ok).toBe(true);
+        expect(Object.keys(result.data)).not.toContain('__proto__');
+        expect(Object.getPrototypeOf(result.data)).toBe(Object.prototype);
+    });
+
+    it('validates a genuine own __proto__ and places it under an own key', () => {
+        let validate = createValidator(`
+            type Data = { "__proto__"?: { x: number } };
+            validator.build<Data>();
+        `);
+
+        let result = validate(JSON.parse('{"__proto__":{"x":1}}'));
+
+        expect(result.ok).toBe(true);
+        expect(Object.keys(result.data)).toContain('__proto__');
+        expect((result.data['__proto__'] as { x: number }).x).toBe(1);
+        expect(Object.getPrototypeOf(result.data)).toBe(Object.prototype);
+    });
+
+    it('applies a __proto__ default when the input has no own __proto__', () => {
+        let validate = build(`
+            type Data = { "__proto__": number };
+            const validate = validator.build<Data>({ "__proto__": ((_v, _e) => {}).default(7) });
+        `);
+
+        let result = validate({ a: 1 });
+
+        expect(result.ok).toBe(true);
+        expect(result.data['__proto__']).toBe(7);
+        expect(Object.getPrototypeOf(result.data)).toBe(Object.prototype);
+    });
+
+    it('treats inherited constructor and toString as absent (own-property presence only)', () => {
+        let validate = createValidator(`
+            type Data = { a: number; "constructor"?: { x: number }; "toString"?: { x: number } };
+            validator.build<Data>();
+        `);
+
+        let result = validate({ a: 1 });
+
+        expect(result.ok).toBe(true);
+        expect(Object.keys(result.data)).toEqual(['a']);
+        expect(Object.getPrototypeOf(result.data)).toBe(Object.prototype);
+    });
+
+    it('validates an own constructor property when the input carries one', () => {
+        let validate = createValidator(`
+            type Data = { "constructor"?: { x: number } };
+            validator.build<Data>();
+        `);
+
+        let result = validate(JSON.parse('{"constructor":{"x":2}}'));
+
+        expect(result.ok).toBe(true);
+        expect(Object.keys(result.data)).toContain('constructor');
+        expect((result.data['constructor'] as { x: number }).x).toBe(2);
+    });
+
+    it('special-cases PROTO_KEY in BOTH propertyAccess and outputAccess', () => {
+        let source = readFileSync(resolve(process.cwd(), 'src/compiler/validator.ts'), 'utf8'),
+            bodyOf = (name: string) => {
+                let start = source.indexOf(`function ${name}(`),
+                    next = source.indexOf('\nfunction ', start + 1);
+
+                return source.slice(start, next === -1 ? undefined : next);
+            };
+
+        expect(bodyOf('propertyAccess')).toContain('PROTO_KEY');
+        expect(bodyOf('outputAccess')).toContain('PROTO_KEY');
     });
 });

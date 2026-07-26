@@ -1,6 +1,6 @@
 import { code, uid } from '@esportsplus/typescript/compiler';
 import type { AnalyzedProperty, AnalyzedType } from './type-analyzer';
-import { GeneratorContext, PathMode } from './types';
+import { GeneratorContext, PathMode, PathSegment } from './types';
 import error, { ERRORS_VARIABLE, emitString } from './error';
 import validators from './validators';
 
@@ -20,12 +20,36 @@ type PropertyDefault = {
     name: string;
 };
 
-type TypeValidator = (prop: AnalyzedProperty, source: string, target: string, pathMode: PathMode, context: GeneratorContext) => string;
+// Per-validator recursion wiring, threaded as a generator parameter (never static state):
+// `names` maps a ref key ('#' or '#/$defs/<key>') to the hoisted local function that validates
+// that shape, and `depthArg` is the depth argument a ref CALL passes at the current nesting -
+// the literal `1` at the top level and `_depth + 1` inside a recursive function body.
+type RecursionState = {
+    depthArg: string;
+    names: Map<string, string>;
+};
+
+type TypeValidator = (prop: AnalyzedProperty, source: string, target: string, pathMode: PathMode, context: GeneratorContext, recursion: RecursionState | null) => string;
 
 
 const CONFIG_VARIABLE = '_config';
 
+// Mirror of error.ts IDENTIFIER_SAFE_SOURCE: emitted into a recursive CALL's `_path` so a
+// runtime record key renders `.key` when identifier-safe and `["k.ey"]` when it is not. Held
+// here because error.ts's copy is unexported and outside this item's writable surface.
+const IDENTIFIER_SAFE_SOURCE = '/^[A-Za-z_$][A-Za-z0-9_$]*$/';
+
+// Every property name Object.prototype shadows-in (constructor, toString, __proto__, ...). A
+// read of one of these off a plain input returns the INHERITED value, so presence/default tests
+// must go through an own-property probe instead of a bare `input.name` read.
+const INHERITED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype));
+
 const INPUT_VARIABLE = '_input';
+
+// A cyclic INPUT value (an object that points back at itself) makes the type graph finite but
+// the value graph infinite, so the recursive functions carry a depth counter and push a named
+// error once it exceeds this ceiling rather than spinning forever.
+const MAX_RECURSION_DEPTH = 512;
 
 const OUTPUT_VARIABLE = '_output';
 
@@ -34,6 +58,8 @@ const PROTO_KEY = '__proto__';
 // Decimal / scientific notation only (README:704) - no hex, no empty string, no
 // whitespace-only. Booleans, arrays, objects and '' are type errors, not coercions.
 const NUMBER_STRING = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
+
+const RECURSION_DEPTH_MESSAGE = 'exceeds maximum validation depth';
 
 const RESERVED_WORDS = new Set([
     'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
@@ -79,6 +105,44 @@ function buildLiteralChecks(source: string, literals: LiteralValue[]): string[] 
     return checks;
 }
 
+// A ref node is a recursion back-edge and carries no children, so its key is recorded and the
+// walk stops; every other node forwards to its structural children so a ref nested inside an
+// array/tuple/union/inline object is still discovered.
+function collectRefsInto(prop: AnalyzedProperty, out: Set<string>): void {
+    if (prop.ref !== undefined) {
+        out.add(prop.ref);
+
+        return;
+    }
+
+    forEachChildProp(prop, (child) => collectRefsInto(child, out));
+}
+
+// The single structural field walk shared by ref collection and the async pre-walk: forwards
+// to every child slot and list entry a node can carry, so a defect fixed here is fixed for both.
+function forEachChildProp(prop: AnalyzedProperty, visit: (child: AnalyzedProperty) => void): void {
+    let children = [prop.indexType, prop.itemType, prop.keyType, prop.restType, prop.valueType],
+        lists = [prop.intersectionTypes, prop.properties, prop.tupleTypes, prop.unionTypes];
+
+    for (let i = 0, n = children.length; i < n; i++) {
+        let child = children[i];
+
+        if (child !== undefined) {
+            visit(child);
+        }
+    }
+
+    for (let i = 0, n = lists.length; i < n; i++) {
+        let list = lists[i];
+
+        if (list !== undefined) {
+            for (let j = 0, m = list.length; j < m; j++) {
+                visit(list[j]);
+            }
+        }
+    }
+}
+
 function configInvocations(validators: ConfigValidator[], varname: string): string {
     let parts: string[] = [];
 
@@ -107,7 +171,8 @@ function generateArrayValidation(
     source: string,
     target: string,
     pathMode: PathMode,
-    context: GeneratorContext
+    context: GeneratorContext,
+    recursion: RecursionState | null
 ): string {
     let a = uid('a'),
         e = uid('e'),
@@ -129,7 +194,8 @@ function generateArrayValidation(
                     `${source}[${i}]`,
                     `${a}[${i}]`,
                     { segments: [...pathMode.segments, { expr: i, kind: 'index', position: '0' }] },
-                    context
+                    context,
+                    recursion
                 )}
 
                 if ((${ERRORS_VARIABLE}?.length ?? 0) > ${e}) {
@@ -170,8 +236,6 @@ function generateBooleanValidation(
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let str = uid('str');
-
     return code`
         {
             ${prop.nullable ? `if (${source} === null) { ${target} = null; } else {` : ''}
@@ -185,17 +249,7 @@ function generateBooleanValidation(
                 ${target} = false;
             }
             else {
-                let ${str} = String(${source}).toLowerCase();
-
-                if (${str} === 'true' || ${str} === '1') {
-                    ${target} = true;
-                }
-                else if (${str} === 'false' || ${str} === '0') {
-                    ${target} = false;
-                }
-                else {
-                    ${error.generate('must be true or false', pathMode, context)}
-                }
+                ${error.generate('must be true or false', pathMode, context)}
             }
             ${prop.nullable ? `}` : ''}
         }
@@ -272,7 +326,8 @@ function generateMapValidation(
     source: string,
     target: string,
     pathMode: PathMode,
-    context: GeneratorContext
+    context: GeneratorContext,
+    recursion: RecursionState | null
 ): string {
     let e = uid('e'),
         fresh = uid('m'),
@@ -299,7 +354,8 @@ function generateMapValidation(
                     key,
                     keyOut,
                     { segments: [...pathMode.segments, { expr: key, kind: 'record' }] },
-                    context
+                    context,
+                    recursion
                 )}
 
                 ${validateOrCopy(
@@ -307,7 +363,8 @@ function generateMapValidation(
                     value,
                     valueOut,
                     { segments: [...pathMode.segments, { expr: key, kind: 'record' }] },
-                    context
+                    context,
+                    recursion
                 )}
 
                 if ((${ERRORS_VARIABLE}?.length ?? 0) > ${e}) {
@@ -385,8 +442,24 @@ function generateObjectValidation(
     source: string,
     target: string,
     pathMode: PathMode,
-    context: GeneratorContext
+    context: GeneratorContext,
+    recursion: RecursionState | null
 ): string {
+    // A recursion back-edge: instead of inlining an empty body (which drops the sub-object's
+    // data and replaces it with {}), call the hoisted function that validates the ref'd shape,
+    // passing the call-site path string and the incremented depth. prepareRecursion mints a name
+    // for every collected ref before any body generates, so a wired ref is unreachable-by-miss;
+    // a miss is an internal defect worth a loud throw, never a silent regeneration of the bug.
+    if (prop.ref !== undefined) {
+        let fnName = recursion === null ? undefined : recursion.names.get(prop.ref);
+
+        if (recursion === null || fnName === undefined) {
+            throw new Error(`Validator: recursion back-edge '${prop.ref}' reached with no generated function`);
+        }
+
+        return `${target} = ${context.hasAsync ? 'await ' : ''}${fnName}(${source}, ${renderChildPath(pathMode.segments)}, ${recursion.depthArg});`;
+    }
+
     let container = uid('o'),
         parts: string[] = [],
         path = pathMode.segments,
@@ -399,13 +472,14 @@ function generateObjectValidation(
             continue;
         }
 
-        let access = propertyAccess(property.name, source),
-            inner = validateInto(property, access, container, { segments: [...path, { kind: 'key', name: property.name }] }, context);
+        let probe = propertyAccess(property.name, source),
+            access = probe.expr,
+            inner = validateInto(property, access, container, { segments: [...path, { kind: 'key', name: property.name }] }, context, recursion);
 
         parts.push(
             property.optional
-                ? code`if (${access} !== undefined) { ${inner} }`
-                : inner
+                ? code`${probe.seed} if (${access} !== undefined) { ${inner} }`
+                : code`${probe.seed} ${inner}`
         );
     }
 
@@ -433,7 +507,8 @@ function generateRecordValidation(
     source: string,
     target: string,
     pathMode: PathMode,
-    context: GeneratorContext
+    context: GeneratorContext,
+    recursion: RecursionState | null
 ): string {
     let e = uid('e'),
         indexType = prop.indexType,
@@ -449,7 +524,8 @@ function generateRecordValidation(
                 out,
                 out,
                 { segments: [...pathMode.segments, { expr: key, kind: 'record' }] },
-                context
+                context,
+                recursion
             )
             : '';
 
@@ -489,12 +565,61 @@ function generateRecordValidation(
     `;
 }
 
+// A hoisted local function that validates one recursive shape into a fresh object. Its property
+// body validates with paths RELATIVE to this shape (base segments []), so message text, custom
+// messages and path rendering behave exactly as the inline path does; the boundary loop then
+// prefixes the caller-supplied `_path` onto every error THIS call appended, once, before return -
+// so prefixing composes across depths (an inner call already prefixed its own appends). `_depth`
+// guards a cyclic INPUT; both failure arms return the fresh empty `_o`, never `_src`, so a raw
+// (possibly cyclic) input reference is never placed into output. The object-shape check mirrors
+// generateObjectValidation's guard so a ref'd slot holding a non-object reports rather than throws.
+// Accepted limitation: custom messages resolve by schema position relative to THIS function's
+// shape, so a '#' root resolves its own keys at every depth (one schema, one message set, per
+// JSON-Schema $ref) while a flattened $defs shape resolves none - no message test touches a
+// recursive shape, which never validated at all before this item.
+function generateRecursiveFunction(
+    fnName: string,
+    properties: AnalyzedProperty[],
+    config: Map<string, ConfigValidator[]> | undefined,
+    defaults: Map<string, PropertyDefault> | undefined,
+    context: GeneratorContext,
+    recursion: RecursionState
+): string {
+    return code`
+        ${context.hasAsync ? 'async ' : ''}function ${fnName}(_src, _path, _depth) {
+            let _o = {},
+                _e = ${ERRORS_VARIABLE}?.length ?? 0;
+
+            if (_depth > ${String(MAX_RECURSION_DEPTH)}) {
+                ${error.generate(RECURSION_DEPTH_MESSAGE, { segments: [] }, context)}
+            }
+            else if (_src === null || typeof _src !== 'object' || Array.isArray(_src)) {
+                ${error.generate('must be an object', { segments: [] }, context)}
+            }
+            else {
+                ${generateRootParts(properties, config, defaults, '_src', '_o', context, recursion)}
+            }
+
+            if (_path !== '' && ${ERRORS_VARIABLE} !== undefined) {
+                for (let _i = _e, _n = ${ERRORS_VARIABLE}.length; _i < _n; _i++) {
+                    let _r = ${ERRORS_VARIABLE}[_i].path;
+
+                    ${ERRORS_VARIABLE}[_i].path = _r === '' ? _path : (_r[0] === '[' ? _path + _r : _path + '.' + _r);
+                }
+            }
+
+            return _o;
+        }
+    `;
+}
+
 function generateSetValidation(
     prop: AnalyzedProperty,
     source: string,
     target: string,
     pathMode: PathMode,
-    context: GeneratorContext
+    context: GeneratorContext,
+    recursion: RecursionState | null
 ): string {
     let e = uid('e'),
         fresh = uid('s'),
@@ -520,7 +645,8 @@ function generateSetValidation(
                     value,
                     valueOut,
                     { segments: [...pathMode.segments, { expr: i, kind: 'index', position: '0' }] },
-                    context
+                    context,
+                    recursion
                 )}
 
                 if ((${ERRORS_VARIABLE}?.length ?? 0) > ${e}) {
@@ -577,7 +703,8 @@ function generateTupleValidation(
     source: string,
     target: string,
     pathMode: PathMode,
-    context: GeneratorContext
+    context: GeneratorContext,
+    recursion: RecursionState | null
 ): string {
     let a = uid('a'),
         parts: string[] = [],
@@ -598,7 +725,8 @@ function generateTupleValidation(
             `${source}[${i}]`,
             `${a}[${i}]`,
             { segments: [...path, { expr: String(i), kind: 'index', position: String(i) }] },
-            context
+            context,
+            recursion
         );
 
         if (tupleTypes[i].optional) {
@@ -623,7 +751,8 @@ function generateTupleValidation(
                     `${source}[${i}]`,
                     `${a}[${i}]`,
                     { segments: [...path, { expr: i, kind: 'index', position: String(tupleTypes.length) }] },
-                    context
+                    context,
+                    recursion
                 )}
 
                 if ((${ERRORS_VARIABLE}?.length ?? 0) > ${e}) {
@@ -654,11 +783,11 @@ function generateTupleValidation(
     `;
 }
 
-function generateTypeValidation(prop: AnalyzedProperty, source: string, target: string, pathMode: PathMode, context: GeneratorContext): string {
-    return TYPE_VALIDATORS[prop.type]?.(prop, source, target, pathMode, context) ?? '';
+function generateTypeValidation(prop: AnalyzedProperty, source: string, target: string, pathMode: PathMode, context: GeneratorContext, recursion: RecursionState | null): string {
+    return TYPE_VALIDATORS[prop.type]?.(prop, source, target, pathMode, context, recursion) ?? '';
 }
 
-function generateUnionValidation(prop: AnalyzedProperty, source: string, target: string, pathMode: PathMode, context: GeneratorContext): string {
+function generateUnionValidation(prop: AnalyzedProperty, source: string, target: string, pathMode: PathMode, context: GeneratorContext, recursion: RecursionState | null): string {
     let literals = prop.literals || [],
         unionTypes = prop.unionTypes || [];
 
@@ -690,7 +819,7 @@ function generateUnionValidation(prop: AnalyzedProperty, source: string, target:
             case 'array':
             case 'tuple':
                 guard = `Array.isArray(${source})`;
-                body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context);
+                body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
                 break;
 
             case 'bigint':
@@ -703,7 +832,7 @@ function generateUnionValidation(prop: AnalyzedProperty, source: string, target:
 
             case 'date':
                 guard = `${source} instanceof Date`;
-                body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context);
+                body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
                 break;
 
             case 'function':
@@ -712,33 +841,33 @@ function generateUnionValidation(prop: AnalyzedProperty, source: string, target:
 
             case 'map':
                 guard = `${source} instanceof Map`;
-                body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context);
+                body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
                 break;
 
             case 'number':
                 guard = `typeof ${source} === 'number'`;
 
                 if (branch.brand) {
-                    body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context);
+                    body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
                 }
                 break;
 
             case 'object':
             case 'record':
                 guard = `typeof ${source} === 'object' && ${source} !== null && !Array.isArray(${source})`;
-                body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context);
+                body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
                 break;
 
             case 'set':
                 guard = `${source} instanceof Set`;
-                body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context);
+                body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
                 break;
 
             case 'string':
                 guard = `typeof ${source} === 'string'`;
 
                 if (branch.brand) {
-                    body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context);
+                    body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
                 }
                 break;
 
@@ -806,70 +935,20 @@ function outputAccess(prop: string, container: string): string {
     return `${container}[${emitString(prop)}]`;
 }
 
-function propertyAccess(prop: string, varname: string): string {
-    if (VALID_IDENTIFIER.test(prop) && !RESERVED_WORDS.has(prop)) {
-        return `${varname}.${prop}`;
-    }
-
-    return `${varname}[${emitString(prop)}]`;
-}
-
-// Validate `source` into the container slot named `prop.name`. A __proto__ slot cannot
-// be a plain lvalue target (assignment hits the prototype setter), so it validates into a
-// temp local and is placed via defineProperty.
-function validateInto(prop: AnalyzedProperty, source: string, container: string, pathMode: PathMode, context: GeneratorContext): string {
-    if (prop.name === PROTO_KEY) {
-        let temp = uid('p');
-
-        return code`
-            let ${temp};
-
-            ${validateOrCopy(prop, source, temp, pathMode, context)}
-
-            ${emitWrite(container, PROTO_KEY, temp)}
-        `;
-    }
-
-    return validateOrCopy(prop, source, outputAccess(prop.name, container), pathMode, context);
-}
-
-// A type with no runtime validator (any / unknown) still contributes its value to the
-// fresh output - copy it through so nested containers keep the caller's data.
-function validateOrCopy(prop: AnalyzedProperty, source: string, target: string, pathMode: PathMode, context: GeneratorContext): string {
-    let generated = generateTypeValidation(prop, source, target, pathMode, context);
-
-    if (generated === '') {
-        return `${target} = ${source};`;
-    }
-
-    return generated;
-}
-
-
-const generateValidator = (type: AnalyzedType, context: GeneratorContext, config?: Map<string, ConfigValidator[]>, defaults?: Map<string, PropertyDefault>): string => {
-    let root = type.root;
-
-    // Non-object roots (primitive, array, tuple, record, union, ...) validate `_input`
-    // into a fresh `_output` - input is never written, coercion lands in the result.
-    if (root.type !== 'object') {
-        return `
-            ${context.hasAsync ? 'async ' : ''}(${INPUT_VARIABLE}) => {
-                let ${ERRORS_VARIABLE},
-                    ${OUTPUT_VARIABLE};
-
-                ${validateOrCopy(root, INPUT_VARIABLE, OUTPUT_VARIABLE, { segments: [] }, context)}
-
-                if (${ERRORS_VARIABLE} && ${ERRORS_VARIABLE}.length > 0) {
-                    return { ok: false, data: ${INPUT_VARIABLE}, errors: ${ERRORS_VARIABLE} };
-                }
-
-                return { ok: true, data: ${OUTPUT_VARIABLE}, errors: undefined };
-            }
-        `;
-    }
-
-    let parts: string[] = [],
-        properties = type.properties;
+// The root property loop, extracted so the top level and every recursive function share ONE
+// body: a type with no refs generates with recursion `null` and source/container `_input`/
+// `_output`, emitting byte-identical output to the pre-extraction inline loop. Config validators
+// and default fills therefore execute at EVERY depth when a recursive function reuses it.
+function generateRootParts(
+    properties: AnalyzedProperty[],
+    config: Map<string, ConfigValidator[]> | undefined,
+    defaults: Map<string, PropertyDefault> | undefined,
+    source: string,
+    container: string,
+    context: GeneratorContext,
+    recursion: RecursionState | null
+): string {
+    let parts: string[] = [];
 
     for (let i = 0, n = properties.length; i < n; i++) {
         let property = properties[i];
@@ -880,20 +959,21 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
 
         let configValidators = config?.get(property.name),
             def = defaults?.get(property.name),
-            source = propertyAccess(property.name, INPUT_VARIABLE),
+            probe = propertyAccess(property.name, source),
+            propSource = probe.expr,
             core: string;
 
         if (configValidators !== undefined && configValidators.length > 0) {
             let count = uid('c'),
                 nullableNonUnion = property.nullable === true && property.type !== 'union',
-                slot = property.name === PROTO_KEY ? uid('p') : outputAccess(property.name, OUTPUT_VARIABLE),
+                slot = property.name === PROTO_KEY ? uid('p') : outputAccess(property.name, container),
                 structural = property.name === PROTO_KEY
                     ? code`
                         let ${slot};
 
-                        ${validateOrCopy(property, source, slot, { segments: [{ kind: 'key', name: property.name }] }, context)}
+                        ${validateOrCopy(property, propSource, slot, { segments: [{ kind: 'key', name: property.name }] }, context, recursion)}
                     `
-                    : validateOrCopy(property, source, slot, { segments: [{ kind: 'key', name: property.name }] }, context);
+                    : validateOrCopy(property, propSource, slot, { segments: [{ kind: 'key', name: property.name }] }, context, recursion);
 
             core = code`
                 let ${count} = ${ERRORS_VARIABLE}?.length ?? 0;
@@ -905,18 +985,20 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
                     ${configInvocations(configValidators, slot)}
                 }
 
-                ${property.name === PROTO_KEY ? emitWrite(OUTPUT_VARIABLE, PROTO_KEY, slot) : ''}
+                ${property.name === PROTO_KEY ? emitWrite(container, PROTO_KEY, slot) : ''}
             `;
         }
         else {
-            core = validateInto(property, source, OUTPUT_VARIABLE, { segments: [{ kind: 'key', name: property.name }] }, context);
+            core = validateInto(property, propSource, container, { segments: [{ kind: 'key', name: property.name }] }, context, recursion);
         }
 
         if (def !== undefined) {
             parts.push(
                 code`
-                    if (${source} === undefined) {
-                        ${emitWrite(OUTPUT_VARIABLE, property.name, def.fresh ? `${def.name}()` : def.name)}
+                    ${probe.seed}
+
+                    if (${propSource} === undefined) {
+                        ${emitWrite(container, property.name, def.fresh ? `${def.name}()` : def.name)}
                     }
                     else {
                         ${core}
@@ -927,24 +1009,313 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
         else if (property.optional) {
             parts.push(
                 code`
-                    if (${source} !== undefined) {
+                    ${probe.seed}
+
+                    if (${propSource} !== undefined) {
                         ${core}
                     }
                 `
             );
         }
         else {
-            parts.push(core);
+            parts.push(code`${probe.seed} ${core}`);
         }
     }
 
+    return parts.join('\n');
+}
+
+// A single node's brand resolves to an async validator: matches generateNumberValidation
+// (any brand) and generateStringValidation (brand set, not 'template') exactly, so the pre-walk
+// flags precisely the nodes those generators would inline an `await`-bearing body for.
+function nodeBrandAsync(prop: AnalyzedProperty, context: GeneratorContext): boolean {
+    if (prop.brand === undefined) {
+        return false;
+    }
+
+    if (prop.type === 'number' || (prop.type === 'string' && prop.brand !== 'template')) {
+        let validator = context.brandValidators.get(prop.brand);
+
+        return validator !== undefined && validator.async;
+    }
+
+    return false;
+}
+
+// True when `prop` or any structural descendant carries an async brand. A ref back-edge stops
+// the walk - the ref'd shape is walked at its own root/def entry - so the traversal is finite.
+function walkAsync(prop: AnalyzedProperty, context: GeneratorContext): boolean {
+    if (prop.ref !== undefined) {
+        return false;
+    }
+
+    if (nodeBrandAsync(prop, context)) {
+        return true;
+    }
+
+    let found = false;
+
+    forEachChildProp(prop, (child) => {
+        if (walkAsync(child, context)) {
+            found = true;
+        }
+    });
+
+    return found;
+}
+
+// Register the ref -> function-name wiring and return the hoisted recursive function
+// declarations: one per $defs entry plus one for the root shape when a '#' back-edge exists.
+// Function bodies generate with depthArg '_depth + 1'; the returned `names` map lets the caller
+// build the top-level state (depthArg '1') so TOP-LEVEL ref calls enter the recursion at depth 1.
+function prepareRecursion(
+    analyzed: AnalyzedType,
+    context: GeneratorContext,
+    config: Map<string, ConfigValidator[]> | undefined,
+    defaults: Map<string, PropertyDefault> | undefined
+): { decls: string; names: Map<string, string> } {
+    let defs = analyzed.root.defs,
+        names = new Map<string, string>(),
+        refs = new Set<string>();
+
+    collectRefsInto(analyzed.root, refs);
+
+    if (defs !== undefined) {
+        for (let [, ir] of defs) {
+            collectRefsInto(ir, refs);
+        }
+    }
+
+    if (refs.size === 0) {
+        return { decls: '', names };
+    }
+
+    let needRoot = refs.has('#');
+
+    if (needRoot) {
+        names.set('#', uid('recurse_root'));
+    }
+
+    if (defs !== undefined) {
+        for (let [key] of defs) {
+            names.set('#/$defs/' + key, uid('recurse_' + key));
+        }
+    }
+
+    // Async must SETTLE before any body generates: a decl's `function` keyword and a ref call's
+    // `await` are read from context.hasAsync at the moment the body string is built, so an async
+    // brand discovered mid-body would splice `await` into a plain `function` (a SyntaxError).
+    if (walkAsync(analyzed.root, context)) {
+        context.hasAsync = true;
+    }
+
+    if (defs !== undefined) {
+        for (let [, ir] of defs) {
+            if (walkAsync(ir, context)) {
+                context.hasAsync = true;
+            }
+        }
+    }
+
+    let bodyState: RecursionState = { depthArg: '_depth + 1', names },
+        decls: string[] = [];
+
+    if (needRoot) {
+        decls.push(generateRecursiveFunction(names.get('#')!, analyzed.properties, config, defaults, context, bodyState));
+    }
+
+    if (defs !== undefined) {
+        for (let [key, ir] of defs) {
+            // A $defs entry is always object-shaped with `properties` set (defSchema in the
+            // type-analyzer), so read `ir.properties!`: a `?? []` fallback would silently
+            // regenerate the original drop-to-{} bug for a hypothetically malformed def.
+            decls.push(generateRecursiveFunction(names.get('#/$defs/' + key)!, ir.properties!, undefined, undefined, context, bodyState));
+        }
+    }
+
+    return { decls: decls.join('\n'), names };
+}
+
+// The twin of outputAccess for READS. A name Object.prototype shadows-in - PROTO_KEY and every
+// other inherited key - is read through a hoisted local seeded via Object.hasOwn so an inherited
+// value never masquerades as the input's own property; the seed feeds the presence test, the
+// default test and the validation source. Every other name keeps its bare dot/bracket spelling
+// with an empty seed, so its generated code is unchanged.
+function propertyAccess(prop: string, varname: string): { expr: string; seed: string } {
+    if (prop === PROTO_KEY || INHERITED_KEYS.has(prop)) {
+        let key = emitString(prop),
+            local = uid('own');
+
+        return { expr: local, seed: `let ${local} = Object.hasOwn(${varname}, ${key}) ? ${varname}[${key}] : undefined;` };
+    }
+
+    if (VALID_IDENTIFIER.test(prop) && !RESERVED_WORDS.has(prop)) {
+        return { expr: `${varname}.${prop}`, seed: '' };
+    }
+
+    return { expr: `${varname}[${emitString(prop)}]`, seed: '' };
+}
+
+// The path VALUE a recursive CALL threads as its `_path` argument - the prefix a recursive
+// function stitches onto the paths it appends. A documented private MIRROR of error.ts
+// resolvePath (unexported, and error.ts is outside this item's writable surface): with the
+// relative bodies this item introduces, its record arm serves only genuine record/map-key
+// segments, where the id-safe wrap is correct.
+function renderChildPath(segments: PathSegment[]): string {
+    let fragments: string[] = [],
+        literal = '';
+
+    for (let i = 0, n = segments.length; i < n; i++) {
+        let first = fragments.length === 0 && literal === '',
+            segment = segments[i];
+
+        if (segment.kind === 'key') {
+            if (segment.name.includes('.')) {
+                literal += `[${emitString(segment.name)}]`;
+            }
+            else {
+                literal += first ? segment.name : `.${segment.name}`;
+            }
+
+            continue;
+        }
+
+        if (segment.kind === 'index') {
+            literal += '[';
+            fragments.push(emitString(literal));
+            fragments.push(segment.expr);
+            literal = ']';
+
+            continue;
+        }
+
+        if (literal !== '') {
+            fragments.push(emitString(literal));
+            literal = '';
+        }
+
+        fragments.push(
+            first
+                ? `(${IDENTIFIER_SAFE_SOURCE}.test(${segment.expr}) ? ${segment.expr} : '[' + JSON.stringify(${segment.expr}) + ']')`
+                : `(${IDENTIFIER_SAFE_SOURCE}.test(${segment.expr}) ? '.' + ${segment.expr} : '[' + JSON.stringify(${segment.expr}) + ']')`
+        );
+    }
+
+    if (literal !== '') {
+        fragments.push(emitString(literal));
+    }
+
+    if (fragments.length === 0) {
+        return emitString('');
+    }
+
+    return fragments.join(' + ');
+}
+
+// Validate `source` into the container slot named `prop.name`. A __proto__ slot cannot
+// be a plain lvalue target (assignment hits the prototype setter), so it validates into a
+// temp local and is placed via defineProperty.
+function validateInto(prop: AnalyzedProperty, source: string, container: string, pathMode: PathMode, context: GeneratorContext, recursion: RecursionState | null): string {
+    if (prop.name === PROTO_KEY) {
+        let temp = uid('p');
+
+        return code`
+            let ${temp};
+
+            ${validateOrCopy(prop, source, temp, pathMode, context, recursion)}
+
+            ${emitWrite(container, PROTO_KEY, temp)}
+        `;
+    }
+
+    return validateOrCopy(prop, source, outputAccess(prop.name, container), pathMode, context, recursion);
+}
+
+// A type with no runtime validator (any / unknown) still contributes its value to the
+// fresh output - copy it through so nested containers keep the caller's data.
+function validateOrCopy(prop: AnalyzedProperty, source: string, target: string, pathMode: PathMode, context: GeneratorContext, recursion: RecursionState | null): string {
+    let generated = generateTypeValidation(prop, source, target, pathMode, context, recursion);
+
+    if (generated === '') {
+        return `${target} = ${source};`;
+    }
+
+    return generated;
+}
+
+
+const generateValidator = (type: AnalyzedType, context: GeneratorContext, config?: Map<string, ConfigValidator[]>, defaults?: Map<string, PropertyDefault>): string => {
+    // Register the recursion wiring FIRST: emits the hoisted function declarations, settles
+    // context.hasAsync, and returns the ref -> function-name map. Every ref call generated below
+    // resolves through it, and the two shared state objects (top-level '1', bodies '_depth + 1')
+    // read the same `names` map.
+    let recursion = prepareRecursion(type, context, config, defaults),
+        names = recursion.names,
+        root = type.root,
+        topState: RecursionState | null = names.size > 0 ? { depthArg: '1', names } : null;
+
+    // Non-object roots (primitive, array, tuple, record, union, ...) validate `_input`
+    // into a fresh `_output` - input is never written, coercion lands in the result.
+    if (root.type !== 'object') {
+        return `
+            ${context.hasAsync ? 'async ' : ''}(${INPUT_VARIABLE}) => {
+                let ${ERRORS_VARIABLE},
+                    ${OUTPUT_VARIABLE};
+                ${recursion.decls}
+
+                ${validateOrCopy(root, INPUT_VARIABLE, OUTPUT_VARIABLE, { segments: [] }, context, topState)}
+
+                if (${ERRORS_VARIABLE} && ${ERRORS_VARIABLE}.length > 0) {
+                    return { ok: false, data: ${INPUT_VARIABLE}, errors: ${ERRORS_VARIABLE} };
+                }
+
+                return { ok: true, data: ${OUTPUT_VARIABLE}, errors: undefined };
+            }
+        `;
+    }
+
     let hasConfig = config !== undefined && config.size > 0;
+
+    // A self-recursive root ('#' back-edge): the root function IS the top-level body, so config
+    // validators and default fills run at EVERY depth. The top level keeps its own non-object
+    // guard verbatim, then calls the root function - which re-guards each recursive sub-value.
+    if (names.has('#')) {
+        return `
+            ${context.hasAsync ? 'async ' : ''}(${INPUT_VARIABLE}) => {
+                let ${ERRORS_VARIABLE},
+                    ${OUTPUT_VARIABLE};
+                ${hasConfig ? `let ${CONFIG_VARIABLE} = { path: '', push(_message) { (${ERRORS_VARIABLE} ??= []).push({ message: _message, path: this.path }); } };` : ''}
+                ${recursion.decls}
+
+                if (${INPUT_VARIABLE} === null || typeof ${INPUT_VARIABLE} !== 'object' || Array.isArray(${INPUT_VARIABLE})) {
+                    ${error.generate('must be an object', { segments: [] }, context)}
+
+                    return { ok: false, data: ${INPUT_VARIABLE}, errors: ${ERRORS_VARIABLE} };
+                }
+
+                ${OUTPUT_VARIABLE} = ${context.hasAsync ? 'await ' : ''}${names.get('#')}(${INPUT_VARIABLE}, '', 0);
+
+                if (${ERRORS_VARIABLE} && ${ERRORS_VARIABLE}.length > 0) {
+                    return { ok: false, data: ${INPUT_VARIABLE}, errors: ${ERRORS_VARIABLE} };
+                }
+
+                return { ok: true, data: ${OUTPUT_VARIABLE}, errors: undefined };
+            }
+        `;
+    }
+
+    // Generate the parts BEFORE the return template: an async brand inlined here flips
+    // context.hasAsync, and the `${context.hasAsync ? 'async ' : ''}` prefix below reads it
+    // eagerly - so the body must exist before the prefix is evaluated (the pre-extraction loop
+    // built `parts` before its return for exactly this reason).
+    let parts = generateRootParts(type.properties, config, defaults, INPUT_VARIABLE, OUTPUT_VARIABLE, context, topState);
 
     return `
         ${context.hasAsync ? 'async ' : ''}(${INPUT_VARIABLE}) => {
             let ${ERRORS_VARIABLE},
                 ${OUTPUT_VARIABLE};
             ${hasConfig ? `let ${CONFIG_VARIABLE} = { path: '', push(_message) { (${ERRORS_VARIABLE} ??= []).push({ message: _message, path: this.path }); } };` : ''}
+            ${recursion.decls}
 
             if (${INPUT_VARIABLE} === null || typeof ${INPUT_VARIABLE} !== 'object' || Array.isArray(${INPUT_VARIABLE})) {
                 ${error.generate('must be an object', { segments: [] }, context)}
@@ -954,7 +1325,7 @@ const generateValidator = (type: AnalyzedType, context: GeneratorContext, config
 
             ${OUTPUT_VARIABLE} = {};
 
-            ${parts.join('\n')}
+            ${parts}
 
             if (${ERRORS_VARIABLE} && ${ERRORS_VARIABLE}.length > 0) {
                 return { ok: false, data: ${INPUT_VARIABLE}, errors: ${ERRORS_VARIABLE} };

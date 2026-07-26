@@ -254,18 +254,18 @@ describe('Type Coercion', () => {
             validator.build<Data>();
         `);
 
-        it('coerces uppercase TRUE', () => {
+        it('rejects uppercase TRUE', () => {
+            // Coercion accepts the documented forms only - 'true'/'false'/'1'/'0' - so a
+            // case variant is a type error, matching the number path's policy
             let result = validate({ active: 'TRUE' });
 
-            expect(result.ok).toBe(true);
-            expect(result.data.active).toBe(true);
+            expect(result.ok).toBe(false);
         });
 
-        it('coerces mixed case True', () => {
+        it('rejects mixed case True', () => {
             let result = validate({ active: 'True' });
 
-            expect(result.ok).toBe(true);
-            expect(result.data.active).toBe(true);
+            expect(result.ok).toBe(false);
         });
 
         it('rejects null', () => {
