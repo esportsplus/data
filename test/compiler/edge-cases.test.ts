@@ -458,8 +458,10 @@ describe('Custom Validator Guard Suppression', () => {
         // custom callback is skipped.
         let validate = createValidator(`
             type WithAge = { age: number; name: string };
-            validator.build<WithAge>((data, errors) => {
-                errors.push({ message: 'custom ran', path: 'custom' });
+            validator.build<WithAge>({
+                age: (value, errors) => {
+                    errors.push({ message: 'custom ran', path: 'custom' });
+                }
             });
         `);
 
