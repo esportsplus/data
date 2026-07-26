@@ -2,7 +2,7 @@
 // Zero per-field branching: all type checks happen at compile time
 
 import { MAX_ARRAY_COUNT } from './constants';
-import { _vr, codegenDriver, readVarint, readZigzag, writeVarint, writeZigzag } from './platform';
+import { _vr, classifyPackedArray, codegenDriver, readVarint, readZigzag, TYPED_ARRAY_BPE, writeVarint, writeZigzag } from './platform';
 import type { CodegenDriver } from './platform';
 
 
@@ -100,6 +100,41 @@ function compileSchema(schema: Schema, helpers: SbcHelpers): void {
         schema.compressedEncodeFn = compileCompressedEncoder(schema, d, helpers);
         schema.compressedDecodeFn = compileCompressedDecoder(schema, d, helpers);
     }
+}
+
+
+// Generic-array packed emission — one shared classifier (_cpa) picks the narrowest lossless
+// width, flag = typeId+1 with 0 reserved for "generic tagged elements". Width writes mirror the
+// tagged path (src/sbc/tagged.ts) byte-for-byte so compiled and tagged payloads are identical.
+function packedArrayEncodeSrc(val: string, d: CodegenDriver): string {
+    return `{let a=${val},l=a.length,_t=_cpa(a);`
+        + `if(_t<0){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}`
+        + `else{let _pl=l*_bpe[_t];b[p]=_t+1;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;`
+        + `if(p+_pl<=b.length){switch(_t){`
+        + `case 1:for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}break;`
+        + `case 2:case 5:case 6:for(let i=0;i<l;i++){b[p]=a[i]&0xFF;p+=1;}break;`
+        + `case 3:case 7:for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}break;`
+        + `case 4:case 8:for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}break;}}else{p+=_pl;}}}\n`;
+}
+
+
+// Generic-array packed decode — flag=0 restores tagged elements; else typeId=flag-1 reads at the
+// _bpe width, per-typeId switch OUTSIDE the loop (no per-element width branch, no per-element alloc).
+function packedArrayDecodeSrc(assign: string, d: CodegenDriver): string {
+    return `{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;`
+        + `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`
+        + `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`
+        + `else{let _t=_f-1,_bp=_bpe[_t];if(_bp===undefined)throw new Error('Codec2: unknown packed array flag '+_f);`
+        + `if(p+l*_bp>b.length)throw new Error('Codec2: truncated array');switch(_t){`
+        + `case 1:for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}break;`
+        + `case 2:for(let i=0;i<l;i++){a[i]=(b[p]<<24)>>24;p+=1;}break;`
+        + `case 3:for(let i=0;i<l;i++){a[i]=((b[p]|(b[p+1]<<8))<<16)>>16;p+=2;}break;`
+        + `case 4:for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}break;`
+        + `case 5:case 6:for(let i=0;i<l;i++){a[i]=b[p];p+=1;}break;`
+        + `case 7:for(let i=0;i<l;i++){a[i]=b[p]|(b[p+1]<<8);p+=2;}break;`
+        + `case 8:for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;}break;`
+        + `default:throw new Error('Codec2: unsupported packed array flag '+_f);}}`
+        + `${assign}=a;}`;
 }
 
 
@@ -264,22 +299,9 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     }
                 }
                 else {
-                    // Existing generic path — inline packed numeric detection
-                    body += `{let a=${val},l=a.length,_pk=0;`;
-                    body += `if(l>0&&typeof a[0]==='number'){`;
-                    body += `let _u8=1,_i32=1,_an=1;`;
-                    body += `for(let i=0;i<l;i++){let v=a[i];if(typeof v!=='number'){_an=0;break;}`;
-                    body += `if(Object.is(v,-0)){_u8=0;_i32=0;continue;}`;
-                    body += `if(v!==((v&0xFF)>>>0)){_u8=0;}`;
-                    body += `if(v!==(v|0)){_i32=0;}}`;
-                    // packed uint8: flag=1, u32 count, raw bytes
-                    body += `if(_an&&_u8){_pk=1;b[p]=1;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;}`;
-                    // packed int32: flag=2, u32 count, 4 bytes each
-                    body += `else if(_an&&_i32){_pk=1;b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
-                    // packed float64: flag=3, u32 count, 8 bytes each
-                    body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;if(p+l*8<=b.length){for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}else{p+=l*8;}}}`;
-                    // generic: flag=0, u32 count, tagged elements
-                    body += `if(!_pk){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
+                    // Generic path — one shared classifier picks the narrowest lossless width;
+                    // flag = typeId+1 (0 stays "generic tagged elements"), count u32, raw LE elements.
+                    body += packedArrayEncodeSrc(val, d);
                 }
 
                 break;
@@ -338,8 +360,8 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
     try {
         return (
-            new Function(params, '_enc', '_encObj', '_wv', ...refEncParamNames, `return function encode(o,b,pos){${body}}`)
-        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint, ...refEncBindValues);
+            new Function(params, '_enc', '_encObj', '_wv', '_cpa', '_bpe', ...refEncParamNames, `return function encode(o,b,pos){${body}}`)
+        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint, classifyPackedArray, TYPED_ARRAY_BPE, ...refEncBindValues);
     }
     catch (e) {
         throw new Error('Codec2: encoder compilation failed: ' + (e instanceof Error ? e.message : e));
@@ -539,17 +561,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     }
                 }
                 else {
-                    // Existing generic path — flag byte + u32 count
-                    body += `{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
-                    // flag=0: generic tagged elements
-                    body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
-                    // flag=1: packed uint8
-                    body += `else if(_f===1){if(p+l>b.length)throw new Error('Codec2: truncated array');for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
-                    // flag=2: packed int32
-                    body += `else if(_f===2){if(p+l*4>b.length)throw new Error('Codec2: truncated array');for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
-                    // flag=3: packed float64
-                    body += `else{for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}}`;
-                    body += `f${i}=a;}\n`;
+                    body += packedArrayDecodeSrc(`f${i}`, d) + `\n`;
                 }
 
                 break;
@@ -623,9 +635,9 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
         refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
 
     try {
-        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_lk', '_rv', '_vrs', '_Ctor', ...refDecParamNames, `return function decode(b,pos,_d){${body}}`);
+        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_lk', '_rv', '_vrs', '_Ctor', '_bpe', ...refDecParamNames, `return function decode(b,pos,_d){${body}}`);
 
-        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, helpers.lookupSchema, readVarint, _vr, Ctor, ...refDecBindValues);
+        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, helpers.lookupSchema, readVarint, _vr, Ctor, TYPED_ARRAY_BPE, ...refDecBindValues);
     }
     catch (e) {
         throw new Error('Codec2: decoder compilation failed: ' + (e instanceof Error ? e.message : e));
@@ -827,12 +839,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     }
                 }
                 else {
-                    body += `${no}{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`;
-                    body += `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`;
-                    body += `else if(_f===1){if(p+l>b.length)throw new Error('Codec2: truncated array');for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;}`;
-                    body += `else if(_f===2){if(p+l*4>b.length)throw new Error('Codec2: truncated array');for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}}`;
-                    body += `else{for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}}`;
-                    body += `f${i}=a;}${nc}\n`;
+                    body += `${no}` + packedArrayDecodeSrc(`f${i}`, d) + `${nc}\n`;
                 }
 
                 break;
@@ -884,8 +891,8 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
         refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
 
     try {
-        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_lk', '_rv', '_rz', '_vrs', '_Ctor', ...refDecParamNames, `return function decodeC(b,pos,_d){${body}}`)
-        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, helpers.lookupSchema, readVarint, readZigzag, _vr, Ctor, ...refDecBindValues);
+        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_lk', '_rv', '_rz', '_vrs', '_Ctor', '_bpe', ...refDecParamNames, `return function decodeC(b,pos,_d){${body}}`)
+        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, helpers.lookupSchema, readVarint, readZigzag, _vr, Ctor, TYPED_ARRAY_BPE, ...refDecBindValues);
     }
     catch (e) {
         throw new Error('Codec2: compressed decoder compilation failed: ' + (e instanceof Error ? e.message : e));
@@ -1143,12 +1150,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     }
                 }
                 else {
-                    body += `{let a=${v},l=a.length,_pk=0;`;
-                    body += `if(l>0&&typeof a[0]==='number'){let _u8=1,_i32=1,_an=1;for(let i=0;i<l;i++){let v=a[i];if(typeof v!=='number'){_an=0;break;}if(Object.is(v,-0)){_u8=0;_i32=0;continue;}if(v!==((v&0xFF)>>>0)){_u8=0;}if(v!==(v|0)){_i32=0;}}`;
-                    body += `if(_an&&_u8){_pk=1;b[p]=1;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;}`;
-                    body += `else if(_an&&_i32){_pk=1;b[p]=2;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}}`;
-                    body += `else if(_an){_pk=1;b[p]=3;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;if(p+l*8<=b.length){for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}else{p+=l*8;}}}`;
-                    body += `if(!_pk){b[p]=0;b[p+1]=l&0xFF;b[p+2]=(l>>>8)&0xFF;b[p+3]=(l>>>16)&0xFF;b[p+4]=(l>>>24)&0xFF;p+=5;for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}}\n`;
+                    body += packedArrayEncodeSrc(v, d);
                 }
 
                 if (f.nullable) {
@@ -1223,8 +1225,8 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
 
     try {
         return (
-            new Function(params, '_enc', '_encObj', '_wv', '_wz', ...refEncParamNames, `return function encodeC(o,b,pos){${body}}`)
-        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint, writeZigzag, ...refEncBindValues);
+            new Function(params, '_enc', '_encObj', '_wv', '_wz', '_cpa', '_bpe', ...refEncParamNames, `return function encodeC(o,b,pos){${body}}`)
+        )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint, writeZigzag, classifyPackedArray, TYPED_ARRAY_BPE, ...refEncBindValues);
     }
     catch (e) {
         throw new Error('Codec2: compressed encoder compilation failed: ' + (e instanceof Error ? e.message : e));
