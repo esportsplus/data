@@ -1,8 +1,7 @@
 ---
 type: fix
 recommended-model: opus
-status: BLOCKED
-blocked-reason: blocked pending user review of the SBC audit findings (Q3/Q4)
+status: PENDING
 priority: P0
 source: findings D2, D4 (audit section D)
 depends-on: relocate-tests-and-benches

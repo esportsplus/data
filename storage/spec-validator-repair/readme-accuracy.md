@@ -1,8 +1,7 @@
 ---
 type: docs
 recommended-model: sonnet
-status: BLOCKED
-blocked-reason: blocked by remove-typed-array-codec, sbc-compute-size, sbc-encode-safety, sbc-schema-preregistration: pending user review of the SBC audit findings (Q3/Q4 cascade — it documents their landed behavior)
+status: PENDING
 priority: P2
 source: findings C22, D10 + doc consequences of D2, D5, D6, D9, D13, C15, E-P2 (audit sections C, D, E)
 depends-on: [compiler-annotation-extraction, output-construction-safety, plugin-self-assertion, runtime-tojsonschema, sbc-compute-size, sbc-encode-safety, sbc-schema-preregistration, repair-brand-registration, sbc-compile-time-parity, format-validators-correctness]

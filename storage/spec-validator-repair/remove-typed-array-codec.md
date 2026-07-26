@@ -1,12 +1,10 @@
 ---
 type: refactor
 recommended-model: sonnet
-status: BLOCKED
-blocked-reason: blocked pending user review of the SBC audit findings (Q3)
+status: PENDING
 priority: P2
 source: finding D11 (audit section D)
 api-impact: breaking
-awaiting-approval: public-API break
 depends-on: relocate-tests-and-benches
 files-own: [src/typed-array-codec.ts, src/index.ts, test/typed-array-codec.test.ts, test/layout.test.ts]
 tests: [test/layout.test.ts]
