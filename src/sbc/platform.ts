@@ -378,11 +378,20 @@ for (let i = 0, n = TYPED_ARRAY_CTORS.length; i < n; i++) {
 // Narrowest lossless element width for a plain number[] — returns a TYPED_ARRAY_IDS typeId,
 // or -1 for not-packable. float32 is excluded (lossy for JS doubles), bigint arrays never apply.
 function classifyPackedArray(a: number[]): number {
+    let n = a.length;
+
+    // An empty array carries no width to classify — not-packable, so both consumers route it to
+    // the generic path. Without this guard min/max keep their ±Infinity sentinels and the range
+    // ladder below would leak a spurious uint8 typeId (Infinity >= 0 && -Infinity <= 255).
+    if (n === 0) {
+        return -1;
+    }
+
     let allInteger = true,
         max = -Infinity,
         min = Infinity;
 
-    for (let i = 0, n = a.length; i < n; i++) {
+    for (let i = 0; i < n; i++) {
         let v = a[i]!;
 
         if (typeof v !== 'number') {
