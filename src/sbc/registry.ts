@@ -104,7 +104,7 @@ function deserializeRegistry(data: Uint8Array, defineSchemaFn: (fields: FieldSpe
 
         for (let j = 0, m = fields.length; j < m; j++) {
             keys[j] = fields[j]!.name;
-            types[j] = fields[j]!.type;
+            types[j] = fields[j]!.nullable ? fields[j]!.type + '?' : fields[j]!.type;
         }
 
         let computed = computeShapeHash(keys, types);

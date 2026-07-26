@@ -164,6 +164,7 @@ const codec = (options?: CodecOptions): {
     let compress = options?.compress ?? false,
         encodeBuf = allocBuf(65536),
         registry: SchemaRegistry = {
+            byNameHash: new Map(),
             nextId: 1,
             schemas: new Map(),
         };
@@ -764,7 +765,13 @@ const codec = (options?: CodecOptions): {
             types[i] = sorted[i]!.type;
         }
 
-        let hash = computeShapeHash(keys, types);
+        let hashTypes: string[] = new Array(sorted.length);
+
+        for (let i = 0, n = sorted.length; i < n; i++) {
+            hashTypes[i] = sorted[i]!.nullable ? types[i]! + '?' : types[i]!;
+        }
+
+        let hash = computeShapeHash(keys, hashTypes);
 
         // Already registered?
         if (registry.schemas.has(hash)) {
@@ -836,6 +843,7 @@ const codec = (options?: CodecOptions): {
             id: registry.nextId++,
             intFields,
             nullableCount,
+            provisional: false,
         };
 
         compileSchema(schema, helpers);

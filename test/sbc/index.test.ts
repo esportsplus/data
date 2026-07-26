@@ -1913,9 +1913,12 @@ describe('Codec2', () => {
             expect(c.computeSize([1, 2, 3])).toBe(-1);
         });
 
-        it('returns -1 for object with mixed field', () => {
-            // Null infers as 'mixed' type, which computeSize cannot predict
-            expect(c.computeSize({ data: null, id: 1 })).toBe(-1);
+        it('object with a first-sample-null field sizes exactly (nullable inference, not the -1 sentinel)', () => {
+            // 'data' first samples null, so it registers nullable (bitmap-tracked) instead
+            // of falling through computeSize's unlisted-type -1 arm.
+            let obj = { data: null, id: 1 };
+
+            expect(c.computeSize(obj)).toBe(c.encode(obj).length);
         });
 
         it('object with only fixed and string fields', () => {

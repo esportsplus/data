@@ -40,6 +40,7 @@ interface Schema {
     id: number;
     intFields: number[];
     nullableCount: number;
+    provisional?: boolean;
 }
 
 interface SbcHelpers {

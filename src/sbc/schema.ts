@@ -159,46 +159,152 @@ function inferType(value: unknown): string {
 }
 
 
-function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers, store: PersistentStore | null, sortedKeys?: string[]): Schema {
-    let keys = sortedKeys ?? Object.keys(obj).sort(),
-        types: string[] = new Array(keys.length);
+function fieldsMatch(existing: Schema, keys: string[], types: string[], nullable: boolean[]): boolean {
+    let ef = existing.fields;
 
-    for (let i = 0, n = keys.length; i < n; i++) {
-        types[i] = inferType(obj[keys[i]!]);
+    if (ef.length !== keys.length) {
+        return false;
     }
 
-    let hash = computeShapeHash(keys, types),
+    for (let i = 0, n = keys.length; i < n; i++) {
+        if (ef[i]!.name !== keys[i] || ef[i]!.rawType !== types[i] || ef[i]!.nullable !== nullable[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+function hashTypesOf(types: string[], nullable: boolean[]): string[] {
+    let out: string[] = new Array(types.length);
+
+    for (let i = 0, n = types.length; i < n; i++) {
+        out[i] = nullable[i] ? types[i]! + '?' : types[i]!;
+    }
+
+    return out;
+}
+
+
+// A null/undefined sample defers the field's base type instead of collapsing it to 'mixed'
+// forever: the field is registered nullable with type 'mixed' (provisional — decodable via
+// the generic tagged fallback, but never persisted to the PersistentStore) and, on the first
+// record supplying a non-null value for that key, upgrades in place to the resolved base type
+// under its OWN hash. A null observed for a field of an already-resolved non-nullable schema
+// upgrades the same way, so both arrival orders converge on one final hash.
+function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers, store: PersistentStore | null, sortedKeys?: string[]): Schema {
+    let keys = sortedKeys ?? Object.keys(obj).sort(),
+        n = keys.length,
+        isNull: boolean[] = new Array(n),
+        nullable: boolean[] = new Array(n),
+        types: string[] = new Array(n);
+
+    for (let i = 0; i < n; i++) {
+        let v = obj[keys[i]!];
+
+        if (v === null || v === undefined) {
+            isNull[i] = true;
+            nullable[i] = true;
+            types[i] = 'mixed';
+        }
+        else {
+            isNull[i] = false;
+            nullable[i] = false;
+            types[i] = inferType(v);
+        }
+    }
+
+    let hash = computeShapeHash(keys, hashTypesOf(types, nullable)),
         existing = registry.schemas.get(hash);
 
     if (existing) {
-        let ef = existing.fields,
-            match = ef.length === keys.length;
+        if (!fieldsMatch(existing, keys, types, nullable)) {
+            throw new Error('Codec2: schema hash collision — two distinct schemas share hash ' + hash);
+        }
 
-        if (match) {
-            for (let i = 0, n = keys.length; i < n; i++) {
-                if (ef[i]!.name !== keys[i] || ef[i]!.rawType !== types[i]) {
-                    match = false;
-                    break;
+        return existing;
+    }
+
+    // Cache miss — consult sibling shapes sharing this key set for a base type or nullable
+    // flag a prior record already established that this record alone can't see.
+    let nameHash = computeNameHash(keys),
+        siblings = registry.byNameHash.get(nameHash),
+        chosen: Schema | null = null;
+
+    if (siblings) {
+        for (let s = 0, sn = siblings.length; s < sn; s++) {
+            let candidate = siblings[s]!,
+                cf = candidate.fields,
+                compatible = cf.length === n;
+
+            if (compatible) {
+                for (let i = 0; i < n; i++) {
+                    let f = cf[i]!;
+
+                    if (f.name !== keys[i]) {
+                        compatible = false;
+                        break;
+                    }
+
+                    if (isNull[i]) {
+                        continue;
+                    }
+
+                    if (f.type !== types[i] && !(f.type === 'mixed' && f.nullable)) {
+                        compatible = false;
+                        break;
+                    }
                 }
+            }
+
+            if (compatible) {
+                chosen = candidate;
+                break;
+            }
+        }
+    }
+
+    if (chosen) {
+        let cf = chosen.fields;
+
+        for (let i = 0; i < n; i++) {
+            let f = cf[i]!;
+
+            if (isNull[i]) {
+                if (f.type !== 'mixed') {
+                    types[i] = f.type;
+                }
+            }
+            else if (f.nullable) {
+                nullable[i] = true;
             }
         }
 
-        if (match) {
+        hash = computeShapeHash(keys, hashTypesOf(types, nullable));
+        existing = registry.schemas.get(hash);
+
+        if (existing) {
+            if (!fieldsMatch(existing, keys, types, nullable)) {
+                throw new Error('Codec2: schema hash collision — two distinct schemas share hash ' + hash);
+            }
+
             return existing;
         }
-
-        throw new Error('Codec2: schema hash collision — two distinct schemas share hash ' + hash);
     }
 
-    let fields: FieldDef[] = new Array(keys.length),
+    let fields: FieldDef[] = new Array(n),
         fixedSize = 0,
+        nullableCount = 0,
         offset = 0;
 
-    for (let i = 0, n = keys.length; i < n; i++) {
+    for (let i = 0; i < n; i++) {
         let fs = FIELD_SIZES[types[i]!] ?? 0,
-            name = keys[i]!;
+            isNullable = nullable[i]!,
+            name = keys[i]!,
+            nullIdx = isNullable ? nullableCount++ : -1;
 
-        fields[i] = { fixedSize: fs, name, nullable: false, nullIndex: -1, offset, rawType: types[i]!, type: types[i]! };
+        fields[i] = { fixedSize: fs, name, nullable: isNullable, nullIndex: nullIdx, offset, rawType: types[i]!, type: types[i]! };
 
         if (fs > 0) {
             fixedSize += fs;
@@ -206,13 +312,19 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         }
     }
 
+    if (nullableCount > 16) {
+        throw new Error('Codec2: max 16 nullable fields per schema');
+    }
+
     let boolFields: number[] = [],
         compFixedSize = 0,
         float64Fields: number[] = [],
-        intFields: number[] = [];
+        intFields: number[] = [],
+        provisional = false;
 
-    for (let i = 0, n = fields.length; i < n; i++) {
-        let t = fields[i]!.type;
+    for (let i = 0, m = fields.length; i < m; i++) {
+        let f = fields[i]!,
+            t = f.type;
 
         if (t === 'boolean') {
             boolFields.push(i);
@@ -229,10 +341,13 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         else if (t === 'int8' || t === 'uint8') {
             compFixedSize += 1;
         }
+        else if (t === 'mixed' && f.nullable) {
+            provisional = true;
+        }
     }
 
     let schema: Schema = {
-        bitmapBytes: 0,
+        bitmapBytes: Math.ceil(nullableCount / 8),
         boolFields,
         compFixedSize,
         compressedDecodeFn: null,
@@ -246,21 +361,31 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         hash,
         id: registry.nextId++,
         intFields,
-        nullableCount: 0,
+        nullableCount,
+        provisional,
     };
 
     compileSchema(schema, helpers);
     registry.schemas.set(hash, schema);
 
-    let storedFields: FieldSpec[] = new Array(keys.length);
+    let siblingList = registry.byNameHash.get(nameHash);
 
-    for (let i = 0, n = keys.length; i < n; i++) {
-        storedFields[i] = { name: keys[i]!, type: types[i]! };
+    if (siblingList) {
+        siblingList.push(schema);
+    }
+    else {
+        registry.byNameHash.set(nameHash, [schema]);
+    }
+
+    let storedFields: FieldSpec[] = new Array(n);
+
+    for (let i = 0; i < n; i++) {
+        storedFields[i] = { name: keys[i]!, nullable: nullable[i], type: types[i]! };
     }
 
     cache.set(hash, { fields: storedFields, hash });
 
-    if (store) {
+    if (store && !provisional) {
         store.set(hash, { fields: storedFields, hash });
     }
 
