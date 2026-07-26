@@ -228,8 +228,6 @@ function generateBooleanValidation(
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let str = uid('str');
-
     return code`
         {
             ${prop.nullable ? `if (${source} === null) { ${target} = null; } else {` : ''}
@@ -243,17 +241,7 @@ function generateBooleanValidation(
                 ${target} = false;
             }
             else {
-                let ${str} = String(${source}).toLowerCase();
-
-                if (${str} === 'true' || ${str} === '1') {
-                    ${target} = true;
-                }
-                else if (${str} === 'false' || ${str} === '0') {
-                    ${target} = false;
-                }
-                else {
-                    ${error.generate('must be true or false', pathMode, context)}
-                }
+                ${error.generate('must be true or false', pathMode, context)}
             }
             ${prop.nullable ? `}` : ''}
         }

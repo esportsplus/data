@@ -181,6 +181,76 @@ describe('Primitive Type Validation', () => {
             expect(result.ok).toBe(false);
             expect(result.errors![0].message).toBe('must be true or false');
         });
+
+        it('rejects an array whose string form is "true"', () => {
+            let result = validate({ active: ['true'] });
+
+            expect(result.ok).toBe(false);
+            expect(result.errors![0].message).toBe('must be true or false');
+        });
+
+        it('rejects an object whose toString form is "true"', () => {
+            let result = validate({ active: { toString: () => 'true' } });
+
+            expect(result.ok).toBe(false);
+            expect(result.errors![0].message).toBe('must be true or false');
+        });
+
+        it('rejects a boxed Boolean object', () => {
+            let result = validate({ active: new Boolean(true) });
+
+            expect(result.ok).toBe(false);
+            expect(result.errors![0].message).toBe('must be true or false');
+        });
+
+        it('rejects uppercase "TRUE" (case-insensitivity intentionally dropped)', () => {
+            let result = validate({ active: 'TRUE' });
+
+            expect(result.ok).toBe(false);
+            expect(result.errors![0].message).toBe('must be true or false');
+        });
+    });
+
+    describe('nullable boolean', () => {
+        let validate = createValidator(`
+            type Flags = { active: boolean | null };
+            validator.build<Flags>();
+        `);
+
+        it('accepts null', () => {
+            let result = validate({ active: null });
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual({ active: null });
+        });
+
+        it('still accepts a plain boolean', () => {
+            let result = validate({ active: true });
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual({ active: true });
+        });
+    });
+
+    describe('boolean inside a string | boolean union', () => {
+        let validate = createValidator(`
+            type Flags = { active: string | boolean };
+            validator.build<Flags>();
+        `);
+
+        it('matches the boolean branch for true', () => {
+            let result = validate({ active: true });
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual({ active: true });
+        });
+
+        it('matches the string branch for "true"', () => {
+            let result = validate({ active: 'true' });
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual({ active: 'true' });
+        });
     });
 
     describe('bigint', () => {
