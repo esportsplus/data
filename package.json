@@ -9,8 +9,8 @@
         "@types/node": "^26.1.1",
         "msgpackr": "^2.0.4",
         "protobufjs": "^8.7.1",
-        "vite": "^8.1.5",
-        "vitest": "^4.1.10"
+        "vite": "^8.2.2",
+        "vitest": "^4.1.11"
     },
     "exports": {
         ".": {
