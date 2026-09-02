@@ -158,6 +158,17 @@ function inferType(value: unknown): string {
 }
 
 
+function numericTypeCanWidenTo(from: string, to: string): boolean {
+    switch (from) {
+        case 'int8': return to === 'int16' || to === 'int32';
+        case 'int16': return to === 'int32';
+        case 'uint8': return to === 'int16' || to === 'int32' || to === 'uint16' || to === 'uint32';
+        case 'uint16': return to === 'int32' || to === 'uint32';
+        default: return false;
+    }
+}
+
+
 function fieldsMatch(existing: Schema, keys: string[], types: string[], nullable: boolean[]): boolean {
     let ef = existing.fields;
 
@@ -250,7 +261,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
                         continue;
                     }
 
-                    if (f.type !== types[i] && !(f.type === 'mixed' && f.nullable)) {
+                    if (f.type !== types[i] && !(f.type === 'mixed' && f.nullable) && !numericTypeCanWidenTo(types[i]!, f.type)) {
                         compatible = false;
                         break;
                     }
@@ -275,8 +286,14 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
                     types[i] = f.type;
                 }
             }
-            else if (f.nullable) {
-                nullable[i] = true;
+            else {
+                if (numericTypeCanWidenTo(types[i]!, f.type)) {
+                    types[i] = f.type;
+                }
+
+                if (f.nullable) {
+                    nullable[i] = true;
+                }
             }
         }
 
