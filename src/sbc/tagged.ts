@@ -56,9 +56,18 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
         case 0: return null;
         case 1: return false;
         case 2: return true;
-        case 3: return buf[offset + 1]!;
+        case 3:
+            if (offset + 2 > end) {
+                throw new Error('Codec2: truncated uint8 at offset ' + offset);
+            }
+
+            return buf[offset + 1]!;
 
         case 4:
+            if (offset + 9 > end) {
+                throw new Error('Codec2: truncated float64 at offset ' + offset);
+            }
+
             return readF64.call(buf, offset + 1);
 
         case 5: {
@@ -163,12 +172,24 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
         }
 
         case 9:
+            if (offset + 9 > end) {
+                throw new Error('Codec2: truncated int64 at offset ' + offset);
+            }
+
             return readBI64.call(buf, offset + 1);
 
         case 10:
+            if (offset + 9 > end) {
+                throw new Error('Codec2: truncated date at offset ' + offset);
+            }
+
             return new Date(readF64.call(buf, offset + 1));
 
         case 11:
+            if (offset + 5 > end) {
+                throw new Error('Codec2: truncated int32 at offset ' + offset);
+            }
+
             return (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) | 0;
 
         case 12: {
@@ -255,6 +276,10 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
         }
 
         case 17: {
+            if (offset + 6 > end) {
+                throw new Error('Codec2: truncated typed array at offset ' + offset);
+            }
+
             let typeId = buf[offset + 1]!;
             let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
             let Ctor = TYPED_ARRAY_CTORS[typeId];
@@ -302,8 +327,16 @@ function decodeTagEnd(buf: Uint8Array, offset: number, end: number, depth: numbe
         case 0: case 1: case 2:
             return offset + 1;
         case 3:
+            if (offset + 2 > end) {
+                throw new Error('Codec2: truncated uint8 at offset ' + offset);
+            }
+
             return offset + 2;
         case 4: case 9: case 10:
+            if (offset + 9 > end) {
+                throw new Error('Codec2: truncated fixed-width value at offset ' + offset);
+            }
+
             return offset + 9;
         case 5: {
             let sLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
@@ -356,6 +389,10 @@ function decodeTagEnd(buf: Uint8Array, offset: number, end: number, depth: numbe
             return offset + 9 + dataLen;
         }
         case 11:
+            if (offset + 5 > end) {
+                throw new Error('Codec2: truncated int32 at offset ' + offset);
+            }
+
             return offset + 5;
         case 12: {
             if (offset + 6 > end) {
@@ -371,6 +408,10 @@ function decodeTagEnd(buf: Uint8Array, offset: number, end: number, depth: numbe
             return offset + 6 + packedLen;
         }
         case 17: {
+            if (offset + 6 > end) {
+                throw new Error('Codec2: truncated typed array at offset ' + offset);
+            }
+
             let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
 
             if (offset + 6 + bLen > end) {

@@ -1168,6 +1168,32 @@ describe('Codec2', () => {
     });
 
 
+    describe('fixed-width tag truncation guards', () => {
+        let cases: Array<[number, number[]]> = [
+            [3, [3]],
+            [4, [4]],
+            [9, [9]],
+            [10, [10]],
+            [11, [11, 1]],
+            [17, [17, 1]],
+        ];
+
+        for (let [tag, bytes] of cases) {
+            it('rejects a truncated tag ' + tag + ' directly and in an array', () => {
+                let inner = new Uint8Array(bytes),
+                    wrapped = new Uint8Array(5 + inner.length);
+
+                wrapped[0] = 7;
+                wrapped[1] = 1;
+                wrapped.set(inner, 5);
+
+                expect(() => c.decode(inner)).toThrow(/^Codec2:/);
+                expect(() => c.decode(wrapped)).toThrow(/^Codec2:/);
+            });
+        }
+    });
+
+
     describe('packed array truncation (F-TEST-3)', () => {
         it('truncated packed array (tag 12) payload throws via decodeTagEnd', () => {
             // [12][typeId 5 = uint8][u32 byteLen = 5] + only 2 payload bytes (need 5)

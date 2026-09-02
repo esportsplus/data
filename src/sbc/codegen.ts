@@ -466,7 +466,6 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         // Typed array: varint count + raw fixed-size elements
                         body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-                        body += `let a=new Array(l);`;
 
                         if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8') {
                             body += `if(p+l>b.length)throw new Error('Codec2: truncated array');`;
@@ -477,6 +476,11 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         else if (et.base === 'uint32' || et.base === 'int32') {
                             body += `if(p+l*4>b.length)throw new Error('Codec2: truncated array');`;
                         }
+                        else {
+                            body += `if(p+l*8>b.length)throw new Error('Codec2: truncated array');`;
+                        }
+
+                        body += `let a=new Array(l);`;
 
                         switch (et.base) {
                             case 'boolean':
@@ -749,7 +753,6 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         et.base === 'float64' || et.base === 'date' || et.base === 'int64') {
                         body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-                        body += `let a=new Array(l);`;
 
                         if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8') {
                             body += `if(p+l>b.length)throw new Error('Codec2: truncated array');`;
@@ -760,6 +763,11 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         else if (et.base === 'uint32' || et.base === 'int32') {
                             body += `if(p+l*4>b.length)throw new Error('Codec2: truncated array');`;
                         }
+                        else {
+                            body += `if(p+l*8>b.length)throw new Error('Codec2: truncated array');`;
+                        }
+
+                        body += `let a=new Array(l);`;
 
                         switch (et.base) {
                             case 'boolean':

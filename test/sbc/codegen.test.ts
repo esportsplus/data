@@ -131,6 +131,19 @@ describe('Codec2 compiled-decoder count limits', () => {
 
         expect(offenders).toEqual(['constants.ts']);
     });
+
+    it('rejects a hostile fixed-width count before allocating its result array', () => {
+        let payload = new Uint8Array([0x80, 0x80, 0x40]),
+            types = ['float64', 'date', 'int64'];
+
+        for (let type of types) {
+            let plain = buildSchema([{ name: 'f', type: 'array<' + type + '>' }]),
+                compressed = buildSchema([{ name: 'f', type: 'array<' + type + '>' }], true);
+
+            expect(() => plain.decodeFn!(payload, 0, 0)).toThrow('Codec2: truncated array');
+            expect(() => compressed.compressedDecodeFn!(payload, 0, 0)).toThrow('Codec2: truncated array');
+        }
+    });
 });
 
 
