@@ -203,12 +203,10 @@ let browser = {
 
 // Codegen driver — emits environment-specific code strings
 interface CodegenDriver {
-    byteLen(str: string): string;
     decoderBindArgs(): unknown[];
     decoderParams(): string;
     encoderBindArgs(): unknown[];
     encoderParams(): string;
-    preamble(bufVar: string): string;
     readF64(off: string): string;
     readStr(start: string, len: string): string;
     writeF64(off: string, val: string): string;
@@ -218,14 +216,12 @@ interface CodegenDriver {
 
 let codegenDriver: CodegenDriver = isNode
     ? {
-        byteLen: (str) => `_bl(${str})`,
         decoderBindArgs: () => [
             Buffer.prototype.readDoubleLE,
-            (Buffer.prototype as unknown as BufferInternal).utf8Slice,
             readStr,
             readBI64,
         ],
-        decoderParams: () => '_rF64,_rUtf8,_rStr,_rBI64',
+        decoderParams: () => '_rF64,_rStr,_rBI64',
         encoderBindArgs: () => [
             Buffer.prototype.writeDoubleLE,
             (Buffer.prototype as unknown as BufferInternal).utf8Write,
@@ -233,25 +229,20 @@ let codegenDriver: CodegenDriver = isNode
             writeBI64,
         ],
         encoderParams: () => '_wF64,_wUtf8,_bl,_wBI64',
-        preamble: () => '',
         readF64: (off) => `_rF64.call(b,${off})`,
         readStr: (start, len) => `_rStr(b,${start},${len})`,
         writeF64: (off, val) => `_wF64.call(b,${val},${off})`,
         writeStr: (str, off, len) => `_wUtf8.call(b,${str},${off},${len})`,
     }
     : {
-        byteLen: (str) => `_bl(${str})`,
         decoderBindArgs: () => {
-            let td = new TextDecoder();
-
             return [
                 (buf: Uint8Array, off: number) => getDv(buf).getFloat64(buf.byteOffset + off, true),
-                (buf: Uint8Array, start: number, end: number) => td.decode(buf.subarray(start, end)),
                 readStr,
                 readBI64,
             ];
         },
-        decoderParams: () => '_rF64,_rUtf8,_rStr,_rBI64',
+        decoderParams: () => '_rF64,_rStr,_rBI64',
         encoderBindArgs: () => {
             let te = new TextEncoder();
 
@@ -263,7 +254,6 @@ let codegenDriver: CodegenDriver = isNode
             ];
         },
         encoderParams: () => '_wF64,_wUtf8,_bl,_wBI64',
-        preamble: () => '',
         readF64: (off) => `_rF64(b,${off})`,
         readStr: (start, len) => `_rStr(b,${start},${len})`,
         writeF64: (off, val) => `_wF64(b,${val},${off})`,
@@ -479,6 +469,7 @@ export {
     writeUtf8,
     writeVarint,
     writeZigzag,
+    zigzagEncode,
 };
 
 export type { CodegenDriver };

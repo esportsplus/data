@@ -1,20 +1,13 @@
 // Tagged encoder/decoder — tag-based binary encoding for primitive + complex values
 // Extracted from codec() closure; state threaded via DecodeContext / EncodeContext
 
-import { MAX_ARRAY_COUNT } from './constants';
+import { INT64_MIN, INT64_OVERFLOW, MAX_ARRAY_COUNT } from './constants';
 import { byteLen, classifyPackedArray, readBI64, readF64, readStr, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 import { inferAndRegister } from './schema';
 
 import type { SchemaCache } from './cache';
 import type { Schema, SbcHelpers } from './codegen';
 import type { PersistentStore, SchemaRegistry } from './types';
-
-
-// int64 bounds — writeBigInt64LE throws RangeError above these on Node and silently
-// wraps modulo 2^64 in the browser (DataView.setBigInt64), so guard every int64 write.
-const INT64_MIN = -(2n ** 63n);
-
-const INT64_OVERFLOW = 2n ** 63n;
 
 
 type DecodeContext = {
@@ -24,7 +17,6 @@ type DecodeContext = {
     lastDecodeSchema: Schema | null;
     resolveSchema: (hash: number) => Schema | null;
     schemas: Map<number, Schema>;
-    setCache: (schema: Schema, decoded: object) => void;
 };
 
 type EncodeContext = {
@@ -426,6 +418,50 @@ function decodeTagEnd(buf: Uint8Array, offset: number, end: number, depth: numbe
 }
 
 
+function encodePlainObject(ectx: EncodeContext, obj: Record<string, unknown>, buf: Uint8Array, pos: number): number {
+    let schema = ectx.weakCache.get(obj) ?? null;
+
+    if (schema && !ectx.revalidateCached(obj, schema)) {
+        schema = null;
+    }
+
+    if (!schema) {
+        schema = ectx.matchSchema(obj);
+
+        if (!schema) {
+            schema = inferAndRegister(obj, ectx.registry, ectx.helpers, ectx.store, ectx.schemaCache, ectx.lastSortedKeys ?? undefined);
+        }
+
+        ectx.setCache(schema, obj);
+    }
+
+    let end: number,
+        h = schema.hash,
+        useCompressed = ectx.compress && schema.compressible && schema.compressedEncodeFn;
+
+    if (useCompressed) {
+        buf[pos] = 18;
+        end = schema.compressedEncodeFn!(obj, buf, pos + 9);
+    }
+    else {
+        buf[pos] = 8;
+        end = schema.encodeFn!(obj, buf, pos + 9);
+    }
+
+    let dataLen = end - pos - 9;
+
+    buf[pos + 1] = h & 0xFF;
+    buf[pos + 2] = (h >>> 8) & 0xFF;
+    buf[pos + 3] = (h >>> 16) & 0xFF;
+    buf[pos + 4] = (h >>> 24) & 0xFF;
+    buf[pos + 5] = dataLen & 0xFF;
+    buf[pos + 6] = (dataLen >>> 8) & 0xFF;
+    buf[pos + 7] = (dataLen >>> 16) & 0xFF;
+    buf[pos + 8] = (dataLen >>> 24) & 0xFF;
+
+    return end;
+}
+
 function unrepresentable(value: unknown): never {
     let ctor = value == null ? undefined : (value as { constructor?: { name?: string } }).constructor;
 
@@ -673,49 +709,7 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 unrepresentable(value);
             }
 
-            // Plain object → schema-compiled path
-            let obj = value as Record<string, unknown>,
-                schema = ectx.weakCache.get(obj) ?? null;
-
-            if (schema && !ectx.revalidateCached(obj, schema)) {
-                schema = null;
-            }
-
-            if (!schema) {
-                schema = ectx.matchSchema(obj);
-
-                if (!schema) {
-                    schema = inferAndRegister(obj, ectx.registry, ectx.helpers, ectx.store, ectx.schemaCache, ectx.lastSortedKeys ?? undefined);
-                }
-
-                ectx.setCache(schema, obj);
-            }
-
-            let end: number,
-                h = schema.hash,
-                useCompressed = ectx.compress && schema.compressible && schema.compressedEncodeFn;
-
-            if (useCompressed) {
-                buf[pos] = 18;
-                end = schema.compressedEncodeFn!(obj, buf, pos + 9);
-            }
-            else {
-                buf[pos] = 8;
-                end = schema.encodeFn!(obj, buf, pos + 9);
-            }
-
-            let dataLen = end - pos - 9;
-
-            buf[pos + 1] = h & 0xFF;
-            buf[pos + 2] = (h >>> 8) & 0xFF;
-            buf[pos + 3] = (h >>> 16) & 0xFF;
-            buf[pos + 4] = (h >>> 24) & 0xFF;
-            buf[pos + 5] = dataLen & 0xFF;
-            buf[pos + 6] = (dataLen >>> 8) & 0xFF;
-            buf[pos + 7] = (dataLen >>> 16) & 0xFF;
-            buf[pos + 8] = (dataLen >>> 24) & 0xFF;
-
-            return end;
+            return encodePlainObject(ectx, value as Record<string, unknown>, buf, pos);
         }
 
         case 'function':
@@ -728,5 +722,5 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
 }
 
 
-export { decodeSbc, decodeTagEnd, encodeSbc };
+export { decodeSbc, decodeTagEnd, encodePlainObject, encodeSbc, unrepresentable };
 export type { DecodeContext, EncodeContext };

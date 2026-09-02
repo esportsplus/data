@@ -168,7 +168,6 @@ function buildSchema(fields: Array<{ name: string; type: string }>, compressible
             name: f.name,
             nullable: false,
             nullIndex: -1,
-            offset: 0,
             rawType: f.type,
             refHash: parsed.hash,
             type: parsed.base,
@@ -178,18 +177,13 @@ function buildSchema(fields: Array<{ name: string; type: string }>, compressible
     let schema: Schema = {
         bitmapBytes: 0,
         boolFields: [],
-        compFixedSize: 0,
         compressedDecodeFn: null,
         compressedEncodeFn: null,
         compressible,
         decodeFn: null,
         encodeFn: null,
         fields: fieldDefs,
-        fixedSize: 0,
-        float64Fields: [],
         hash: 0,
-        id: 0,
-        intFields: [],
         nullableCount: 0,
     };
 

@@ -1,4 +1,6 @@
-const FIELD_NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+const INT64_MIN = -(2n ** 63n);
+
+const INT64_OVERFLOW = 2n ** 63n;
 
 const MAX_ARRAY_COUNT = 1048576; // 2^20 — guard against DoS from untrusted u32 counts
 
@@ -43,4 +45,4 @@ const KNOWN_TYPES: Record<string, number> = {
 };
 
 
-export { FIELD_NAME_RE, FIELD_SIZES, FNV_OFFSET, FNV_PRIME, KNOWN_TYPES, MAX_ARRAY_COUNT, MAX_SCHEMA_COUNT };
+export { FIELD_SIZES, FNV_OFFSET, FNV_PRIME, INT64_MIN, INT64_OVERFLOW, KNOWN_TYPES, MAX_ARRAY_COUNT, MAX_SCHEMA_COUNT };

@@ -63,12 +63,8 @@
     "scripts": {
         "build": "tsc -p tsconfig.build.json",
         "build:test": "pnpm build && pnpm test",
-        "-": "-",
         "prepare": "pnpm build",
         "prepublishOnly": "pnpm build",
-        "--": "--",
-        "agent:bench": "vitest bench",
-        "agent:test": "vitest run",
         "bench": "vitest bench",
         "test": "vitest run"
     },

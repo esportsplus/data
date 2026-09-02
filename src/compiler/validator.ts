@@ -1,18 +1,15 @@
 import { code, uid } from '@esportsplus/typescript/compiler';
+import { IDENTIFIER } from '../constants';
 import type { AnalyzedProperty, AnalyzedType } from './type-analyzer';
-import { GeneratorContext, PathMode, PathSegment } from './types';
-import error, { ERRORS_VARIABLE, emitString } from './error';
+import { GeneratorContext, PathMode } from './types';
+import error, { ERRORS_VARIABLE, emitString, resolvePath } from './error';
 import validators from './validators';
+import type { LiteralValue } from '../types';
 
 
 type ConfigValidator = {
     async: boolean;
     name: string;
-};
-
-type LiteralValue = {
-    type: 'boolean' | 'number' | 'string';
-    value: boolean | number | string;
 };
 
 type PropertyDefault = {
@@ -33,11 +30,6 @@ type TypeValidator = (prop: AnalyzedProperty, source: string, target: string, pa
 
 
 const CONFIG_VARIABLE = '_config';
-
-// Mirror of error.ts IDENTIFIER_SAFE_SOURCE: emitted into a recursive CALL's `_path` so a
-// runtime record key renders `.key` when identifier-safe and `["k.ey"]` when it is not. Held
-// here because error.ts's copy is unexported and outside this item's writable surface.
-const IDENTIFIER_SAFE_SOURCE = '/^[A-Za-z_$][A-Za-z0-9_$]*$/';
 
 // Every property name Object.prototype shadows-in (constructor, toString, __proto__, ...). A
 // read of one of these off a plain input returns the INHERITED value, so presence/default tests
@@ -86,8 +78,6 @@ const TYPE_VALIDATORS: Record<string, TypeValidator> = {
     tuple: generateTupleValidation,
     union: generateUnionValidation
 };
-
-const VALID_IDENTIFIER = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
 
 
 function buildLiteralChecks(source: string, literals: LiteralValue[]): string[] {
@@ -457,7 +447,7 @@ function generateObjectValidation(
             throw new Error(`Validator: recursion back-edge '${prop.ref}' reached with no generated function`);
         }
 
-        return `${target} = ${context.hasAsync ? 'await ' : ''}${fnName}(${source}, ${renderChildPath(pathMode.segments)}, ${recursion.depthArg});`;
+        return `${target} = ${context.hasAsync ? 'await ' : ''}${fnName}(${source}, ${resolvePath(pathMode)}, ${recursion.depthArg});`;
     }
 
     let container = uid('o'),
@@ -928,7 +918,7 @@ function generateUnionValidation(prop: AnalyzedProperty, source: string, target:
 }
 
 function outputAccess(prop: string, container: string): string {
-    if (VALID_IDENTIFIER.test(prop) && !RESERVED_WORDS.has(prop) && prop !== PROTO_KEY) {
+    if (IDENTIFIER.test(prop) && !RESERVED_WORDS.has(prop) && prop !== PROTO_KEY) {
         return `${container}.${prop}`;
     }
 
@@ -1149,67 +1139,11 @@ function propertyAccess(prop: string, varname: string): { expr: string; seed: st
         return { expr: local, seed: `let ${local} = Object.hasOwn(${varname}, ${key}) ? ${varname}[${key}] : undefined;` };
     }
 
-    if (VALID_IDENTIFIER.test(prop) && !RESERVED_WORDS.has(prop)) {
+    if (IDENTIFIER.test(prop) && !RESERVED_WORDS.has(prop)) {
         return { expr: `${varname}.${prop}`, seed: '' };
     }
 
     return { expr: `${varname}[${emitString(prop)}]`, seed: '' };
-}
-
-// The path VALUE a recursive CALL threads as its `_path` argument - the prefix a recursive
-// function stitches onto the paths it appends. A documented private MIRROR of error.ts
-// resolvePath (unexported, and error.ts is outside this item's writable surface): with the
-// relative bodies this item introduces, its record arm serves only genuine record/map-key
-// segments, where the id-safe wrap is correct.
-function renderChildPath(segments: PathSegment[]): string {
-    let fragments: string[] = [],
-        literal = '';
-
-    for (let i = 0, n = segments.length; i < n; i++) {
-        let first = fragments.length === 0 && literal === '',
-            segment = segments[i];
-
-        if (segment.kind === 'key') {
-            if (segment.name.includes('.')) {
-                literal += `[${emitString(segment.name)}]`;
-            }
-            else {
-                literal += first ? segment.name : `.${segment.name}`;
-            }
-
-            continue;
-        }
-
-        if (segment.kind === 'index') {
-            literal += '[';
-            fragments.push(emitString(literal));
-            fragments.push(segment.expr);
-            literal = ']';
-
-            continue;
-        }
-
-        if (literal !== '') {
-            fragments.push(emitString(literal));
-            literal = '';
-        }
-
-        fragments.push(
-            first
-                ? `(${IDENTIFIER_SAFE_SOURCE}.test(${segment.expr}) ? ${segment.expr} : '[' + JSON.stringify(${segment.expr}) + ']')`
-                : `(${IDENTIFIER_SAFE_SOURCE}.test(${segment.expr}) ? '.' + ${segment.expr} : '[' + JSON.stringify(${segment.expr}) + ']')`
-        );
-    }
-
-    if (literal !== '') {
-        fragments.push(emitString(literal));
-    }
-
-    if (fragments.length === 0) {
-        return emitString('');
-    }
-
-    return fragments.join(' + ');
 }
 
 // Validate `source` into the container slot named `prop.name`. A __proto__ slot cannot

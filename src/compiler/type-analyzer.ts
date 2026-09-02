@@ -1,4 +1,6 @@
 import { ts } from '@esportsplus/typescript';
+import { IDENTIFIER } from '../constants';
+import type { LiteralValue } from '../types';
 
 
 type BaseType = 'boolean' | 'number' | 'string' | 'unknown';
@@ -7,11 +9,6 @@ interface BrandedTypeInfo {
     base: BaseType;
     brand?: string;
 }
-
-type LiteralValue = {
-    type: 'boolean' | 'number' | 'string';
-    value: boolean | number | string;
-};
 
 type PropertyType =
     | 'any'
@@ -66,9 +63,6 @@ interface AnalyzedType {
     properties: AnalyzedProperty[];
     root: AnalyzedProperty;
 }
-
-
-const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
 
 let cache = new WeakMap<ts.TypeNode, AnalyzedType>(),

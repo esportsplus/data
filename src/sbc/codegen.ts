@@ -18,7 +18,6 @@ interface FieldDef {
     name: string;
     nullable: boolean;
     nullIndex: number;
-    offset: number;
     rawType: string;
     refHash?: number;
     type: string;
@@ -27,20 +26,14 @@ interface FieldDef {
 interface Schema {
     bitmapBytes: number;
     boolFields: number[];
-    compFixedSize: number;
     compressedDecodeFn: ((buf: Uint8Array, pos: number, depth: number) => unknown) | null;
     compressedEncodeFn: ((obj: unknown, buf: Uint8Array, pos: number) => number) | null;
     compressible: boolean;
     decodeFn: ((buf: Uint8Array, pos: number, depth: number) => unknown) | null;
     encodeFn: ((obj: unknown, buf: Uint8Array, pos: number) => number) | null;
     fields: FieldDef[];
-    fixedSize: number;
-    float64Fields: number[];
     hash: number;
-    id: number;
-    intFields: number[];
     nullableCount: number;
-    provisional?: boolean;
 }
 
 interface SbcHelpers {
@@ -145,7 +138,6 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
     let refHashes = collectRefHashes(fields, helpers.registry, 'encodeFn', '_re');
 
-    body += d.preamble('b');
     body += `let p=pos;\n`;
 
     if (schema.nullableCount > 0) {
@@ -376,7 +368,6 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
     let refHashes = collectRefHashes(fields, helpers.registry, 'decodeFn', '_rd');
 
-    body += d.preamble('b');
     body += `let p=pos;\n`;
 
     if (schema.nullableCount > 0) {
@@ -656,7 +647,6 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
 
     let refHashes = collectRefHashes(fields, helpers.registry, 'decodeFn', '_rd');
 
-    body += d.preamble('b');
     body += `let p=pos;\n`;
 
     // Declare field variables
@@ -915,7 +905,6 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
 
     let refHashes = collectRefHashes(fields, helpers.registry, 'encodeFn', '_re');
 
-    body += d.preamble('b');
     body += `let p=pos;\n`;
 
     // Null bitmap

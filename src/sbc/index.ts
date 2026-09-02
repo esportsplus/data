@@ -1,14 +1,15 @@
 // Codec2 — High-performance binary codec
 // JIT-compiled per-shape encode/decode, zero per-field branching at runtime
 
-import { FIELD_NAME_RE, FIELD_SIZES } from './constants';
+import { INT64_MIN, INT64_OVERFLOW, FIELD_SIZES } from './constants';
+import { IDENTIFIER } from '../constants';
 import { compileSchema } from './codegen';
 import { extractField } from './extract';
 import { allocBuf, allocUnsafe, copyBuf } from './platform';
 import { deserializeRegistry, serializeRegistry } from './registry';
 import { computeNameHash, computeShapeHash, inferAndRegister, inferType, parseFieldType } from './schema';
 import { computeSize } from './size';
-import { decodeSbc, decodeTagEnd, encodeSbc } from './tagged';
+import { decodeSbc, decodeTagEnd, encodePlainObject, encodeSbc } from './tagged';
 
 import type { CodecOptions, DecodeOptions, Encodable, EncodeOptions, FieldSpec, SchemaRegistry } from './types';
 import type { DecodeContext, EncodeContext } from './tagged';
@@ -18,12 +19,6 @@ import type { FieldDef, Schema, SbcHelpers } from './codegen';
 
 import cache from './cache';
 
-
-// int64 bounds — an out-of-range bigint throws RangeError on Node and silently wraps
-// modulo 2^64 in the browser, so the hinted validator rejects it up front.
-const INT64_MIN = -(2n ** 63n);
-
-const INT64_OVERFLOW = 2n ** 63n;
 
 // Ceiling for the encode-buffer grow-loop — overflow no longer throws (every write is a
 // guarded write-if-fits that overshoots the position past the buffer), so growth is driven
@@ -201,7 +196,6 @@ const codec = (options?: CodecOptions): {
         encodeBuf = allocBuf(65536),
         registry: SchemaRegistry = {
             byNameHash: new Map(),
-            nextId: 1,
             schemas: new Map(),
         };
 
@@ -256,47 +250,7 @@ const codec = (options?: CodecOptions): {
             throw new Error('Codec2: unencodable value (' + ((ctor as { name?: string }).name ?? typeof obj) + ')');
         }
 
-        let schema = weakCache.get(obj) ?? null;
-
-        if (schema && !revalidateCached(obj, schema)) {
-            schema = null;
-        }
-
-        if (!schema) {
-            schema = matchSchema(obj);
-
-            if (!schema) {
-                schema = inferAndRegister(obj, registry, helpers, store, schemaCache, lastSortedKeys ?? undefined);
-            }
-
-            setCache(schema, obj);
-        }
-
-        let end: number,
-            h = schema.hash,
-            useCompressed = compress && schema.compressible && schema.compressedEncodeFn;
-
-        if (useCompressed) {
-            buf[pos] = 18;
-            end = schema.compressedEncodeFn!(obj, buf, pos + 9);
-        }
-        else {
-            buf[pos] = 8;
-            end = schema.encodeFn!(obj, buf, pos + 9);
-        }
-
-        let dataLen = end - pos - 9;
-
-        buf[pos + 1] = h & 0xFF;
-        buf[pos + 2] = (h >>> 8) & 0xFF;
-        buf[pos + 3] = (h >>> 16) & 0xFF;
-        buf[pos + 4] = (h >>> 24) & 0xFF;
-        buf[pos + 5] = dataLen & 0xFF;
-        buf[pos + 6] = (dataLen >>> 8) & 0xFF;
-        buf[pos + 7] = (dataLen >>> 16) & 0xFF;
-        buf[pos + 8] = (dataLen >>> 24) & 0xFF;
-
-        return end;
+        return encodePlainObject(ectx, obj, buf, pos);
     }
 
     // Decode context — mutable slots for decode cache, shared with tagged.ts
@@ -307,7 +261,6 @@ const codec = (options?: CodecOptions): {
         lastDecodeSchema: null,
         resolveSchema: resolveSchemaFromCacheOrStore,
         schemas: registry.schemas,
-        setCache,
     };
 
     // Encode context — mutable slots for encode cache, shared with tagged.ts
@@ -529,7 +482,7 @@ const codec = (options?: CodecOptions): {
             len = lengthOrOptions;
         }
         else if (lengthOrOptions && lengthOrOptions.schema != null) {
-            let hintSchema = resolveSchemaForDecode(lengthOrOptions.schema),
+            let hintSchema = resolveSchemaHint(lengthOrOptions.schema),
                 tag = buffer[0];
 
             if ((tag === 8 || tag === 18) && len >= 9) {
@@ -629,25 +582,6 @@ const codec = (options?: CodecOptions): {
         throw new Error('Codec2: encode buffer growth exceeded');
     }
 
-    function tryEncodeSbc(value: unknown, pos: number): number {
-        for (let i = 0; i < 32; i++) {
-            let end = boundEncodeSbc(value, encodeBuf, pos);
-
-            if (end <= encodeBuf.length) {
-                return end;
-            }
-
-            if (end > MAX_ENCODE_BUF) {
-                throw new Error('Codec2: encode buffer growth exceeded');
-            }
-
-            encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
-        }
-
-        throw new Error('Codec2: encode buffer growth exceeded');
-    }
-
-
     function encodeObject(schema: Schema, obj: Record<string, unknown>, view: boolean, validate: boolean): Uint8Array {
         if (validate) {
             validateHinted(schema, obj);
@@ -704,7 +638,7 @@ const codec = (options?: CodecOptions): {
             view = viewOrOptions.view ?? false;
 
             if (viewOrOptions.schema != null) {
-                hintSchema = resolveSchemaForEncode(viewOrOptions.schema);
+                hintSchema = resolveSchemaHint(viewOrOptions.schema);
             }
         }
 
@@ -736,7 +670,7 @@ const codec = (options?: CodecOptions): {
         }
 
         // Generic path
-        let end = tryEncodeSbc(value, 0);
+        let end = tryEncode(boundEncodeSbc, value, 0);
 
         if (view) {
             return encodeBuf.subarray(0, end);
@@ -774,7 +708,7 @@ const codec = (options?: CodecOptions): {
         let sorted = fields.slice().sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 
         for (let i = 0, n = sorted.length; i < n; i++) {
-            if (!FIELD_NAME_RE.test(sorted[i]!.name)) {
+            if (!IDENTIFIER.test(sorted[i]!.name)) {
                 throw new Error('Codec2: invalid field name: ' + sorted[i]!.name);
             }
         }
@@ -801,9 +735,7 @@ const codec = (options?: CodecOptions): {
         }
 
         let fieldDefs: FieldDef[] = new Array(sorted.length),
-            fixedSize = 0,
-            nullableCount = 0,
-            offset = 0;
+            nullableCount = 0;
 
         for (let i = 0, n = sorted.length; i < n; i++) {
             let parsed = parseFieldType(types[i]!),
@@ -812,12 +744,7 @@ const codec = (options?: CodecOptions): {
                 isNullable = sorted[i]!.nullable === true,
                 nullIdx = isNullable ? nullableCount++ : -1;
 
-            fieldDefs[i] = { elementType: parsed.elementType, fixedSize: fs, name: keys[i]!, nullable: isNullable, nullIndex: nullIdx, offset, rawType: types[i]!, refHash: parsed.hash, type: baseType };
-
-            if (fs > 0) {
-                fixedSize += fs;
-                offset += fs;
-            }
+            fieldDefs[i] = { elementType: parsed.elementType, fixedSize: fs, name: keys[i]!, nullable: isNullable, nullIndex: nullIdx, rawType: types[i]!, refHash: parsed.hash, type: baseType };
         }
 
         if (nullableCount > 16) {
@@ -825,7 +752,6 @@ const codec = (options?: CodecOptions): {
         }
 
         let boolFields: number[] = [],
-            compFixedSize = 0,
             float64Fields: number[] = [],
             intFields: number[] = [];
 
@@ -841,31 +767,19 @@ const codec = (options?: CodecOptions): {
             else if (t === 'int16' || t === 'int32' || t === 'uint16' || t === 'uint32') {
                 intFields.push(i);
             }
-            else if (t === 'int64' || t === 'date') {
-                compFixedSize += 8;
-            }
-            else if (t === 'int8' || t === 'uint8') {
-                compFixedSize += 1;
-            }
         }
 
         let schema: Schema = {
             bitmapBytes: Math.ceil(nullableCount / 8),
             boolFields,
-            compFixedSize,
             compressedDecodeFn: null,
             compressedEncodeFn: null,
             compressible: (boolFields.length > 0 || float64Fields.length > 0 || intFields.length > 0) && boolFields.length <= 16,
             decodeFn: null,
             encodeFn: null,
             fields: fieldDefs,
-            fixedSize,
-            float64Fields,
             hash,
-            id: registry.nextId++,
-            intFields,
             nullableCount,
-            provisional: false,
         };
 
         compileSchema(schema, helpers);
@@ -895,24 +809,7 @@ const codec = (options?: CodecOptions): {
     }
 
 
-    function resolveSchemaForDecode(hint: number | FieldSpec[]): Schema {
-        if (typeof hint === 'number') {
-            let s = registry.schemas.get(hint);
-
-            if (!s) {
-                throw new Error('Codec2: unknown schema hash ' + hint);
-            }
-
-            return s;
-        }
-
-        let hash = defineSchema(hint);
-
-        return registry.schemas.get(hash)!;
-    }
-
-
-    function resolveSchemaForEncode(hint: number | FieldSpec[]): Schema {
+    function resolveSchemaHint(hint: number | FieldSpec[]): Schema {
         if (typeof hint === 'number') {
             let s = registry.schemas.get(hint);
 
@@ -945,7 +842,6 @@ const codec = (options?: CodecOptions): {
         registry,
         revalidateCached,
         schemaCache,
-        setCache,
         store,
         weakCache,
     };

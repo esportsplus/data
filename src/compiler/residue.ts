@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PACKAGE_NAME } from '../constants';
+import { escapeRegExp, PACKAGE_NAME } from '../constants';
 
 
 type ResidueFinding = {
@@ -22,14 +22,7 @@ type Position = {
 // real runtime factory (src/index.ts re-exports it from ./sbc/index) and must not be listed here.
 const COMPILE_TIME_SYMBOLS = new Set(['validator']);
 
-const ESCAPE_REGEX = /[.*+?^${}()|[\]\\]/g;
-
 const IMPORT_REGEX = /import\s+(?:\*\s+as\s+(\w+)|(\{[^}]*\}))\s+from\s+(['"])([^'"]+)\3/g;
-
-
-function escapeRegExp(value: string): string {
-    return value.replace(ESCAPE_REGEX, '\\$&');
-}
 
 function positionOf(text: string, index: number): Position {
     let column = 1,

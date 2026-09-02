@@ -34,9 +34,6 @@ type Survivor = {
 };
 
 
-const VALIDATOR_ALIASES = 'compiler/validator-aliases';
-
-
 function extractMessages(type: ts.Type, parts: string[], messages: Map<string, string>, checker: ts.Checker): void {
     if (type.isStringLiteralType()) {
         messages.set(parts.join('.'), type.value);
@@ -378,11 +375,6 @@ export default {
                 aliases.set(propertyName, localName);
             }
         }
-
-        // Some hosts (e.g. single-plugin test harnesses) omit the coordinator's `root` argument
-        // and the `shared` context arrives undefined; the alias map is a courtesy for downstream
-        // plugins, never required for this plugin's own detection, so the write is best-effort
-        ctx.shared?.set(VALIDATOR_ALIASES, aliases);
 
         let detected = new Map<ts.CallExpression, DetectedCall>(),
             namespaceName = namespaceLocalName(ctx.sourceFile),

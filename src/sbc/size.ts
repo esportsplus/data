@@ -5,7 +5,9 @@
 // compileCompressedEncoder); state is threaded via SizeContext.
 
 import { FIELD_SIZES } from './constants';
-import { byteLen, classifyPackedArray, TYPED_ARRAY_BPE, TYPED_ARRAY_IDS } from './platform';
+import { INT64_MIN, INT64_OVERFLOW } from './constants';
+import { byteLen, classifyPackedArray, TYPED_ARRAY_BPE, TYPED_ARRAY_IDS, zigzagEncode } from './platform';
+import { unrepresentable } from './tagged';
 import { inferAndRegister, varintSize } from './schema';
 
 import type { SchemaCache } from './cache';
@@ -20,7 +22,6 @@ type SizeContext = {
     registry: SchemaRegistry;
     revalidateCached(obj: Record<string, unknown>, schema: Schema): boolean;
     schemaCache: SchemaCache;
-    setCache(schema: Schema, obj: object): void;
     store: PersistentStore | null;
     weakCache: WeakMap<object, Schema>;
 };
@@ -28,10 +29,6 @@ type SizeContext = {
 
 // int64 bounds — literal mirror of src/sbc/tagged.ts:14-16 (unexported there); encodeSbc throws
 // on the same range so the bigint domain agrees.
-const INT64_MIN = -(2n ** 63n);
-
-const INT64_OVERFLOW = 2n ** 63n;
-
 
 function computeSize(ctx: SizeContext, value: unknown): number {
     if (value === null || value === undefined) {
@@ -141,7 +138,6 @@ function resolveObjSchema(ctx: SizeContext, obj: Record<string, unknown>): Schem
             schema = inferAndRegister(obj, ctx.registry, ctx.helpers, ctx.store, ctx.schemaCache);
         }
 
-        ctx.setCache(schema, obj);
     }
 
     return schema;
@@ -394,21 +390,6 @@ function sizeEncodeObj(ctx: SizeContext, v: unknown): number {
         schema = resolveObjSchema(ctx, obj);
 
     return 9 + sizeObjectPayload(ctx, schema, obj);
-}
-
-
-// Mirrors unrepresentable (src/sbc/tagged.ts:374-378) — unexported there, so a local mirror.
-function unrepresentable(value: unknown): never {
-    let ctor = value == null ? undefined : (value as { constructor?: { name?: string } }).constructor;
-
-    throw new Error('Codec2: unrepresentable value of type ' + (ctor?.name ?? typeof value));
-}
-
-
-// zigzagEncode-equivalent arithmetic — literal mirror of src/sbc/platform.ts:358-360 (that fn is
-// unexported); the compressed layout varint-sizes zigzag(v) for int16/int32 and adaptive float64.
-function zigzagEncode(n: number): number {
-    return ((n << 1) ^ (n >> 31)) >>> 0;
 }
 
 

@@ -293,9 +293,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
     }
 
     let fields: FieldDef[] = new Array(n),
-        fixedSize = 0,
-        nullableCount = 0,
-        offset = 0;
+        nullableCount = 0;
 
     for (let i = 0; i < n; i++) {
         let fs = FIELD_SIZES[types[i]!] ?? 0,
@@ -303,12 +301,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
             name = keys[i]!,
             nullIdx = isNullable ? nullableCount++ : -1;
 
-        fields[i] = { fixedSize: fs, name, nullable: isNullable, nullIndex: nullIdx, offset, rawType: types[i]!, type: types[i]! };
-
-        if (fs > 0) {
-            fixedSize += fs;
-            offset += fs;
-        }
+        fields[i] = { fixedSize: fs, name, nullable: isNullable, nullIndex: nullIdx, rawType: types[i]!, type: types[i]! };
     }
 
     if (nullableCount > 16) {
@@ -316,7 +309,6 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
     }
 
     let boolFields: number[] = [],
-        compFixedSize = 0,
         float64Fields: number[] = [],
         intFields: number[] = [],
         provisional = false;
@@ -334,12 +326,6 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         else if (t === 'int16' || t === 'int32' || t === 'uint16' || t === 'uint32') {
             intFields.push(i);
         }
-        else if (t === 'int64' || t === 'date') {
-            compFixedSize += 8;
-        }
-        else if (t === 'int8' || t === 'uint8') {
-            compFixedSize += 1;
-        }
         else if (t === 'mixed' && f.nullable) {
             provisional = true;
         }
@@ -348,20 +334,14 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
     let schema: Schema = {
         bitmapBytes: Math.ceil(nullableCount / 8),
         boolFields,
-        compFixedSize,
         compressedDecodeFn: null,
         compressedEncodeFn: null,
         compressible: (boolFields.length > 0 || float64Fields.length > 0 || intFields.length > 0) && boolFields.length <= 16,
         decodeFn: null,
         encodeFn: null,
         fields,
-        fixedSize,
-        float64Fields,
         hash,
-        id: registry.nextId++,
-        intFields,
         nullableCount,
-        provisional,
     };
 
     compileSchema(schema, helpers);
