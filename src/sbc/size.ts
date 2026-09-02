@@ -5,11 +5,14 @@
 // compileCompressedEncoder); state is threaded via SizeContext.
 
 import { FIELD_SIZES } from './constants';
-import { byteLen, classifyPackedArray, TYPED_ARRAY_BPE, TYPED_ARRAY_IDS } from './platform';
+import { INT64_MIN, INT64_OVERFLOW } from './constants';
+import { byteLen, classifyPackedArray, TYPED_ARRAY_BPE, TYPED_ARRAY_IDS, zigzagEncode } from './platform';
+import { unrepresentable } from './tagged';
 import { inferAndRegister, varintSize } from './schema';
 
-import type { PersistentStore, SchemaRegistry } from './types';
+import type { SchemaCache } from './cache';
 import type { FieldDef, Schema, SbcHelpers } from './codegen';
+import type { PersistentStore, SchemaRegistry } from './types';
 
 
 type SizeContext = {
@@ -17,7 +20,8 @@ type SizeContext = {
     helpers: SbcHelpers;
     matchSchema(obj: Record<string, unknown>): Schema | null;
     registry: SchemaRegistry;
-    setCache(schema: Schema, obj: object): void;
+    revalidateCached(obj: Record<string, unknown>, schema: Schema): boolean;
+    schemaCache: SchemaCache;
     store: PersistentStore | null;
     weakCache: WeakMap<object, Schema>;
 };
@@ -25,10 +29,6 @@ type SizeContext = {
 
 // int64 bounds — literal mirror of src/sbc/tagged.ts:14-16 (unexported there); encodeSbc throws
 // on the same range so the bigint domain agrees.
-const INT64_MIN = -(2n ** 63n);
-
-const INT64_OVERFLOW = 2n ** 63n;
-
 
 function computeSize(ctx: SizeContext, value: unknown): number {
     if (value === null || value === undefined) {
@@ -125,11 +125,19 @@ function computeSize(ctx: SizeContext, value: unknown): number {
 
 
 function resolveObjSchema(ctx: SizeContext, obj: Record<string, unknown>): Schema {
-    let schema = ctx.weakCache.get(obj) ?? ctx.matchSchema(obj) ?? null;
+    let schema = ctx.weakCache.get(obj) ?? null;
+
+    if (schema && !ctx.revalidateCached(obj, schema)) {
+        schema = null;
+    }
 
     if (!schema) {
-        schema = inferAndRegister(obj, ctx.registry, ctx.helpers, ctx.store);
-        ctx.setCache(schema, obj);
+        schema = ctx.matchSchema(obj);
+
+        if (!schema) {
+            schema = inferAndRegister(obj, ctx.registry, ctx.helpers, ctx.store, ctx.schemaCache);
+        }
+
     }
 
     return schema;
@@ -382,21 +390,6 @@ function sizeEncodeObj(ctx: SizeContext, v: unknown): number {
         schema = resolveObjSchema(ctx, obj);
 
     return 9 + sizeObjectPayload(ctx, schema, obj);
-}
-
-
-// Mirrors unrepresentable (src/sbc/tagged.ts:374-378) — unexported there, so a local mirror.
-function unrepresentable(value: unknown): never {
-    let ctor = value == null ? undefined : (value as { constructor?: { name?: string } }).constructor;
-
-    throw new Error('Codec2: unrepresentable value of type ' + (ctor?.name ?? typeof value));
-}
-
-
-// zigzagEncode-equivalent arithmetic — literal mirror of src/sbc/platform.ts:358-360 (that fn is
-// unexported); the compressed layout varint-sizes zigzag(v) for int16/int32 and adaptive float64.
-function zigzagEncode(n: number): number {
-    return ((n << 1) ^ (n >> 31)) >>> 0;
 }
 
 

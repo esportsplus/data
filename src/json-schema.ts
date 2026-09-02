@@ -1,11 +1,6 @@
 import type { AnalyzedProperty } from './compiler/type-analyzer';
-import type { JsonSchema } from './types';
-
-
-type LiteralValue = {
-    type: 'boolean' | 'number' | 'string';
-    value: boolean | number | string;
-};
+import { compare } from './constants';
+import type { JsonSchema, LiteralValue } from './types';
 
 // Draft 2020-12 keywords the shared JsonSchema shape does not carry: recursion refs
 // and the readonly annotation.
@@ -18,10 +13,6 @@ interface EmittedSchema extends JsonSchema {
 
 const DRAFT = 'https://json-schema.org/draft/2020-12/schema';
 
-
-function compare(a: string, b: string): number {
-    return a < b ? -1 : a > b ? 1 : 0;
-}
 
 function emitArray(prop: AnalyzedProperty): JsonSchema {
     return { items: prop.itemType ? emit(prop.itemType) : {}, type: 'array' };
@@ -279,7 +270,6 @@ const EMITTERS: Record<string, (prop: AnalyzedProperty) => JsonSchema> = {
     bigint: emitBigint,
     boolean: emitBoolean,
     date: emitDate,
-    enum: emitLiteral,
     intersection: emitIntersection,
     literal: emitLiteral,
     never: emitNever,
@@ -303,8 +293,8 @@ const generateJsonSchema = (root: AnalyzedProperty, constraints?: Map<string, Js
     if (root.defs !== undefined && root.defs.size > 0) {
         let defs: Record<string, JsonSchema> = {};
 
-        for (let [name, ir] of root.defs) {
-            defs[name] = emitObject(ir);
+        for (let [, ir] of root.defs) {
+            defs[ir.name] = emitObject(ir);
         }
 
         schema.$defs = defs;

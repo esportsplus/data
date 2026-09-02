@@ -2,7 +2,7 @@ import { ts } from '@esportsplus/typescript';
 import { describe, expect, it } from 'vitest';
 
 import { analyzeType } from '../../src/compiler/type-analyzer';
-import { extractConstraints } from '../../src/compiler/json-schema-constraints';
+import { extractConfig } from '../../src/compiler/json-schema-constraints';
 import type { AnalyzedProperty } from '../../src/compiler/type-analyzer';
 import type { JsonSchema } from '../../src/types';
 import { compile } from '../utils';
@@ -23,7 +23,7 @@ function build(validators: string, type: string, config: string): string {
 function extract(code: string): Map<string, JsonSchema> {
     let { checker, configArg, root, sourceFile } = setup(code);
 
-    return extractConstraints(configArg, root, sourceFile, checker);
+    return extractConfig(configArg, root, sourceFile, checker).constraints;
 }
 
 function setup(code: string): Setup {
@@ -418,7 +418,7 @@ describe('extractConstraints', () => {
 
         it('returns an empty map for a non-object root', () => {
             let { checker, configArg, sourceFile } = setup(build("import { min } from '@esportsplus/data/validators';", '{ age: number }', '{ age: min(0) }'));
-            let result = extractConstraints(configArg, { name: '', optional: false, type: 'string' }, sourceFile, checker);
+            let result = extractConfig(configArg, { name: '', optional: false, type: 'string' }, sourceFile, checker).constraints;
 
             expect(result.size).toBe(0);
         });

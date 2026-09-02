@@ -1,13 +1,9 @@
 import { code } from '@esportsplus/typescript/compiler';
+import { IDENTIFIER } from '../constants';
 import type { GeneratorContext, PathMode } from './types';
 
 
 const ERRORS_VARIABLE = '_errors';
-
-// Emitted into the generated code so a runtime record key renders `.key` when it is
-// identifier-safe and `["k.ey"]` when it is not. Evaluated on the ERROR path only.
-const IDENTIFIER_SAFE_SOURCE = '/^[A-Za-z_$][A-Za-z0-9_$]*$/';
-
 
 // Renders the segment list into a JS expression. Static runs accumulate into one string
 // literal so a fully-static path costs a single literal and no concatenation at runtime.
@@ -50,8 +46,8 @@ function resolvePath(mode: PathMode): string {
 
         fragments.push(
             first
-                ? `(${IDENTIFIER_SAFE_SOURCE}.test(${segment.expr}) ? ${segment.expr} : '[' + JSON.stringify(${segment.expr}) + ']')`
-                : `(${IDENTIFIER_SAFE_SOURCE}.test(${segment.expr}) ? '.' + ${segment.expr} : '[' + JSON.stringify(${segment.expr}) + ']')`
+                ? `(${IDENTIFIER}.test(${segment.expr}) ? ${segment.expr} : '[' + JSON.stringify(${segment.expr}) + ']')`
+                : `(${IDENTIFIER}.test(${segment.expr}) ? '.' + ${segment.expr} : '[' + JSON.stringify(${segment.expr}) + ']')`
         );
     }
 
@@ -111,4 +107,4 @@ const messageKey = (mode: PathMode): string | undefined => {
 
 
 export default { generate };
-export { emitString, messageKey, ERRORS_VARIABLE };
+export { emitString, messageKey, ERRORS_VARIABLE, resolvePath };

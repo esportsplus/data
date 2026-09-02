@@ -11,7 +11,7 @@ import type { Schema } from './codegen';
 
 type ExtractContext = {
     decode(buffer: Uint8Array): unknown;
-    decodeSbc(buf: Uint8Array, offset: number, len: number, depth: number): unknown;
+    decodeSbc(buf: Uint8Array, offset: number, end: number, depth: number): unknown;
     resolveSchema(hash: number): Schema | null;
     schemas: Map<number, Schema>;
 };
@@ -52,12 +52,11 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
     }
 
     let bm = schema.bitmapBytes,
+        bitmap = bm > 0 ? (bm === 1 ? buffer[9]! : (buffer[9]! | (buffer[10]! << 8))) : 0,
         target = fields[targetIdx]!;
 
     // Check nullable bitmap for target field
     if (target.nullable) {
-        let bitmap = bm === 1 ? buffer[9]! : (buffer[9]! | (buffer[10]! << 8));
-
         if (!(bitmap & (1 << target.nullIndex))) {
             return null;
         }
@@ -65,42 +64,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
 
     let dataStart = 9 + bm;
 
-    // O(1) path: target is fixed-size and all preceding fields are also fixed-size
-    if (target.fixedSize > 0) {
-        let allPrecedingFixed = true;
-
-        for (let i = 0; i < targetIdx; i++) {
-            if (fields[i]!.fixedSize === 0) {
-                allPrecedingFixed = false;
-                break;
-            }
-        }
-
-        if (allPrecedingFixed) {
-            let bitmap = bm > 0 ? (bm === 1 ? buffer[9]! : (buffer[9]! | (buffer[10]! << 8))) : 0,
-                pos = dataStart;
-
-            for (let i = 0; i < targetIdx; i++) {
-                let f = fields[i]!;
-
-                if (f.nullable && !(bitmap & (1 << f.nullIndex))) {
-                    continue;
-                }
-
-                pos += f.fixedSize;
-            }
-
-            if (pos + target.fixedSize > buffer.length) {
-                throw new Error('Codec2: buffer too short for field at offset ' + pos);
-            }
-
-            return readFixedField(buffer, pos, target.type);
-        }
-    }
-
-    // Variable-size scan
-    let bitmap = bm > 0 ? (bm === 1 ? buffer[9]! : (buffer[9]! | (buffer[10]! << 8))) : 0,
-        pos = dataStart;
+    let pos = dataStart;
 
     for (let i = 0; i < targetIdx; i++) {
         let f = fields[i]!;
@@ -164,7 +128,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
                     }
                     else {
                         for (let j = 0; j < count; j++) {
-                            pos = decodeTagEnd(buffer, pos, 0);
+                            pos = decodeTagEnd(buffer, pos, buffer.length, 0);
                         }
                     }
                 }
@@ -188,7 +152,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
                     }
                     else {
                         for (let j = 0; j < count; j++) {
-                            pos = decodeTagEnd(buffer, pos, 0);
+                            pos = decodeTagEnd(buffer, pos, buffer.length, 0);
                         }
                     }
                 }
@@ -219,13 +183,13 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
                     pos += 9 + dLen;
                 }
                 else {
-                    pos = decodeTagEnd(buffer, pos, 0);
+                    pos = decodeTagEnd(buffer, pos, buffer.length, 0);
                 }
 
                 break;
             }
             case 'typedarray': {
-                pos = decodeTagEnd(buffer, pos, 0);
+                pos = decodeTagEnd(buffer, pos, buffer.length, 0);
                 break;
             }
             default:
@@ -249,15 +213,13 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
         }
         case 'bytes': {
             readVarint(buffer, pos);
-            return buffer.slice(_vr.p, _vr.p + _vr.v);
+            return new Uint8Array(buffer.subarray(_vr.p, _vr.p + _vr.v));
         }
         case 'array': {
             // Both typed and generic arrays use schema-specific encoding;
             // fall back to full object decode to read the field correctly
-            let s = ctx.schemas.get(hash);
-
-            if (s && s.decodeFn) {
-                let obj = s.decodeFn(buffer, 9, 0) as Record<string, unknown>;
+            if (schema.decodeFn) {
+                let obj = schema.decodeFn(buffer, 9, 0) as Record<string, unknown>;
 
                 return obj[fieldName];
             }
@@ -266,14 +228,12 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
         }
         case 'mixed':
         case 'typedarray':
-            return ctx.decodeSbc(buffer, pos, decodeTagEnd(buffer, pos, 0) - pos, 0);
+            return ctx.decodeSbc(buffer, pos, decodeTagEnd(buffer, pos, buffer.length, 0), 0);
         case 'object': {
             if (target.refHash !== undefined) {
                 // Typed object — use full object decode
-                let s = ctx.schemas.get(hash);
-
-                if (s && s.decodeFn) {
-                    let obj = s.decodeFn(buffer, 9, 0) as Record<string, unknown>;
+                if (schema.decodeFn) {
+                    let obj = schema.decodeFn(buffer, 9, 0) as Record<string, unknown>;
 
                     return obj[fieldName];
                 }
@@ -287,9 +247,9 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
 
             let end = (buffer[pos] === 8 || buffer[pos] === 18)
                 ? pos + 9 + ((buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0)
-                : decodeTagEnd(buffer, pos, 0);
+                : decodeTagEnd(buffer, pos, buffer.length, 0);
 
-            return ctx.decodeSbc(buffer, pos, end - pos, 0);
+            return ctx.decodeSbc(buffer, pos, end, 0);
         }
         default:
             return undefined;

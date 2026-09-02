@@ -16,11 +16,9 @@ const FILE_NAME = ROOT + '/src/__compiler-fixture.ts';
 const TYPE_LINE = /^\s*(export\s+)?type\b/;
 
 
-// Fixtures are scripts, not modules, so a `type Node` declaration collides with the DOM global
-// instead of shadowing it. Narrowing `lib` to es2020 keeps the analyzer off the DOM type graph -
-// the same lib set this harness used before the TS7 migration.
+// Fixtures must be modules so local type aliases such as Node do not merge with DOM globals.
 function compile(code: string, fileName: string = FILE_NAME): ScratchResult {
-    return languageService.scratch(fileName, code, { lib: ['es2020'], strict: true, target: 'es2020' });
+    return languageService.scratch(fileName, code + '\nexport {};');
 }
 
 function mightNeedTransform(code: string): boolean {

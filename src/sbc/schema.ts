@@ -2,10 +2,9 @@ import { FIELD_SIZES, FNV_OFFSET, FNV_PRIME, KNOWN_TYPES } from './constants';
 import { compileSchema } from './codegen';
 import { readBI64, readF64 } from './platform';
 
+import type { SchemaCache } from './cache';
 import type { FieldDef, ParsedType, Schema, SbcHelpers } from './codegen';
 import type { FieldSpec, PersistentStore, SchemaRegistry } from './types';
-
-import cache from './cache';
 
 
 function computeShapeHash(keys: string[], types: string[]): number {
@@ -159,6 +158,17 @@ function inferType(value: unknown): string {
 }
 
 
+function numericTypeCanWidenTo(from: string, to: string): boolean {
+    switch (from) {
+        case 'int8': return to === 'int16' || to === 'int32';
+        case 'int16': return to === 'int32';
+        case 'uint8': return to === 'int16' || to === 'int32' || to === 'uint16' || to === 'uint32';
+        case 'uint16': return to === 'int32' || to === 'uint32';
+        default: return false;
+    }
+}
+
+
 function fieldsMatch(existing: Schema, keys: string[], types: string[], nullable: boolean[]): boolean {
     let ef = existing.fields;
 
@@ -193,7 +203,7 @@ function hashTypesOf(types: string[], nullable: boolean[]): string[] {
 // record supplying a non-null value for that key, upgrades in place to the resolved base type
 // under its OWN hash. A null observed for a field of an already-resolved non-nullable schema
 // upgrades the same way, so both arrival orders converge on one final hash.
-function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers, store: PersistentStore | null, sortedKeys?: string[]): Schema {
+function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers, store: PersistentStore | null, schemaCache: SchemaCache, sortedKeys?: string[]): Schema {
     let keys = sortedKeys ?? Object.keys(obj).sort(),
         n = keys.length,
         isNull: boolean[] = new Array(n),
@@ -251,7 +261,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
                         continue;
                     }
 
-                    if (f.type !== types[i] && !(f.type === 'mixed' && f.nullable)) {
+                    if (f.type !== types[i] && !(f.type === 'mixed' && f.nullable) && !numericTypeCanWidenTo(types[i]!, f.type)) {
                         compatible = false;
                         break;
                     }
@@ -276,8 +286,14 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
                     types[i] = f.type;
                 }
             }
-            else if (f.nullable) {
-                nullable[i] = true;
+            else {
+                if (numericTypeCanWidenTo(types[i]!, f.type)) {
+                    types[i] = f.type;
+                }
+
+                if (f.nullable) {
+                    nullable[i] = true;
+                }
             }
         }
 
@@ -294,9 +310,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
     }
 
     let fields: FieldDef[] = new Array(n),
-        fixedSize = 0,
-        nullableCount = 0,
-        offset = 0;
+        nullableCount = 0;
 
     for (let i = 0; i < n; i++) {
         let fs = FIELD_SIZES[types[i]!] ?? 0,
@@ -304,12 +318,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
             name = keys[i]!,
             nullIdx = isNullable ? nullableCount++ : -1;
 
-        fields[i] = { fixedSize: fs, name, nullable: isNullable, nullIndex: nullIdx, offset, rawType: types[i]!, type: types[i]! };
-
-        if (fs > 0) {
-            fixedSize += fs;
-            offset += fs;
-        }
+        fields[i] = { fixedSize: fs, name, nullable: isNullable, nullIndex: nullIdx, rawType: types[i]!, type: types[i]! };
     }
 
     if (nullableCount > 16) {
@@ -317,7 +326,6 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
     }
 
     let boolFields: number[] = [],
-        compFixedSize = 0,
         float64Fields: number[] = [],
         intFields: number[] = [],
         provisional = false;
@@ -335,12 +343,6 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         else if (t === 'int16' || t === 'int32' || t === 'uint16' || t === 'uint32') {
             intFields.push(i);
         }
-        else if (t === 'int64' || t === 'date') {
-            compFixedSize += 8;
-        }
-        else if (t === 'int8' || t === 'uint8') {
-            compFixedSize += 1;
-        }
         else if (t === 'mixed' && f.nullable) {
             provisional = true;
         }
@@ -349,20 +351,14 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
     let schema: Schema = {
         bitmapBytes: Math.ceil(nullableCount / 8),
         boolFields,
-        compFixedSize,
         compressedDecodeFn: null,
         compressedEncodeFn: null,
         compressible: (boolFields.length > 0 || float64Fields.length > 0 || intFields.length > 0) && boolFields.length <= 16,
         decodeFn: null,
         encodeFn: null,
         fields,
-        fixedSize,
-        float64Fields,
         hash,
-        id: registry.nextId++,
-        intFields,
         nullableCount,
-        provisional,
     };
 
     compileSchema(schema, helpers);
@@ -383,7 +379,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         storedFields[i] = { name: keys[i]!, nullable: nullable[i], type: types[i]! };
     }
 
-    cache.set(hash, { fields: storedFields, hash });
+    schemaCache.set(hash, { fields: storedFields, hash });
 
     if (store && !provisional) {
         store.set(hash, { fields: storedFields, hash });

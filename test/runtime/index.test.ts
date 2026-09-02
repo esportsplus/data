@@ -135,6 +135,18 @@ describe('runtime schema builder: composition parity', () => {
             type: 'object'
         });
     });
+
+    it('emits each property when they share a schema node', () => {
+        let value = schema.string();
+
+        expect(toJsonSchema(schema.object({ a: value, b: value }))).toEqual({
+            $schema: DRAFT,
+            additionalProperties: false,
+            properties: { a: { type: 'string' }, b: { type: 'string' } },
+            required: ['a', 'b'],
+            type: 'object'
+        });
+    });
 });
 
 describe('runtime schema builder: nullable behavior', () => {

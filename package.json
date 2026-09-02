@@ -5,7 +5,7 @@
     },
     "description": "Compile-time data validation utility",
     "devDependencies": {
-        "@esportsplus/typescript": "^0.29.5",
+        "@esportsplus/typescript": "^0.31.0",
         "@types/node": "^26.1.1",
         "msgpackr": "^2.0.4",
         "protobufjs": "^8.7.1",
@@ -63,12 +63,7 @@
     "scripts": {
         "build": "tsc -p tsconfig.build.json",
         "build:test": "pnpm build && pnpm test",
-        "-": "-",
-        "prepare": "pnpm build",
         "prepublishOnly": "pnpm build",
-        "--": "--",
-        "agent:bench": "vitest bench",
-        "agent:test": "vitest run",
         "bench": "vitest bench",
         "test": "vitest run"
     },

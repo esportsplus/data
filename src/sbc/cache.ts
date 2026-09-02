@@ -1,5 +1,6 @@
 // Codec2 — SIEVE-evicted bounded schema cache
 
+import type { FieldSpec } from './types';
 
 type CacheEntry = {
     hash: number;
@@ -7,12 +8,6 @@ type CacheEntry = {
     prev: CacheEntry | null;
     schema: StoredSchema;
     visited: boolean;
-};
-
-type FieldSpec = {
-    name: string;
-    nullable?: boolean;
-    type: string;
 };
 
 type SchemaCache = {

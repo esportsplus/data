@@ -2,18 +2,13 @@ import type { ReplacementIntent, TransformContext } from '@esportsplus/typescrip
 import { ts } from '@esportsplus/typescript';
 
 import { resolveBrandedType } from '../type-analyzer';
+import type { FieldSpec } from '../../sbc/types';
 
 
 type DetectedCall = {
     method: 'decode' | 'encode';
     node: ts.CallExpression;
     typeArg: ts.TypeNode;
-};
-
-type FieldSpec = {
-    name: string;
-    nullable?: boolean;
-    type: string;
 };
 
 

@@ -1,12 +1,8 @@
 import type { AnalyzedProperty } from '../compiler/type-analyzer';
+import { compare } from '../constants';
 import type { JsonSchema } from '../types';
+import type { LiteralValue } from '../types';
 import { generateJsonSchema } from '../json-schema';
-
-
-type LiteralValue = {
-    type: 'boolean' | 'number' | 'string';
-    value: boolean | number | string;
-};
 
 type NodeOptions = {
     default?: unknown;
@@ -55,10 +51,6 @@ function array(element: SchemaNode, options?: NodeOptions): SchemaNode {
 
 function boolean(options?: NodeOptions): SchemaNode {
     return apply({ name: '', optional: false, type: 'boolean' }, options);
-}
-
-function compare(a: string, b: string): number {
-    return a < b ? -1 : a > b ? 1 : 0;
 }
 
 function enumeration(values: string[], options?: NodeOptions): SchemaNode {
@@ -117,8 +109,7 @@ function object(properties: Record<string, SchemaNode>, options?: NodeOptions): 
             throw new Error(`Runtime: schema.object property '${name}' must be a schema node`);
         }
 
-        node.name = name;
-        result.push(node);
+        result.push({ ...node, name });
     }
 
     return apply({ name: '', optional: false, properties: result, type: 'object' }, options);

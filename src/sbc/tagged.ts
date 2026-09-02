@@ -1,19 +1,13 @@
 // Tagged encoder/decoder — tag-based binary encoding for primitive + complex values
 // Extracted from codec() closure; state threaded via DecodeContext / EncodeContext
 
-import { MAX_ARRAY_COUNT } from './constants';
+import { INT64_MIN, INT64_OVERFLOW, MAX_ARRAY_COUNT } from './constants';
 import { byteLen, classifyPackedArray, readBI64, readF64, readStr, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 import { inferAndRegister } from './schema';
 
-import type { PersistentStore, SchemaRegistry } from './types';
+import type { SchemaCache } from './cache';
 import type { Schema, SbcHelpers } from './codegen';
-
-
-// int64 bounds — writeBigInt64LE throws RangeError above these on Node and silently
-// wraps modulo 2^64 in the browser (DataView.setBigInt64), so guard every int64 write.
-const INT64_MIN = -(2n ** 63n);
-
-const INT64_OVERFLOW = 2n ** 63n;
+import type { PersistentStore, SchemaRegistry } from './types';
 
 
 type DecodeContext = {
@@ -23,7 +17,6 @@ type DecodeContext = {
     lastDecodeSchema: Schema | null;
     resolveSchema: (hash: number) => Schema | null;
     schemas: Map<number, Schema>;
-    setCache: (schema: Schema, decoded: object) => void;
 };
 
 type EncodeContext = {
@@ -33,18 +26,19 @@ type EncodeContext = {
     matchSchema: (obj: Record<string, unknown>) => Schema | null;
     registry: SchemaRegistry;
     revalidateCached: (obj: Record<string, unknown>, schema: Schema) => boolean;
+    schemaCache: SchemaCache;
     setCache: (schema: Schema, obj: object) => void;
     store: PersistentStore | null;
     weakCache: WeakMap<object, Schema>;
 };
 
 
-function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: number, depth: number): unknown {
+function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: number, depth: number): unknown {
     if (depth > 64) {
         throw new Error('Codec2: max decode depth exceeded');
     }
 
-    if (len === 0) {
+    if (offset >= end) {
         throw new Error('Codec2: empty buffer');
     }
 
@@ -54,15 +48,24 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
         case 0: return null;
         case 1: return false;
         case 2: return true;
-        case 3: return buf[offset + 1]!;
+        case 3:
+            if (offset + 2 > end) {
+                throw new Error('Codec2: truncated uint8 at offset ' + offset);
+            }
+
+            return buf[offset + 1]!;
 
         case 4:
+            if (offset + 9 > end) {
+                throw new Error('Codec2: truncated float64 at offset ' + offset);
+            }
+
             return readF64.call(buf, offset + 1);
 
         case 5: {
             let sLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
-            if (offset + 5 + sLen > buf.length) {
+            if (offset + 5 + sLen > end) {
                 throw new Error('Codec2: truncated string at offset ' + offset);
             }
 
@@ -72,7 +75,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
         case 6: {
             let bLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
-            if (offset + 5 + bLen > buf.length) {
+            if (offset + 5 + bLen > end) {
                 throw new Error('Codec2: truncated bytes at offset ' + offset);
             }
 
@@ -82,6 +85,10 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
         }
 
         case 7: {
+            if (offset + 5 > end) {
+                throw new Error('Codec2: truncated array at offset ' + offset);
+            }
+
             let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
             if (count > MAX_ARRAY_COUNT) {
@@ -92,23 +99,23 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
                 p = offset + 5;
 
             for (let i = 0; i < count; i++) {
-                let end = decodeTagEnd(buf, p, depth + 1);
+                let tagEnd = decodeTagEnd(buf, p, end, depth + 1);
 
-                arr[i] = decodeSbc(dctx, buf, p, end - p, depth + 1);
-                p = end;
+                arr[i] = decodeSbc(dctx, buf, p, tagEnd, depth + 1);
+                p = tagEnd;
             }
 
             return arr;
         }
 
         case 8: {
-            if (offset + 9 > buf.length) {
+            if (offset + 9 > end) {
                 throw new Error('Codec2: truncated tag-8/18 header');
             }
 
             let dataLen = (buf[offset + 5]! | (buf[offset + 6]! << 8) | (buf[offset + 7]! << 16) | (buf[offset + 8]! << 24)) >>> 0;
 
-            if (offset + 9 + dataLen > buf.length) {
+            if (offset + 9 + dataLen > end) {
                 throw new Error('Codec2: truncated tag-8 object at offset ' + offset);
             }
 
@@ -132,13 +139,13 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
         }
 
         case 18: {
-            if (offset + 9 > buf.length) {
+            if (offset + 9 > end) {
                 throw new Error('Codec2: truncated tag-8/18 header');
             }
 
             let dataLen = (buf[offset + 5]! | (buf[offset + 6]! << 8) | (buf[offset + 7]! << 16) | (buf[offset + 8]! << 24)) >>> 0;
 
-            if (offset + 9 + dataLen > buf.length) {
+            if (offset + 9 + dataLen > end) {
                 throw new Error('Codec2: truncated tag-18 object at offset ' + offset);
             }
 
@@ -157,18 +164,30 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
         }
 
         case 9:
+            if (offset + 9 > end) {
+                throw new Error('Codec2: truncated int64 at offset ' + offset);
+            }
+
             return readBI64.call(buf, offset + 1);
 
         case 10:
+            if (offset + 9 > end) {
+                throw new Error('Codec2: truncated date at offset ' + offset);
+            }
+
             return new Date(readF64.call(buf, offset + 1));
 
         case 11:
+            if (offset + 5 > end) {
+                throw new Error('Codec2: truncated int32 at offset ' + offset);
+            }
+
             return (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) | 0;
 
         case 12: {
             // packed number[] — [12][u8 typeId][u32 byteLen][raw LE elements], tag 17's
             // payload layout decoded into a plain Array (never a TypedArray) at the classified width.
-            if (offset + 6 > buf.length) {
+            if (offset + 6 > end) {
                 throw new Error('Codec2: truncated packed array at offset ' + offset);
             }
 
@@ -190,7 +209,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
                 throw new Error('Codec2: array count ' + count + ' exceeds limit');
             }
 
-            if (offset + 6 + packedLen > buf.length) {
+            if (offset + 6 + packedLen > end) {
                 throw new Error('Codec2: truncated packed array at offset ' + offset);
             }
 
@@ -249,6 +268,10 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
         }
 
         case 17: {
+            if (offset + 6 > end) {
+                throw new Error('Codec2: truncated typed array at offset ' + offset);
+            }
+
             let typeId = buf[offset + 1]!;
             let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
             let Ctor = TYPED_ARRAY_CTORS[typeId];
@@ -263,7 +286,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
                 throw new Error('Codec2: typed array byteLength not aligned');
             }
 
-            if (offset + 6 + bLen > buf.length) {
+            if (offset + 6 + bLen > end) {
                 throw new Error('Codec2: truncated typed array at offset ' + offset);
             }
 
@@ -281,9 +304,13 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, len: nu
 }
 
 
-function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
+function decodeTagEnd(buf: Uint8Array, offset: number, end: number, depth: number): number {
     if (depth > 64) {
         throw new Error('Codec2: max decode depth exceeded');
+    }
+
+    if (offset >= end) {
+        throw new Error('Codec2: empty buffer');
     }
 
     let tag = buf[offset]!;
@@ -292,13 +319,21 @@ function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
         case 0: case 1: case 2:
             return offset + 1;
         case 3:
+            if (offset + 2 > end) {
+                throw new Error('Codec2: truncated uint8 at offset ' + offset);
+            }
+
             return offset + 2;
         case 4: case 9: case 10:
+            if (offset + 9 > end) {
+                throw new Error('Codec2: truncated fixed-width value at offset ' + offset);
+            }
+
             return offset + 9;
         case 5: {
             let sLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
-            if (offset + 5 + sLen > buf.length) {
+            if (offset + 5 + sLen > end) {
                 throw new Error('Codec2: truncated string at offset ' + offset);
             }
 
@@ -307,13 +342,17 @@ function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
         case 6: {
             let bLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
-            if (offset + 5 + bLen > buf.length) {
+            if (offset + 5 + bLen > end) {
                 throw new Error('Codec2: truncated bytes at offset ' + offset);
             }
 
             return offset + 5 + bLen;
         }
         case 7: {
+            if (offset + 5 > end) {
+                throw new Error('Codec2: truncated array at offset ' + offset);
+            }
+
             let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
             if (count > MAX_ARRAY_COUNT) {
@@ -323,43 +362,51 @@ function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
             let p = offset + 5;
 
             for (let i = 0; i < count; i++) {
-                p = decodeTagEnd(buf, p, depth + 1);
+                p = decodeTagEnd(buf, p, end, depth + 1);
             }
 
             return p;
         }
         case 8: case 18: {
-            if (offset + 9 > buf.length) {
+            if (offset + 9 > end) {
                 throw new Error('Codec2: truncated tag-8/18 header');
             }
 
             let dataLen = (buf[offset + 5]! | (buf[offset + 6]! << 8) | (buf[offset + 7]! << 16) | (buf[offset + 8]! << 24)) >>> 0;
 
-            if (offset + 9 + dataLen > buf.length) {
+            if (offset + 9 + dataLen > end) {
                 throw new Error('Codec2: truncated tag-8/18 object at offset ' + offset);
             }
 
             return offset + 9 + dataLen;
         }
         case 11:
+            if (offset + 5 > end) {
+                throw new Error('Codec2: truncated int32 at offset ' + offset);
+            }
+
             return offset + 5;
         case 12: {
-            if (offset + 6 > buf.length) {
+            if (offset + 6 > end) {
                 throw new Error('Codec2: truncated packed array at offset ' + offset);
             }
 
             let packedLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
 
-            if (offset + 6 + packedLen > buf.length) {
+            if (offset + 6 + packedLen > end) {
                 throw new Error('Codec2: truncated packed array at offset ' + offset);
             }
 
             return offset + 6 + packedLen;
         }
         case 17: {
+            if (offset + 6 > end) {
+                throw new Error('Codec2: truncated typed array at offset ' + offset);
+            }
+
             let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
 
-            if (offset + 6 + bLen > buf.length) {
+            if (offset + 6 + bLen > end) {
                 throw new Error('Codec2: truncated typed array at offset ' + offset);
             }
 
@@ -370,6 +417,50 @@ function decodeTagEnd(buf: Uint8Array, offset: number, depth: number): number {
     }
 }
 
+
+function encodePlainObject(ectx: EncodeContext, obj: Record<string, unknown>, buf: Uint8Array, pos: number): number {
+    let schema = ectx.weakCache.get(obj) ?? null;
+
+    if (schema && !ectx.revalidateCached(obj, schema)) {
+        schema = null;
+    }
+
+    if (!schema) {
+        schema = ectx.matchSchema(obj);
+
+        if (!schema) {
+            schema = inferAndRegister(obj, ectx.registry, ectx.helpers, ectx.store, ectx.schemaCache, ectx.lastSortedKeys ?? undefined);
+        }
+
+        ectx.setCache(schema, obj);
+    }
+
+    let end: number,
+        h = schema.hash,
+        useCompressed = ectx.compress && schema.compressible && schema.compressedEncodeFn;
+
+    if (useCompressed) {
+        buf[pos] = 18;
+        end = schema.compressedEncodeFn!(obj, buf, pos + 9);
+    }
+    else {
+        buf[pos] = 8;
+        end = schema.encodeFn!(obj, buf, pos + 9);
+    }
+
+    let dataLen = end - pos - 9;
+
+    buf[pos + 1] = h & 0xFF;
+    buf[pos + 2] = (h >>> 8) & 0xFF;
+    buf[pos + 3] = (h >>> 16) & 0xFF;
+    buf[pos + 4] = (h >>> 24) & 0xFF;
+    buf[pos + 5] = dataLen & 0xFF;
+    buf[pos + 6] = (dataLen >>> 8) & 0xFF;
+    buf[pos + 7] = (dataLen >>> 16) & 0xFF;
+    buf[pos + 8] = (dataLen >>> 24) & 0xFF;
+
+    return end;
+}
 
 function unrepresentable(value: unknown): never {
     let ctor = value == null ? undefined : (value as { constructor?: { name?: string } }).constructor;
@@ -618,49 +709,7 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 unrepresentable(value);
             }
 
-            // Plain object → schema-compiled path
-            let obj = value as Record<string, unknown>,
-                schema = ectx.weakCache.get(obj) ?? null;
-
-            if (schema && !ectx.revalidateCached(obj, schema)) {
-                schema = null;
-            }
-
-            if (!schema) {
-                schema = ectx.matchSchema(obj);
-
-                if (!schema) {
-                    schema = inferAndRegister(obj, ectx.registry, ectx.helpers, ectx.store, ectx.lastSortedKeys ?? undefined);
-                }
-
-                ectx.setCache(schema, obj);
-            }
-
-            let end: number,
-                h = schema.hash,
-                useCompressed = ectx.compress && schema.compressible && schema.compressedEncodeFn;
-
-            if (useCompressed) {
-                buf[pos] = 18;
-                end = schema.compressedEncodeFn!(obj, buf, pos + 9);
-            }
-            else {
-                buf[pos] = 8;
-                end = schema.encodeFn!(obj, buf, pos + 9);
-            }
-
-            let dataLen = end - pos - 9;
-
-            buf[pos + 1] = h & 0xFF;
-            buf[pos + 2] = (h >>> 8) & 0xFF;
-            buf[pos + 3] = (h >>> 16) & 0xFF;
-            buf[pos + 4] = (h >>> 24) & 0xFF;
-            buf[pos + 5] = dataLen & 0xFF;
-            buf[pos + 6] = (dataLen >>> 8) & 0xFF;
-            buf[pos + 7] = (dataLen >>> 16) & 0xFF;
-            buf[pos + 8] = (dataLen >>> 24) & 0xFF;
-
-            return end;
+            return encodePlainObject(ectx, value as Record<string, unknown>, buf, pos);
         }
 
         case 'function':
@@ -673,5 +722,5 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
 }
 
 
-export { decodeSbc, decodeTagEnd, encodeSbc };
+export { decodeSbc, decodeTagEnd, encodePlainObject, encodeSbc, unrepresentable };
 export type { DecodeContext, EncodeContext };

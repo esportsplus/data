@@ -183,6 +183,15 @@ describe('CodecOptions.cache isolation', () => {
         expect(() => b.decode(buf)).toThrow('Codec2:');
     });
 
+    it('an isolated codec does not publish inferred shapes to the default cache', () => {
+        let a = codec({ cache: createCache() }),
+            b = codec();
+
+        let buf = a.encode({ id: 7, name: 'x' });
+
+        expect(() => b.decode(buf)).toThrow('Codec2:');
+    });
+
     it('an isolated codec consults its own store instead of the shared cache', () => {
         let store = makeCountingStore(),
             a = codec(),

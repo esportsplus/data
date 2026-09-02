@@ -917,6 +917,14 @@ describe('Codec2', () => {
             expect(decoded.own).toBe(42);
             expect(decoded.inherited).toBeUndefined();
         });
+
+        it('does not match a schema field inherited from Object.prototype', () => {
+            let c = codec();
+
+            c.defineSchema([{ name: 'toString', type: 'mixed' }]);
+
+            expect(c.decode(c.encode({ other: 1 }))).toEqual({ other: 1 });
+        });
     });
 
 
@@ -1100,6 +1108,12 @@ describe('Codec2', () => {
 
 
     describe('F-003 (run2): decode respects length parameter', () => {
+        it('throws when the declared length truncates an array', () => {
+            let encoded = c.encode(Array.from({ length: 11 }, (_, i) => i));
+
+            expect(() => c.decode(encoded, 3)).toThrow(/^Codec2:/);
+        });
+
         it('decode with length shorter than buffer ignores trailing bytes', () => {
             let data = { x: 42 },
                 encoded = c.encode(data),
@@ -1112,6 +1126,16 @@ describe('Codec2', () => {
             }
 
             expect(c.decode(extended, encoded.length)).toEqual(data);
+        });
+
+        it('decodes an oversized buffer with an exact object length', () => {
+            let data = { x: 42 },
+                encoded = c.encode(data),
+                oversized = new Uint8Array(encoded.length + 10);
+
+            oversized.set(encoded);
+
+            expect(c.decode(oversized, encoded.length)).toEqual(data);
         });
     });
 
@@ -1149,6 +1173,32 @@ describe('Codec2', () => {
 
             expect(() => c.decode(truncated)).toThrow('truncated');
         });
+    });
+
+
+    describe('fixed-width tag truncation guards', () => {
+        let cases: Array<[number, number[]]> = [
+            [3, [3]],
+            [4, [4]],
+            [9, [9]],
+            [10, [10]],
+            [11, [11, 1]],
+            [17, [17, 1]],
+        ];
+
+        for (let [tag, bytes] of cases) {
+            it('rejects a truncated tag ' + tag + ' directly and in an array', () => {
+                let inner = new Uint8Array(bytes),
+                    wrapped = new Uint8Array(5 + inner.length);
+
+                wrapped[0] = 7;
+                wrapped[1] = 1;
+                wrapped.set(inner, 5);
+
+                expect(() => c.decode(inner)).toThrow(/^Codec2:/);
+                expect(() => c.decode(wrapped)).toThrow(/^Codec2:/);
+            });
+        }
     });
 
 
@@ -1841,11 +1891,13 @@ describe('Codec2', () => {
                 { name: 'id', type: 'uint8' },
             ]);
 
-            let encoded = c.encode({ data: new Uint8Array([10, 20, 30]), id: 5 });
-            let extracted = c.extractField(encoded, 'data') as Uint8Array;
+            let source = c.encode({ data: new Uint8Array([10, 20, 30]), id: 5 });
+            let extracted = c.extractField(source, 'data') as Uint8Array;
 
             expect([...extracted]).toEqual([10, 20, 30]);
-            expect(c.extractField(encoded, 'id')).toBe(5);
+            expect(extracted.buffer).not.toBe(source.buffer);
+            expect(extracted.constructor).toBe(Uint8Array);
+            expect(c.extractField(source, 'id')).toBe(5);
         });
 
         it('extract from auto-inferred schema', () => {
@@ -4300,6 +4352,16 @@ describe('Codec2', () => {
             obj.b = 2;
 
             expect(c.decode(c.encode(obj))).toEqual({ a: 1, b: 2 });
+        });
+    });
+
+    describe('F-008: hinted typed arrays validate elements', () => {
+        it('rejects a non-uint8 array element', () => {
+            let c = codec();
+
+            expect(() => c.encode({ data: [1, 'invalid'] }, {
+                schema: [{ name: 'data', type: 'array<uint8>' }],
+            })).toThrow('Codec2:');
         });
     });
 

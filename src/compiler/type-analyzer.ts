@@ -1,4 +1,6 @@
 import { ts } from '@esportsplus/typescript';
+import { IDENTIFIER } from '../constants';
+import type { LiteralValue } from '../types';
 
 
 type BaseType = 'boolean' | 'number' | 'string' | 'unknown';
@@ -7,11 +9,6 @@ interface BrandedTypeInfo {
     base: BaseType;
     brand?: string;
 }
-
-type LiteralValue = {
-    type: 'boolean' | 'number' | 'string';
-    value: boolean | number | string;
-};
 
 type PropertyType =
     | 'any'
@@ -35,14 +32,15 @@ type PropertyType =
     | 'unknown';
 
 interface AnalyzeContext {
-    defs: Map<string, AnalyzedProperty>;
-    root: ts.Type;
-    visited: Set<ts.Type>;
+    defs: Map<TypeKey, AnalyzedProperty>;
+    depth: number;
+    root: TypeKey;
+    visited: Set<TypeKey>;
 }
 
 interface AnalyzedProperty {
     brand?: string;
-    defs?: Map<string, AnalyzedProperty>;
+    defs?: Map<TypeKey, AnalyzedProperty>;
     indexType?: AnalyzedProperty;
     intersectionTypes?: AnalyzedProperty[];
     itemType?: AnalyzedProperty;
@@ -68,7 +66,10 @@ interface AnalyzedType {
 }
 
 
-const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+type TypeKey = number | ts.Type;
+
+
+const MAX_ANALYSIS_DEPTH = 512;
 
 
 let cache = new WeakMap<ts.TypeNode, AnalyzedType>(),
@@ -111,22 +112,24 @@ function analyzeObjectShape(
     checker: ts.Checker,
     ctx: AnalyzeContext
 ): AnalyzedProperty {
-    if (ctx.visited.has(type)) {
-        if (type === ctx.root) {
+    let typeKey = keyOf(type);
+
+    if (ctx.visited.has(typeKey)) {
+        if (typeKey === ctx.root) {
             return { name, optional, ref: '#', type: 'object' };
         }
 
-        let key = defName(type);
+        let defKey = defName(type);
 
-        if (!ctx.defs.has(key)) {
-            ctx.defs.set(key, { name: key, optional: false, type: 'object' });
-            ctx.defs.set(key, defSchema(type, key, checker, ctx));
+        if (!ctx.defs.has(typeKey)) {
+            ctx.defs.set(typeKey, { name: defKey, optional: false, type: 'object' });
+            ctx.defs.set(typeKey, defSchema(type, defKey, checker, ctx));
         }
 
-        return { name, optional, ref: '#/$defs/' + key, type: 'object' };
+        return { name, optional, ref: '#/$defs/' + defKey, type: 'object' };
     }
 
-    ctx.visited.add(type);
+    ctx.visited.add(typeKey);
 
     let result: AnalyzedProperty = {
         name,
@@ -135,7 +138,7 @@ function analyzeObjectShape(
         type: 'object'
     };
 
-    ctx.visited.delete(type);
+    ctx.visited.delete(typeKey);
 
     return result;
 }
@@ -169,167 +172,178 @@ function analyzePropertyType(
     checker: ts.Checker,
     ctx: AnalyzeContext
 ): AnalyzedProperty {
-    if (type.flags & ts.TypeFlags.Any) {
-        return { name, optional, type: 'any' };
+    if (ctx.depth >= MAX_ANALYSIS_DEPTH) {
+        throw new Error('TypeAnalyzer: recursion depth exceeded');
     }
 
-    if (type.flags & ts.TypeFlags.Unknown) {
-        return { name, optional, type: 'unknown' };
-    }
+    ctx.depth++;
 
-    if (type.flags & ts.TypeFlags.Never) {
-        return { name, optional, type: 'never' };
-    }
+    try {
+        if (type.flags & ts.TypeFlags.Any) {
+            return { name, optional, type: 'any' };
+        }
 
-    if (type.flags & ts.TypeFlags.Null) {
-        return { name, optional, type: 'null' };
-    }
+        if (type.flags & ts.TypeFlags.Unknown) {
+            return { name, optional, type: 'unknown' };
+        }
 
-    if (type.isIntersectionType()) {
-        let branded = resolveBrandedType(type, checker);
+        if (type.flags & ts.TypeFlags.Never) {
+            return { name, optional, type: 'never' };
+        }
 
-        if (branded.brand) {
+        if (type.flags & ts.TypeFlags.Null) {
+            return { name, optional, type: 'null' };
+        }
+
+        if (type.isIntersectionType()) {
+            let branded = resolveBrandedType(type, checker);
+
+            if (branded.brand) {
+                return {
+                    brand: branded.brand,
+                    name,
+                    optional,
+                    type: branded.base === 'number' ? 'number' : branded.base as PropertyType
+                };
+            }
+
+            let constituents = type.getTypes();
+
+            // All-object intersection: the checker has already merged the members - emit
+            // one flat object schema (and a normal object validator). Otherwise reserve
+            // `allOf` of the constituent schemas.
+            if (isAllObject(constituents)) {
+                return analyzeObjectShape(type, name, optional, checker, ctx);
+            }
+
+            let intersectionTypes: AnalyzedProperty[] = [];
+
+            for (let i = 0, n = constituents.length; i < n; i++) {
+                intersectionTypes.push(analyzePropertyType(constituents[i], name, false, checker, ctx));
+            }
+
+            return { intersectionTypes, name, optional, type: 'intersection' };
+        }
+
+        if (type.isStringLiteralType()) {
             return {
-                brand: branded.brand,
+                literals: [{ type: 'string', value: type.value }],
                 name,
                 optional,
-                type: branded.base === 'number' ? 'number' : branded.base as PropertyType
+                type: 'literal'
             };
         }
 
-        let constituents = type.getTypes();
-
-        // All-object intersection: the checker has already merged the members - emit
-        // one flat object schema (and a normal object validator). Otherwise reserve
-        // `allOf` of the constituent schemas.
-        if (isAllObject(constituents)) {
-            return analyzeObjectShape(type, name, optional, checker, ctx);
+        if (type.isNumberLiteralType()) {
+            return {
+                literals: [{ type: 'number', value: type.value }],
+                name,
+                optional,
+                type: 'literal'
+            };
         }
 
-        let intersectionTypes: AnalyzedProperty[] = [];
-
-        for (let i = 0, n = constituents.length; i < n; i++) {
-            intersectionTypes.push(analyzePropertyType(constituents[i], name, false, checker, ctx));
+        if (type.isBooleanLiteralType()) {
+            return {
+                literals: [{ type: 'boolean', value: type.value }],
+                name,
+                optional,
+                type: 'literal'
+            };
         }
 
-        return { intersectionTypes, name, optional, type: 'intersection' };
-    }
-
-    if (type.isStringLiteralType()) {
-        return {
-            literals: [{ type: 'string', value: type.value }],
-            name,
-            optional,
-            type: 'literal'
-        };
-    }
-
-    if (type.isNumberLiteralType()) {
-        return {
-            literals: [{ type: 'number', value: type.value }],
-            name,
-            optional,
-            type: 'literal'
-        };
-    }
-
-    if (type.isBooleanLiteralType()) {
-        return {
-            literals: [{ type: 'boolean', value: type.value }],
-            name,
-            optional,
-            type: 'literal'
-        };
-    }
-
-    if (type.flags & ts.TypeFlags.Boolean) {
-        return { name, optional, type: 'boolean' };
-    }
-
-    if (type.flags & ts.TypeFlags.Number) {
-        return { name, optional, type: 'number' };
-    }
-
-    if (type.flags & ts.TypeFlags.String) {
-        return { name, optional, type: 'string' };
-    }
-
-    // Template literal types (e.g., `${string}@${string}`) - treat as branded string
-    if (type.flags & ts.TypeFlags.TemplateLiteral) {
-        return { brand: 'template', name, optional, type: 'string' };
-    }
-
-    if (type.flags & ts.TypeFlags.BigInt || type.flags & ts.TypeFlags.BigIntLiteral) {
-        return { name, optional, type: 'bigint' };
-    }
-
-    if (checker.isTupleType(type)) {
-        return analyzeTupleType(type as ts.TupleType, name, optional, checker, ctx);
-    }
-
-    if (checker.isArrayType(type)) {
-        return analyzeArrayType(type, name, optional, checker, ctx);
-    }
-
-    if (type.isUnionType()) {
-        return analyzeUnionType(type, name, optional, checker, ctx);
-    }
-
-    if (type.flags & ts.TypeFlags.Object) {
-        let symbol = type.getSymbol();
-
-        // Check for Date type
-        if (symbol && symbol.name === 'Date') {
-            return { name, optional, type: 'date' };
+        if (type.flags & ts.TypeFlags.Boolean) {
+            return { name, optional, type: 'boolean' };
         }
 
-        if (symbol) {
-            let symbolName = symbol.name;
+        if (type.flags & ts.TypeFlags.Number) {
+            return { name, optional, type: 'number' };
+        }
 
-            if (symbolName === 'Array') {
-                return analyzeArrayType(type, name, optional, checker, ctx);
+        if (type.flags & ts.TypeFlags.String) {
+            return { name, optional, type: 'string' };
+        }
+
+        // Template literal types (e.g., `${string}@${string}`) - treat as branded string
+        if (type.flags & ts.TypeFlags.TemplateLiteral) {
+            return { brand: 'template', name, optional, type: 'string' };
+        }
+
+        if (type.flags & ts.TypeFlags.BigInt || type.flags & ts.TypeFlags.BigIntLiteral) {
+            return { name, optional, type: 'bigint' };
+        }
+
+        if (checker.isTupleType(type)) {
+            return analyzeTupleType(type as ts.TupleType, name, optional, checker, ctx);
+        }
+
+        if (checker.isArrayType(type)) {
+            return analyzeArrayType(type, name, optional, checker, ctx);
+        }
+
+        if (type.isUnionType()) {
+            return analyzeUnionType(type, name, optional, checker, ctx);
+        }
+
+        if (type.flags & ts.TypeFlags.Object) {
+            let symbol = type.getSymbol();
+
+            // Check for Date type
+            if (symbol && symbol.name === 'Date') {
+                return { name, optional, type: 'date' };
             }
 
-            if (symbolName === 'Function') {
+            if (symbol) {
+                let symbolName = symbol.name;
+
+                if (symbolName === 'Array') {
+                    return analyzeArrayType(type, name, optional, checker, ctx);
+                }
+
+                if (symbolName === 'Function') {
+                    return { name, optional, type: 'function' };
+                }
+
+                if (symbolName === 'Map') {
+                    return analyzeMapType(type, name, optional, checker, ctx);
+                }
+
+                // Promise carries no runtime-checkable shape - accept any value
+                if (symbolName === 'Promise') {
+                    return { name, optional, type: 'unknown' };
+                }
+
+                if (symbolName === 'Set') {
+                    return analyzeSetType(type, name, optional, checker, ctx);
+                }
+            }
+
+            // Anonymous callable (e.g. `() => void` has symbol name `__type`)
+            if (checker.getSignaturesOfType(type, ts.SignatureKind.Call).length > 0) {
                 return { name, optional, type: 'function' };
             }
 
-            if (symbolName === 'Map') {
-                return analyzeMapType(type, name, optional, checker, ctx);
+            // Check for Record/index signature
+            let info = stringIndexInfo(type, checker);
+
+            // Only treat as record if it has no explicit properties (pure index signature)
+            if (info && checker.getPropertiesOfType(type).length === 0) {
+                return {
+                    indexType: analyzePropertyType(info.valueType, 'value', false, checker, ctx),
+                    name,
+                    optional,
+                    type: 'record'
+                };
             }
 
-            // Promise carries no runtime-checkable shape - accept any value
-            if (symbolName === 'Promise') {
-                return { name, optional, type: 'unknown' };
-            }
-
-            if (symbolName === 'Set') {
-                return analyzeSetType(type, name, optional, checker, ctx);
-            }
+            return analyzeObjectShape(type, name, optional, checker, ctx);
         }
 
-        // Anonymous callable (e.g. `() => void` has symbol name `__type`)
-        if (checker.getSignaturesOfType(type, ts.SignatureKind.Call).length > 0) {
-            return { name, optional, type: 'function' };
-        }
-
-        // Check for Record/index signature
-        let info = stringIndexInfo(type, checker);
-
-        // Only treat as record if it has no explicit properties (pure index signature)
-        if (info && checker.getPropertiesOfType(type).length === 0) {
-            return {
-                indexType: analyzePropertyType(info.valueType, 'value', false, checker, ctx),
-                name,
-                optional,
-                type: 'record'
-            };
-        }
-
-        return analyzeObjectShape(type, name, optional, checker, ctx);
+        return { name, optional, type: 'unknown' };
     }
-
-    return { name, optional, type: 'unknown' };
+    finally {
+        ctx.depth--;
+    }
 }
 
 function analyzeSetType(
@@ -448,7 +462,13 @@ function analyzeUnionType(
 
 function defName(type: ts.Type): string {
     let symbol = type.getAliasSymbol() ?? type.getSymbol(),
-        name = symbol?.name;
+        name = symbol?.name,
+        declaration = symbol?.declarations[0]?.resolve() as { name?: ts.Node } | undefined;
+
+    if ((name === undefined || name === '__type' || name === '__object' || !IDENTIFIER.test(name)) &&
+        declaration?.name !== undefined && ts.isIdentifier(declaration.name)) {
+        name = declaration.name.text;
+    }
 
     if (name === undefined || name === '__type' || name === '__object' || !IDENTIFIER.test(name)) {
         throw new Error('TypeAnalyzer: cannot emit a JSON Schema $ref for an unnamed recursive type');
@@ -463,8 +483,8 @@ function defName(type: ts.Type): string {
 function defSchema(type: ts.Type, key: string, checker: ts.Checker, ctx: AnalyzeContext): AnalyzedProperty {
     let saved = ctx.visited;
 
-    ctx.visited = new Set<ts.Type>();
-    ctx.visited.add(type);
+    ctx.visited = new Set<TypeKey>();
+    ctx.visited.add(keyOf(type));
 
     let properties = extractProperties(type, checker, ctx);
 
@@ -525,6 +545,10 @@ function isAllObject(constituents: readonly ts.Type[]): boolean {
     return true;
 }
 
+function keyOf(type: ts.Type): TypeKey {
+    return typeof type.id === 'number' ? type.id : type;
+}
+
 function isReadonly(node: ts.Node): boolean {
     if (ts.isPropertySignatureDeclaration(node) || ts.isPropertyDeclaration(node)) {
         return (node.modifierFlags & ts.ModifierFlags.Readonly) !== 0;
@@ -559,7 +583,7 @@ const analyzeRootType = (typeNode: ts.TypeNode, checker: ts.Checker): AnalyzedPr
         throw new Error('TypeAnalyzer: unable to resolve the type argument');
     }
 
-    let ctx: AnalyzeContext = { defs: new Map<string, AnalyzedProperty>(), root: type, visited: new Set<ts.Type>() },
+    let ctx: AnalyzeContext = { defs: new Map<TypeKey, AnalyzedProperty>(), depth: 0, root: keyOf(type), visited: new Set<TypeKey>() },
         result = analyzePropertyType(type, checker.typeToString(type), false, checker, ctx);
 
     if (ctx.defs.size > 0) {

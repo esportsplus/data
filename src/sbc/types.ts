@@ -80,7 +80,6 @@ type PersistentStore = {
 
 type SchemaRegistry = {
     byNameHash: Map<number, import('./codegen').Schema[]>;
-    nextId: number;
     schemas: Map<number, import('./codegen').Schema>;
 };
 

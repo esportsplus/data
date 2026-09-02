@@ -5,6 +5,10 @@ type float = Brand<number, 'float'>;
 
 type integer = Brand<number, 'integer'>;
 
+type LiteralValue = {
+    type: 'boolean' | 'number' | 'string';
+    value: boolean | number | string;
+};
 
 interface JsonSchema {
     $schema?: string;
@@ -110,6 +114,7 @@ export type {
     float,
     integer,
     JsonSchema,
+    LiteralValue,
     Schema,
     ValidationError,
     ValidationResult,

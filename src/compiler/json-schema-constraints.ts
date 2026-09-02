@@ -1,6 +1,6 @@
 import { ts } from '@esportsplus/typescript';
 import { imports } from '@esportsplus/typescript/compiler';
-import { PACKAGE_NAME } from '../constants';
+import { escapeRegExp, PACKAGE_NAME } from '../constants';
 import type { AnalyzedProperty } from './type-analyzer';
 import type { Annotations, JsonSchema } from '../types';
 
@@ -44,8 +44,6 @@ type UpperKey = 'exclusiveMaximum' | 'maxItems' | 'maxLength' | 'maximum';
 const ANNOTATION_METHODS = new Set(['default', 'describe', 'meta']);
 
 const NON_STATIC = Symbol('JsonSchemaConstraints: non-static default');
-
-const REGEX_ESCAPE = /[.*+?^${}()|[\]\\]/g;
 
 const VALIDATORS_MODULE = PACKAGE_NAME + '/validators';
 
@@ -96,10 +94,6 @@ function collectCalls(initializer: ts.Expression): ts.CallExpression[] | null {
 
     return null;
 }
-
-const esc = (value: string): string => {
-    return value.replace(REGEX_ESCAPE, '\\$&');
-};
 
 function extractArgs(args: ts.NodeArray<ts.Expression>): StaticArg[] | null {
     let result: StaticArg[] = [];
@@ -199,7 +193,7 @@ function mapBuiltin(name: string, variant: string | undefined, ir: IRType, args:
                 return null;
             }
 
-            return [{ kind: 'pattern', value: esc(value) + '$' }];
+            return [{ kind: 'pattern', value: escapeRegExp(value) + '$' }];
         }
         case 'includes': {
             let value = stringArg(args, 0);
@@ -208,7 +202,7 @@ function mapBuiltin(name: string, variant: string | undefined, ir: IRType, args:
                 return null;
             }
 
-            return [{ kind: 'pattern', value: esc(value) }];
+            return [{ kind: 'pattern', value: escapeRegExp(value) }];
         }
         case 'integer': {
             if (ir !== 'number') {
@@ -342,7 +336,7 @@ function mapBuiltin(name: string, variant: string | undefined, ir: IRType, args:
                 return null;
             }
 
-            return [{ kind: 'pattern', value: '^' + esc(value) }];
+            return [{ kind: 'pattern', value: '^' + escapeRegExp(value) }];
         }
         case 'url': {
             if (ir !== 'string') {
@@ -724,15 +718,6 @@ const extractConfig = (
     return { annotations, constraints };
 };
 
-const extractConstraints = (
-    configArg: ts.Expression,
-    root: AnalyzedProperty,
-    sourceFile: ts.SourceFile,
-    checker: ts.Checker
-): Map<string, JsonSchema> => {
-    return extractConfig(configArg, root, sourceFile, checker).constraints;
-};
-
 const peelAnnotations = (
     expr: ts.Expression,
     sourceFile: ts.SourceFile
@@ -784,4 +769,4 @@ const peelAnnotations = (
 };
 
 
-export { NON_STATIC, extractConfig, extractConstraints, peelAnnotations };
+export { NON_STATIC, extractConfig, peelAnnotations };
