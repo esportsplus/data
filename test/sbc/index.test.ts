@@ -4347,6 +4347,16 @@ describe('Codec2', () => {
         });
     });
 
+    describe('F-008: hinted typed arrays validate elements', () => {
+        it('rejects a non-uint8 array element', () => {
+            let c = codec();
+
+            expect(() => c.encode({ data: [1, 'invalid'] }, {
+                schema: [{ name: 'data', type: 'array<uint8>' }],
+            })).toThrow('Codec2:');
+        });
+    });
+
     describe('F-006: typed-schema matching range-checks fixed-width integers', () => {
         it('out-of-range integer for a uint8 field falls through to inference instead of truncating', () => {
             let c = codec();

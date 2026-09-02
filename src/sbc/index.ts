@@ -60,60 +60,39 @@ function validateHinted(schema: Schema, obj: Record<string, unknown>): void {
         }
 
         switch (f.type) {
-            case 'int64':
-                if (typeof value !== 'bigint') {
-                    throw new Error("Codec2: field '" + name + "' expected bigint, got " + typeof value);
+            case 'array':
+                if (f.elementType) {
+                    validateHintedArray(name, value, f.elementType);
                 }
-
-                if (value < INT64_MIN || value >= INT64_OVERFLOW) {
-                    throw new Error("Codec2: field '" + name + "' bigint out of int64 range");
-                }
-
                 break;
 
-            case 'boolean':
-                if (typeof value !== 'boolean') {
-                    throw new Error("Codec2: field '" + name + "' expected boolean, got " + typeof value);
-                }
+            default:
+                validateHintedPrimitive(name, value, f.type);
+        }
+    }
+}
 
-                break;
 
-            case 'bytes':
-                if (!(value instanceof Uint8Array)) {
-                    throw new Error("Codec2: field '" + name + "' expected bytes (Uint8Array)");
-                }
+function validateHintedArray(name: string, value: unknown, elementType: FieldDef['elementType']): void {
+    if (!Array.isArray(value)) {
+        throw new Error("Codec2: field '" + name + "' expected array, got " + typeof value);
+    }
 
-                break;
+    if (!elementType) {
+        return;
+    }
 
-            case 'date':
-                if (!(value instanceof Date)) {
-                    throw new Error("Codec2: field '" + name + "' expected date (Date)");
-                }
+    for (let i = 0, n = value.length; i < n; i++) {
+        let element = value[i],
+            elementName = name + '[' + i + ']';
 
-                break;
-
-            case 'float64':
-                if (typeof value !== 'number') {
-                    throw new Error("Codec2: field '" + name + "' expected float64, got " + typeof value);
-                }
-
-                break;
-
-            case 'int16':
-            case 'int32':
-            case 'int8':
-            case 'uint16':
-            case 'uint32':
-            case 'uint8':
-                validateHintedInt(name, value, f.type);
-                break;
-
-            case 'string':
-                if (typeof value !== 'string') {
-                    throw new Error("Codec2: field '" + name + "' expected string, got " + typeof value);
-                }
-
-                break;
+        if (elementType.hash !== undefined) {
+            if (element === null || typeof element !== 'object' || Array.isArray(element) || ((element as object).constructor !== Object && (element as object).constructor !== undefined)) {
+                throw new Error("Codec2: field '" + elementName + "' expected plain object");
+            }
+        }
+        else if (elementType.base !== 'mixed' && elementType.base !== 'typedarray') {
+            validateHintedPrimitive(elementName, element, elementType.base);
         }
     }
 }
@@ -128,6 +107,66 @@ function validateHintedInt(name: string, value: unknown, type: string): void {
 
     if (value < range[0] || value > range[1]) {
         throw new Error("Codec2: field '" + name + "' value " + value + ' out of ' + type + ' range [' + range[0] + ', ' + range[1] + ']');
+    }
+}
+
+
+function validateHintedPrimitive(name: string, value: unknown, type: string): void {
+    switch (type) {
+        case 'int64':
+            if (typeof value !== 'bigint') {
+                throw new Error("Codec2: field '" + name + "' expected bigint, got " + typeof value);
+            }
+
+            if (value < INT64_MIN || value >= INT64_OVERFLOW) {
+                throw new Error("Codec2: field '" + name + "' bigint out of int64 range");
+            }
+
+            break;
+
+        case 'boolean':
+            if (typeof value !== 'boolean') {
+                throw new Error("Codec2: field '" + name + "' expected boolean, got " + typeof value);
+            }
+
+            break;
+
+        case 'bytes':
+            if (!(value instanceof Uint8Array)) {
+                throw new Error("Codec2: field '" + name + "' expected bytes (Uint8Array)");
+            }
+
+            break;
+
+        case 'date':
+            if (!(value instanceof Date)) {
+                throw new Error("Codec2: field '" + name + "' expected date (Date)");
+            }
+
+            break;
+
+        case 'float64':
+            if (typeof value !== 'number') {
+                throw new Error("Codec2: field '" + name + "' expected float64, got " + typeof value);
+            }
+
+            break;
+
+        case 'int16':
+        case 'int32':
+        case 'int8':
+        case 'uint16':
+        case 'uint32':
+        case 'uint8':
+            validateHintedInt(name, value, type);
+            break;
+
+        case 'string':
+            if (typeof value !== 'string') {
+                throw new Error("Codec2: field '" + name + "' expected string, got " + typeof value);
+            }
+
+            break;
     }
 }
 
