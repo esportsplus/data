@@ -58,6 +58,16 @@ describe('Codec2 computeSize — exact encoded byte length', () => {
     // === CLAUSE 1 — the three measured divergences flip to exact equality ===
 
     describe('clause 1 — measured divergences become exact', () => {
+        it('revalidates a cached schema after a field changes type families', () => {
+            let instance = codec(),
+                value: { field: number | string } = { field: 1 };
+
+            instance.encode(value);
+            value.field = 'a string in a different type family';
+
+            expect(instance.computeSize(value)).toBe(instance.encode(value).length);
+        });
+
         it('compress {a:true,b:1.5}: computeSize equals encoded length (was 18 vs 19)', () => {
             let value = { a: true, b: 1.5 };
 

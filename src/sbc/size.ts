@@ -17,6 +17,7 @@ type SizeContext = {
     helpers: SbcHelpers;
     matchSchema(obj: Record<string, unknown>): Schema | null;
     registry: SchemaRegistry;
+    revalidateCached(obj: Record<string, unknown>, schema: Schema): boolean;
     setCache(schema: Schema, obj: object): void;
     store: PersistentStore | null;
     weakCache: WeakMap<object, Schema>;
@@ -125,10 +126,19 @@ function computeSize(ctx: SizeContext, value: unknown): number {
 
 
 function resolveObjSchema(ctx: SizeContext, obj: Record<string, unknown>): Schema {
-    let schema = ctx.weakCache.get(obj) ?? ctx.matchSchema(obj) ?? null;
+    let schema = ctx.weakCache.get(obj) ?? null;
+
+    if (schema && !ctx.revalidateCached(obj, schema)) {
+        schema = null;
+    }
 
     if (!schema) {
-        schema = inferAndRegister(obj, ctx.registry, ctx.helpers, ctx.store);
+        schema = ctx.matchSchema(obj);
+
+        if (!schema) {
+            schema = inferAndRegister(obj, ctx.registry, ctx.helpers, ctx.store);
+        }
+
         ctx.setCache(schema, obj);
     }
 

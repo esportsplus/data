@@ -903,6 +903,7 @@ const codec = (options?: CodecOptions): {
         helpers: null as unknown as SbcHelpers,
         matchSchema,
         registry,
+        revalidateCached,
         setCache,
         store,
         weakCache,
