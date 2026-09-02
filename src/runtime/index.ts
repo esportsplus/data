@@ -117,8 +117,7 @@ function object(properties: Record<string, SchemaNode>, options?: NodeOptions): 
             throw new Error(`Runtime: schema.object property '${name}' must be a schema node`);
         }
 
-        node.name = name;
-        result.push(node);
+        result.push({ ...node, name });
     }
 
     return apply({ name: '', optional: false, properties: result, type: 'object' }, options);
