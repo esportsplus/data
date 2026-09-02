@@ -3,6 +3,9 @@
 .idea
 build
 node_modules
+src/**/*.js
+test/**/*.js
+!test/compiler/fixtures/*.js
 
 # Claude batch state (ephemeral, session-specific)
 .claude/storage/batch-state*

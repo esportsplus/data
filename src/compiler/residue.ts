@@ -24,30 +24,43 @@ const COMPILE_TIME_SYMBOLS = new Set(['validator']);
 
 const IMPORT_REGEX = /import\s+(?:\*\s+as\s+(\w+)|(\{[^}]*\}))\s+from\s+(['"])([^'"]+)\3/g;
 
-function positionOf(text: string, index: number): Position {
-    let column = 1,
-        line = 1;
+function lineStartsOf(text: string): number[] {
+    let lineStarts = [0];
 
-    for (let i = 0; i < index; i++) {
+    for (let i = 0, n = text.length; i < n; i++) {
         if (text.charCodeAt(i) === 10) {
-            column = 1;
-            line++;
-        }
-        else {
-            column++;
+            lineStarts.push(i + 1);
         }
     }
 
-    return { column, line };
+    return lineStarts;
 }
 
-function scanCalls(file: string, text: string, regex: RegExp, findings: ResidueFinding[]): void {
+function positionOf(lineStarts: number[], index: number): Position {
+    let high = lineStarts.length,
+        low = 0;
+
+    while (low + 1 < high) {
+        let middle = (low + high) >>> 1;
+
+        if (lineStarts[middle] <= index) {
+            low = middle;
+        }
+        else {
+            high = middle;
+        }
+    }
+
+    return { column: index - lineStarts[low] + 1, line: low + 1 };
+}
+
+function scanCalls(file: string, text: string, lineStarts: number[], regex: RegExp, findings: ResidueFinding[]): void {
     let match: RegExpExecArray | null;
 
     regex.lastIndex = 0;
 
     while ((match = regex.exec(text)) !== null) {
-        let position = positionOf(text, match.index);
+        let position = positionOf(lineStarts, match.index);
 
         findings.push({
             column: position.column,
@@ -60,7 +73,8 @@ function scanCalls(file: string, text: string, regex: RegExp, findings: ResidueF
 }
 
 function scanFile(file: string, text: string, findings: ResidueFinding[]): void {
-    let match: RegExpExecArray | null,
+    let lineStarts = lineStartsOf(text),
+        match: RegExpExecArray | null,
         namespaces: string[] = [],
         validatorLocals: string[] = [];
 
@@ -97,7 +111,7 @@ function scanFile(file: string, text: string, findings: ResidueFinding[]): void 
         }
 
         if (bound) {
-            let position = positionOf(text, match.index);
+            let position = positionOf(lineStarts, match.index);
 
             findings.push({
                 column: position.column,
@@ -110,11 +124,11 @@ function scanFile(file: string, text: string, findings: ResidueFinding[]): void 
     }
 
     for (let i = 0, n = validatorLocals.length; i < n; i++) {
-        scanCalls(file, text, new RegExp(`(?<![\\w$])${escapeRegExp(validatorLocals[i])}\\.(build|set|toJsonSchema)\\s*\\(`, 'g'), findings);
+        scanCalls(file, text, lineStarts, new RegExp(`(?<![\\w$])${escapeRegExp(validatorLocals[i])}\\.(build|set|toJsonSchema)\\s*\\(`, 'g'), findings);
     }
 
     for (let i = 0, n = namespaces.length; i < n; i++) {
-        scanCalls(file, text, new RegExp(`(?<![\\w$])${escapeRegExp(namespaces[i])}\\.validator\\.(build|set|toJsonSchema)\\s*\\(`, 'g'), findings);
+        scanCalls(file, text, lineStarts, new RegExp(`(?<![\\w$])${escapeRegExp(namespaces[i])}\\.validator\\.(build|set|toJsonSchema)\\s*\\(`, 'g'), findings);
     }
 }
 
