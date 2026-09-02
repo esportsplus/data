@@ -1087,8 +1087,8 @@ function prepareRecursion(
     }
 
     if (defs !== undefined) {
-        for (let [key] of defs) {
-            names.set('#/$defs/' + key, uid('recurse_' + key));
+        for (let [, ir] of defs) {
+            names.set('#/$defs/' + ir.name, uid('recurse_' + ir.name));
         }
     }
 
@@ -1115,11 +1115,11 @@ function prepareRecursion(
     }
 
     if (defs !== undefined) {
-        for (let [key, ir] of defs) {
+        for (let [, ir] of defs) {
             // A $defs entry is always object-shaped with `properties` set (defSchema in the
             // type-analyzer), so read `ir.properties!`: a `?? []` fallback would silently
             // regenerate the original drop-to-{} bug for a hypothetically malformed def.
-            decls.push(generateRecursiveFunction(names.get('#/$defs/' + key)!, ir.properties!, undefined, undefined, context, bodyState));
+            decls.push(generateRecursiveFunction(names.get('#/$defs/' + ir.name)!, ir.properties!, undefined, undefined, context, bodyState));
         }
     }
 

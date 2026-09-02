@@ -293,8 +293,8 @@ const generateJsonSchema = (root: AnalyzedProperty, constraints?: Map<string, Js
     if (root.defs !== undefined && root.defs.size > 0) {
         let defs: Record<string, JsonSchema> = {};
 
-        for (let [name, ir] of root.defs) {
-            defs[name] = emitObject(ir);
+        for (let [, ir] of root.defs) {
+            defs[ir.name] = emitObject(ir);
         }
 
         schema.$defs = defs;
