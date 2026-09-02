@@ -52,12 +52,11 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
     }
 
     let bm = schema.bitmapBytes,
+        bitmap = bm > 0 ? (bm === 1 ? buffer[9]! : (buffer[9]! | (buffer[10]! << 8))) : 0,
         target = fields[targetIdx]!;
 
     // Check nullable bitmap for target field
     if (target.nullable) {
-        let bitmap = bm === 1 ? buffer[9]! : (buffer[9]! | (buffer[10]! << 8));
-
         if (!(bitmap & (1 << target.nullIndex))) {
             return null;
         }
@@ -65,42 +64,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
 
     let dataStart = 9 + bm;
 
-    // O(1) path: target is fixed-size and all preceding fields are also fixed-size
-    if (target.fixedSize > 0) {
-        let allPrecedingFixed = true;
-
-        for (let i = 0; i < targetIdx; i++) {
-            if (fields[i]!.fixedSize === 0) {
-                allPrecedingFixed = false;
-                break;
-            }
-        }
-
-        if (allPrecedingFixed) {
-            let bitmap = bm > 0 ? (bm === 1 ? buffer[9]! : (buffer[9]! | (buffer[10]! << 8))) : 0,
-                pos = dataStart;
-
-            for (let i = 0; i < targetIdx; i++) {
-                let f = fields[i]!;
-
-                if (f.nullable && !(bitmap & (1 << f.nullIndex))) {
-                    continue;
-                }
-
-                pos += f.fixedSize;
-            }
-
-            if (pos + target.fixedSize > buffer.length) {
-                throw new Error('Codec2: buffer too short for field at offset ' + pos);
-            }
-
-            return readFixedField(buffer, pos, target.type);
-        }
-    }
-
-    // Variable-size scan
-    let bitmap = bm > 0 ? (bm === 1 ? buffer[9]! : (buffer[9]! | (buffer[10]! << 8))) : 0,
-        pos = dataStart;
+    let pos = dataStart;
 
     for (let i = 0; i < targetIdx; i++) {
         let f = fields[i]!;
@@ -249,15 +213,13 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
         }
         case 'bytes': {
             readVarint(buffer, pos);
-            return buffer.slice(_vr.p, _vr.p + _vr.v);
+            return new Uint8Array(buffer.subarray(_vr.p, _vr.p + _vr.v));
         }
         case 'array': {
             // Both typed and generic arrays use schema-specific encoding;
             // fall back to full object decode to read the field correctly
-            let s = ctx.schemas.get(hash);
-
-            if (s && s.decodeFn) {
-                let obj = s.decodeFn(buffer, 9, 0) as Record<string, unknown>;
+            if (schema.decodeFn) {
+                let obj = schema.decodeFn(buffer, 9, 0) as Record<string, unknown>;
 
                 return obj[fieldName];
             }
@@ -270,10 +232,8 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
         case 'object': {
             if (target.refHash !== undefined) {
                 // Typed object — use full object decode
-                let s = ctx.schemas.get(hash);
-
-                if (s && s.decodeFn) {
-                    let obj = s.decodeFn(buffer, 9, 0) as Record<string, unknown>;
+                if (schema.decodeFn) {
+                    let obj = schema.decodeFn(buffer, 9, 0) as Record<string, unknown>;
 
                     return obj[fieldName];
                 }

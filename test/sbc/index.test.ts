@@ -1883,11 +1883,13 @@ describe('Codec2', () => {
                 { name: 'id', type: 'uint8' },
             ]);
 
-            let encoded = c.encode({ data: new Uint8Array([10, 20, 30]), id: 5 });
-            let extracted = c.extractField(encoded, 'data') as Uint8Array;
+            let source = c.encode({ data: new Uint8Array([10, 20, 30]), id: 5 });
+            let extracted = c.extractField(source, 'data') as Uint8Array;
 
             expect([...extracted]).toEqual([10, 20, 30]);
-            expect(c.extractField(encoded, 'id')).toBe(5);
+            expect(extracted.buffer).not.toBe(source.buffer);
+            expect(extracted.constructor).toBe(Uint8Array);
+            expect(c.extractField(source, 'id')).toBe(5);
         });
 
         it('extract from auto-inferred schema', () => {
