@@ -90,7 +90,13 @@ function browserReadStr(buf: Uint8Array, start: number, len: number): string {
 
 
 let readStr: (buf: Uint8Array, start: number, len: number) => string = isNode
-    ? (buf, start, len) => readShortStrAscii(buf, start, len) ?? (buf as BufferInternal).utf8Slice(start, start + len)
+    ? (buf, start, len) => {
+        let nodeBuf = buf as BufferInternal;
+
+        return readShortStrAscii(buf, start, len) ?? (typeof nodeBuf.utf8Slice === 'function'
+            ? nodeBuf.utf8Slice(start, start + len)
+            : textDecoder.decode(buf.subarray(start, start + len)));
+    }
     : browserReadStr;
 
 
