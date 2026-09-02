@@ -917,6 +917,14 @@ describe('Codec2', () => {
             expect(decoded.own).toBe(42);
             expect(decoded.inherited).toBeUndefined();
         });
+
+        it('does not match a schema field inherited from Object.prototype', () => {
+            let c = codec();
+
+            c.defineSchema([{ name: 'toString', type: 'mixed' }]);
+
+            expect(c.decode(c.encode({ other: 1 }))).toEqual({ other: 1 });
+        });
     });
 
 

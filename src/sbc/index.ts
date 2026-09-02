@@ -365,7 +365,7 @@ const codec = (options?: CodecOptions): {
             for (let j = 0; j < n; j++) {
                 let f = fields[j]!;
 
-                if (!(f.name in obj) || !matchesTypedField(obj[f.name], f)) {
+                if (!Object.hasOwn(obj, f.name) || !matchesTypedField(obj[f.name], f)) {
                     match = false;
                     break;
                 }
@@ -513,7 +513,7 @@ const codec = (options?: CodecOptions): {
         for (let j = 0; j < n; j++) {
             let f = fields[j]!;
 
-            if (!(f.name in obj) || !matchesTypedField(obj[f.name], f)) {
+            if (!Object.hasOwn(obj, f.name) || !matchesTypedField(obj[f.name], f)) {
                 return false;
             }
         }
