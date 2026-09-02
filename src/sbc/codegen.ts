@@ -44,8 +44,8 @@ interface Schema {
 }
 
 interface SbcHelpers {
-    decodeSbc: (buf: Uint8Array, offset: number, len: number, depth: number) => unknown;
-    decodeTagEnd: (buf: Uint8Array, offset: number, depth: number) => number;
+    decodeSbc: (buf: Uint8Array, offset: number, end: number, depth: number) => unknown;
+    decodeTagEnd: (buf: Uint8Array, offset: number, end: number, depth: number) => number;
     encodeObj: (obj: Record<string, unknown>, buf: Uint8Array, pos: number) => number;
     encodeSbc: (value: unknown, buf: Uint8Array, pos: number) => number;
     lookupSchema: (hash: number) => Schema | null;
@@ -123,7 +123,7 @@ function packedArrayEncodeSrc(val: string, d: CodegenDriver): string {
 function packedArrayDecodeSrc(assign: string, d: CodegenDriver): string {
     return `{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;`
         + `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`
-        + `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}}`
+        + `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}}`
         + `else{let _t=_f-1,_bp=_bpe[_t];if(_bp===undefined)throw new Error('Codec2: unknown packed array flag '+_f);`
         + `if(p+l*_bp>b.length)throw new Error('Codec2: truncated array');switch(_t){`
         + `case 1:for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}break;`
@@ -547,7 +547,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                             body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                             body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                             body += `let a=new Array(l);`;
-                            body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
+                            body += `for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}`;
                             body += `f${i}=a;}\n`;
                         }
                     }
@@ -556,7 +556,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
+                        body += `for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}`;
                         body += `f${i}=a;}\n`;
                     }
                 }
@@ -584,7 +584,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                         body += `_s=_reg.get(_h)||_lk(_h);`;
                         body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{throw new Error('Codec2: unknown schema hash '+_h);}`;
                         body += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
-                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
+                        body += `else{let e=_dte(b,p,b.length,_d+1);f${i}=_dec(b,p,e,_d+1);p=e;}}\n`;
                     }
                 }
                 else {
@@ -595,18 +595,18 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                     body += `_s=_reg.get(_h)||_lk(_h);`;
                     body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{throw new Error('Codec2: unknown schema hash '+_h);}`;
                     body += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
-                    body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}\n`;
+                    body += `else{let e=_dte(b,p,b.length,_d+1);f${i}=_dec(b,p,e,_d+1);p=e;}}\n`;
                 }
 
                 break;
 
             case 'typedarray':
-                body += `{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}\n`;
+                body += `{let e=_dte(b,p,b.length,_d+1);f${i}=_dec(b,p,e,_d+1);p=e;}\n`;
 
                 break;
 
             case 'mixed':
-                body += `{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}\n`;
+                body += `{let e=_dte(b,p,b.length,_d+1);f${i}=_dec(b,p,e,_d+1);p=e;}\n`;
 
                 break;
         }
@@ -826,7 +826,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                             body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                             body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                             body += `let a=new Array(l);`;
-                            body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
+                            body += `for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}`;
                             body += `f${i}=a;}${nc}\n`;
                         }
                     }
@@ -834,7 +834,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
                         body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
                         body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let e=_dte(b,p,_d+1);a[i]=_dec(b,p,e-p,_d+1);p=e;}`;
+                        body += `for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}`;
                         body += `f${i}=a;}${nc}\n`;
                     }
                 }
@@ -856,19 +856,19 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                         body += `${no}{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h)||_lk(_h);`;
                         body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{throw new Error('Codec2: unknown schema hash '+_h);}`;
                         body += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
-                        body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
+                        body += `else{let e=_dte(b,p,b.length,_d+1);f${i}=_dec(b,p,e,_d+1);p=e;}}${nc}\n`;
                     }
                 }
                 else {
                     body += `${no}{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h)||_lk(_h);`;
                     body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{throw new Error('Codec2: unknown schema hash '+_h);}`;
                     body += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
-                    body += `else{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}}${nc}\n`;
+                    body += `else{let e=_dte(b,p,b.length,_d+1);f${i}=_dec(b,p,e,_d+1);p=e;}}${nc}\n`;
                 }
 
                 break;
             case 'typedarray': case 'mixed':
-                body += `${no}{let e=_dte(b,p,_d+1);f${i}=_dec(b,p,e-p,_d+1);p=e;}${nc}\n`;
+                body += `${no}{let e=_dte(b,p,b.length,_d+1);f${i}=_dec(b,p,e,_d+1);p=e;}${nc}\n`;
                 break;
         }
     }

@@ -286,7 +286,7 @@ const codec = (options?: CodecOptions): {
     };
 
     // Bound wrappers — close over dctx/ectx so call sites keep the original 4/3-arg signature
-    let boundDecodeSbc = (buf: Uint8Array, offset: number, len: number, depth: number) => decodeSbc(dctx, buf, offset, len, depth),
+    let boundDecodeSbc = (buf: Uint8Array, offset: number, end: number, depth: number) => decodeSbc(dctx, buf, offset, end, depth),
         boundDecodeTagEnd = decodeTagEnd,
         boundEncodeSbc = (value: unknown, buf: Uint8Array, pos: number) => encodeSbc(ectx, value, buf, pos);
 
@@ -516,7 +516,7 @@ const codec = (options?: CodecOptions): {
         }
 
         // Fast path: tag 8 (uncompressed object) — hottest path, minimize overhead
-        if (buffer[0] === 8 && len >= 9 && len === buffer.length) {
+        if (buffer[0] === 8 && len >= 9 && len <= buffer.length) {
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
 
             if (9 + ((buffer[5]! | (buffer[6]! << 8) | (buffer[7]! << 16) | (buffer[8]! << 24)) >>> 0) > len) {
@@ -539,7 +539,7 @@ const codec = (options?: CodecOptions): {
         }
 
         // Tag 18 (compressed object) fast path
-        if (buffer[0] === 18 && len >= 9 && len === buffer.length) {
+        if (buffer[0] === 18 && len >= 9 && len <= buffer.length) {
             if (9 + ((buffer[5]! | (buffer[6]! << 8) | (buffer[7]! << 16) | (buffer[8]! << 24)) >>> 0) > len) {
                 throw new Error('Codec2: truncated tag-18 object');
             }
@@ -721,12 +721,12 @@ const codec = (options?: CodecOptions): {
 
             let dataLen = (buffer[offset + 5]! | (buffer[offset + 6]! << 8) | (buffer[offset + 7]! << 16) | (buffer[offset + 8]! << 24)) >>> 0;
 
-            return boundDecodeSbc(buffer, offset, 9 + dataLen, 0) as T;
+            return boundDecodeSbc(buffer, offset, offset + 9 + dataLen, 0) as T;
         }
 
-        let end = decodeTagEnd(buffer, offset, 0);
+        let end = decodeTagEnd(buffer, offset, buffer.length, 0);
 
-        return boundDecodeSbc(buffer, offset, end - offset, 0) as T;
+        return boundDecodeSbc(buffer, offset, end, 0) as T;
     }
 
 

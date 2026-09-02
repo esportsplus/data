@@ -11,7 +11,7 @@ import type { Schema } from './codegen';
 
 type ExtractContext = {
     decode(buffer: Uint8Array): unknown;
-    decodeSbc(buf: Uint8Array, offset: number, len: number, depth: number): unknown;
+    decodeSbc(buf: Uint8Array, offset: number, end: number, depth: number): unknown;
     resolveSchema(hash: number): Schema | null;
     schemas: Map<number, Schema>;
 };
@@ -164,7 +164,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
                     }
                     else {
                         for (let j = 0; j < count; j++) {
-                            pos = decodeTagEnd(buffer, pos, 0);
+                            pos = decodeTagEnd(buffer, pos, buffer.length, 0);
                         }
                     }
                 }
@@ -188,7 +188,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
                     }
                     else {
                         for (let j = 0; j < count; j++) {
-                            pos = decodeTagEnd(buffer, pos, 0);
+                            pos = decodeTagEnd(buffer, pos, buffer.length, 0);
                         }
                     }
                 }
@@ -219,13 +219,13 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
                     pos += 9 + dLen;
                 }
                 else {
-                    pos = decodeTagEnd(buffer, pos, 0);
+                    pos = decodeTagEnd(buffer, pos, buffer.length, 0);
                 }
 
                 break;
             }
             case 'typedarray': {
-                pos = decodeTagEnd(buffer, pos, 0);
+                pos = decodeTagEnd(buffer, pos, buffer.length, 0);
                 break;
             }
             default:
@@ -266,7 +266,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
         }
         case 'mixed':
         case 'typedarray':
-            return ctx.decodeSbc(buffer, pos, decodeTagEnd(buffer, pos, 0) - pos, 0);
+            return ctx.decodeSbc(buffer, pos, decodeTagEnd(buffer, pos, buffer.length, 0), 0);
         case 'object': {
             if (target.refHash !== undefined) {
                 // Typed object — use full object decode
@@ -287,9 +287,9 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
 
             let end = (buffer[pos] === 8 || buffer[pos] === 18)
                 ? pos + 9 + ((buffer[pos + 5]! | (buffer[pos + 6]! << 8) | (buffer[pos + 7]! << 16) | (buffer[pos + 8]! << 24)) >>> 0)
-                : decodeTagEnd(buffer, pos, 0);
+                : decodeTagEnd(buffer, pos, buffer.length, 0);
 
-            return ctx.decodeSbc(buffer, pos, end - pos, 0);
+            return ctx.decodeSbc(buffer, pos, end, 0);
         }
         default:
             return undefined;

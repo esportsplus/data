@@ -1100,6 +1100,12 @@ describe('Codec2', () => {
 
 
     describe('F-003 (run2): decode respects length parameter', () => {
+        it('throws when the declared length truncates an array', () => {
+            let encoded = c.encode(Array.from({ length: 11 }, (_, i) => i));
+
+            expect(() => c.decode(encoded, 3)).toThrow(/^Codec2:/);
+        });
+
         it('decode with length shorter than buffer ignores trailing bytes', () => {
             let data = { x: 42 },
                 encoded = c.encode(data),
@@ -1112,6 +1118,16 @@ describe('Codec2', () => {
             }
 
             expect(c.decode(extended, encoded.length)).toEqual(data);
+        });
+
+        it('decodes an oversized buffer with an exact object length', () => {
+            let data = { x: 42 },
+                encoded = c.encode(data),
+                oversized = new Uint8Array(encoded.length + 10);
+
+            oversized.set(encoded);
+
+            expect(c.decode(oversized, encoded.length)).toEqual(data);
         });
     });
 
