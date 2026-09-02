@@ -131,6 +131,300 @@ function packedArrayDecodeSrc(assign: string, d: CodegenDriver): string {
 }
 
 
+function emitArrayEncode(field: FieldDef, index: number, driver: CodegenDriver, refHashes: Map<number, string>): string {
+    void index;
+    void driver;
+    void refHashes;
+    let source = '',
+        value = `o[${JSON.stringify(field.name)}]`;
+                if (field.elementType) {
+                    let et = field.elementType;
+
+                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
+                        et.base === 'uint16' || et.base === 'int16' ||
+                        et.base === 'uint32' || et.base === 'int32' ||
+                        et.base === 'float64' || et.base === 'date' || et.base === 'int64') {
+                        // Typed array: varint count + raw fixed-size elements
+                        source += `{let a=${value},l=a.length;p=_wv(b,p,l);`;
+
+                        switch (et.base) {
+                            case 'boolean':
+                                source += `for(let i=0;i<l;i++){b[p]=a[i]?1:0;p+=1;}`;
+                                break;
+                            case 'uint8':
+                                source += `for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;`;
+                                break;
+                            case 'int8':
+                                source += `for(let i=0;i<l;i++){b[p]=a[i]&0xFF;p+=1;}`;
+                                break;
+                            case 'uint16':
+                                source += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
+                                break;
+                            case 'int16':
+                                source += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
+                                break;
+                            case 'uint32':
+                                source += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
+                                break;
+                            case 'int32':
+                                source += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
+                                break;
+                            case 'float64':
+                                source += `if(p+l*8<=b.length){for(let i=0;i<l;i++){${driver.writeF64('p', 'a[i]')};p+=8;}}else{p+=l*8;}`;
+                                break;
+                            case 'date':
+                                source += `if(p+l*8<=b.length){for(let i=0;i<l;i++){${driver.writeF64('p', 'a[i].getTime()')};p+=8;}}else{p+=l*8;}`;
+                                break;
+                            case 'int64':
+                                source += `if(p+l*8<=b.length){for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}}else{p+=l*8;}`;
+                                break;
+                        }
+
+                        source += `}\n`;
+                    }
+                    else if (et.base === 'string') {
+                        // Typed array<string>: varint count + per-element [varint len][utf8 data]
+                        source += `{let a=${value},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let s=a[i],sl=s.length;`;
+                        source += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${driver.writeStr('s', 'p', 'l')};}p+=l;}}`;
+                        source += `else{let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${driver.writeStr('s', 'p', 'l')};}p+=l;}}}\n`;
+                    }
+                    else if (et.base === 'bytes') {
+                        // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
+                        source += `{let a=${value},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let v=a[i],vl=v.length;p=_wv(b,p,vl);if(p+vl<=b.length){b.set(v,p);}p+=vl;}}\n`;
+                    }
+                    else if (et.base === 'object' && et.hash !== undefined) {
+                        // Typed array<object(hash)>: varint count + per-element [varint payloadLen][fields]
+                        let refParam = refHashes.get(et.hash);
+
+                        if (refParam) {
+                            source += `{let a=${value},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){`;
+                            source += `let _lp=p;p+=1;let _end=${refParam}(a[i],b,p);let _dl=_end-p;`;
+                            source += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
+                            source += `else{let _vl=_dl<16384?2:_dl<2097152?3:_dl<268435456?4:5;b.copyWithin(_lp+_vl,_lp+1,_end);_wv(b,_lp,_dl);p=_end+_vl-1;}}}\n`;
+                        }
+                        else {
+                            // Referenced schema not compiled — tagged fallback
+                            source += `{let a=${value},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
+                        }
+                    }
+                    else {
+                        // Container element types: varint count + tagged elements
+                        source += `{let a=${value},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
+                    }
+                }
+                else {
+                    // Generic path — one shared classifier picks the narrowest lossless width;
+                    // flag = typeId+1 (0 stays "generic tagged elements"), count u32, raw LE elements.
+                    source += packedArrayEncodeSrc(value, driver);
+                }
+
+    return source;
+}
+
+function emitObjectEncode(field: FieldDef, index: number, driver: CodegenDriver, refHashes: Map<number, string>): string {
+    void index;
+    void driver;
+    void refHashes;
+    let source = '',
+        value = `o[${JSON.stringify(field.name)}]`;
+                if (field.refHash !== undefined) {
+                    let rp = refHashes.get(field.refHash);
+
+                    if (rp) {
+                        // Reserve 1 byte for the varint payload-length prefix; for payloads
+                        // >=128 the varint needs extra bytes, so shift the payload right first.
+                        source += `{let _lp=p;p+=1;let _end=${rp}(${value},b,p);let _dl=_end-p;`;
+                        source += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
+                        source += `else{let _vl=_dl<16384?2:_dl<2097152?3:_dl<268435456?4:5;b.copyWithin(_lp+_vl,_lp+1,_end);_wv(b,_lp,_dl);p=_end+_vl-1;}}\n`;
+                    }
+                    else {
+                        source += `p=_encObj(${value},b,p);\n`;
+                    }
+                }
+                else {
+                    source += `p=_encObj(${value},b,p);\n`;
+                }
+
+    return source;
+}
+
+function emitStringEncode(field: FieldDef, index: number, driver: CodegenDriver, refHashes: Map<number, string>): string {
+    void index;
+    void driver;
+    void refHashes;
+    let source = '',
+        value = `o[${JSON.stringify(field.name)}]`;
+
+                // ASCII fast path — single-pass check+write for short strings (varint length)
+                source += `{let s=${value},sl=s.length;`;
+                source += `if(sl<17){`;
+                source += `b[p]=sl;p+=1;`;
+                source += `let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}`;
+                source += `if(_ok){p+=sl;}`;
+                source += `else{p-=1;let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${driver.writeStr('s', 'p', 'l')};}p+=l;}}`;
+                source += `else{let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${driver.writeStr('s', 'p', 'l')};}p+=l;}}\n`;
+    return source;
+}
+
+function emitArrayDecode(field: FieldDef, index: number, driver: CodegenDriver, refHashes: Map<number, string>): string {
+    void index;
+    void driver;
+    void refHashes;
+    let source = '';
+                if (field.elementType) {
+                    let et = field.elementType;
+
+                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
+                        et.base === 'uint16' || et.base === 'int16' ||
+                        et.base === 'uint32' || et.base === 'int32' ||
+                        et.base === 'float64' || et.base === 'date' || et.base === 'int64') {
+                        // Typed array: varint count + raw fixed-size elements
+                        source += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
+                        source += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
+
+                        if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8') {
+                            source += `if(p+l>b.length)throw new Error('Codec2: truncated array');`;
+                        }
+                        else if (et.base === 'uint16' || et.base === 'int16') {
+                            source += `if(p+l*2>b.length)throw new Error('Codec2: truncated array');`;
+                        }
+                        else if (et.base === 'uint32' || et.base === 'int32') {
+                            source += `if(p+l*4>b.length)throw new Error('Codec2: truncated array');`;
+                        }
+                        else {
+                            source += `if(p+l*8>b.length)throw new Error('Codec2: truncated array');`;
+                        }
+
+                        source += `let a=new Array(l);`;
+
+                        switch (et.base) {
+                            case 'boolean':
+                                source += `for(let i=0;i<l;i++){a[i]=!!b[p];p+=1;}`;
+                                break;
+                            case 'uint8':
+                                source += `for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;`;
+                                break;
+                            case 'int8':
+                                source += `for(let i=0;i<l;i++){a[i]=(b[p]<<24)>>24;p+=1;}`;
+                                break;
+                            case 'uint16':
+                                source += `for(let i=0;i<l;i++){a[i]=b[p]|(b[p+1]<<8);p+=2;}`;
+                                break;
+                            case 'int16':
+                                source += `for(let i=0;i<l;i++){a[i]=((b[p]|(b[p+1]<<8))<<16)>>16;p+=2;}`;
+                                break;
+                            case 'uint32':
+                                source += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;}`;
+                                break;
+                            case 'int32':
+                                source += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}`;
+                                break;
+                            case 'float64':
+                                source += `for(let i=0;i<l;i++){a[i]=${driver.readF64('p')};p+=8;}`;
+                                break;
+                            case 'date':
+                                source += `for(let i=0;i<l;i++){a[i]=new Date(${driver.readF64('p')});p+=8;}`;
+                                break;
+                            case 'int64':
+                                source += `for(let i=0;i<l;i++){a[i]=_rBI64.call(b,p);p+=8;}`;
+                                break;
+                        }
+
+                        source += `f${index}=a;}\n`;
+                    }
+                    else if (et.base === 'string') {
+                        // Typed array<string>: varint count + per-element [varint len][utf8 data]
+                        source += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
+                        source += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        source += `let a=new Array(l);`;
+                        source += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{_rv(b,p);sl=_vrs.v;p=_vrs.p;}if(p+sl>b.length)throw new Error('SBC: truncated');a[i]=${driver.readStr('p', 'sl')};p+=sl;}`;
+                        source += `f${index}=a;}\n`;
+                    }
+                    else if (et.base === 'bytes') {
+                        // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
+                        source += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
+                        source += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        source += `let a=new Array(l);`;
+                        source += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}if(p+bl>b.length)throw new Error('SBC: truncated');a[i]=new Uint8Array(b.subarray(p,p+bl));p+=bl;}`;
+                        source += `f${index}=a;}\n`;
+                    }
+                    else if (et.base === 'object' && et.hash !== undefined) {
+                        // Typed array<object(hash)>: varint count + per-element [varint payloadLen][fields]
+                        let refParam = refHashes.get(et.hash);
+
+                        if (refParam) {
+                            source += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
+                            source += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            source += `let a=new Array(l);`;
+                            source += `for(let i=0;i<l;i++){let _dl=b[p];`;
+                            source += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
+                            source += `else{_rv(b,p);_dl=_vrs.v;p=_vrs.p;if(p+_dl>b.length)throw new Error('SBC: truncated');a[i]=${refParam}(b,p,_d+1);p+=_dl;}}`;
+                            source += `f${index}=a;}\n`;
+                        }
+                        else {
+                            // Referenced schema not compiled — tagged fallback
+                            source += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
+                            source += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            source += `let a=new Array(l);`;
+                            source += `for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}`;
+                            source += `f${index}=a;}\n`;
+                        }
+                    }
+                    else {
+                        // Container element types: varint count + tagged elements
+                        source += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
+                        source += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        source += `let a=new Array(l);`;
+                        source += `for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}`;
+                        source += `f${index}=a;}\n`;
+                    }
+                }
+                else {
+                    source += packedArrayDecodeSrc(`f${index}`, driver) + `\n`;
+                }
+
+    return source;
+}
+
+function emitObjectDecode(field: FieldDef, index: number, driver: CodegenDriver, refHashes: Map<number, string>): string {
+    void index;
+    void driver;
+    void refHashes;
+    let source = '';
+                if (field.refHash !== undefined) {
+                    let rp = refHashes.get(field.refHash);
+
+                    if (rp) {
+                        // 1-byte length fast path; else a multi-byte varint prefixes the payload.
+                        source += `{let _dl=b[p];`;
+                        source += `if(_dl<128){p+=1;f${index}=${rp}(b,p,_d+1);p+=_dl;}`;
+                        source += `else{_rv(b,p);_dl=_vrs.v;p=_vrs.p;if(p+_dl>b.length)throw new Error('SBC: truncated');f${index}=${rp}(b,p,_d+1);p+=_dl;}}\n`;
+                    }
+                    else {
+                        // Ref schema not compiled — generic path
+                        source += `{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
+                        source += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                        source += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                        source += `_s=_reg.get(_h)||_lk(_h);`;
+                        source += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${index}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${index}=_s.decodeFn(b,p+9,_d+1);}else{f${index}=null;}}else{throw new Error('Codec2: unknown schema hash '+_h);}`;
+                        source += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
+                        source += `else{let e=_dte(b,p,b.length,_d+1);f${index}=_dec(b,p,e,_d+1);p=e;}}\n`;
+                    }
+                }
+                else {
+                    // Inline tag-8/18 fast path: skip decodeTagEnd + decodeSbc switch overhead
+                    source += `{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
+                    source += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
+                    source += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
+                    source += `_s=_reg.get(_h)||_lk(_h);`;
+                    source += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${index}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${index}=_s.decodeFn(b,p+9,_d+1);}else{f${index}=null;}}else{throw new Error('Codec2: unknown schema hash '+_h);}`;
+                    source += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
+                    source += `else{let e=_dte(b,p,b.length,_d+1);f${index}=_dec(b,p,e,_d+1);p=e;}}\n`;
+                }
+
+    return source;
+}
+
 function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): (obj: unknown, buf: Uint8Array, pos: number) => number {
     let body = `'use strict';\n`,
         fields = schema.fields,
@@ -196,15 +490,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'string':
-
-                // ASCII fast path — single-pass check+write for short strings (varint length)
-                body += `{let s=${val},sl=s.length;`;
-                body += `if(sl<17){`;
-                body += `b[p]=sl;p+=1;`;
-                body += `let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}`;
-                body += `if(_ok){p+=sl;}`;
-                body += `else{p-=1;let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}`;
-                body += `else{let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}\n`;
+                body += emitStringEncode(f, i, d, refHashes);
                 break;
 
             case 'bytes':
@@ -215,108 +501,11 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'array':
-                if (f.elementType) {
-                    let et = f.elementType;
-
-                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
-                        et.base === 'uint16' || et.base === 'int16' ||
-                        et.base === 'uint32' || et.base === 'int32' ||
-                        et.base === 'float64' || et.base === 'date' || et.base === 'int64') {
-                        // Typed array: varint count + raw fixed-size elements
-                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);`;
-
-                        switch (et.base) {
-                            case 'boolean':
-                                body += `for(let i=0;i<l;i++){b[p]=a[i]?1:0;p+=1;}`;
-                                break;
-                            case 'uint8':
-                                body += `for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;`;
-                                break;
-                            case 'int8':
-                                body += `for(let i=0;i<l;i++){b[p]=a[i]&0xFF;p+=1;}`;
-                                break;
-                            case 'uint16':
-                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
-                                break;
-                            case 'int16':
-                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
-                                break;
-                            case 'uint32':
-                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
-                                break;
-                            case 'int32':
-                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
-                                break;
-                            case 'float64':
-                                body += `if(p+l*8<=b.length){for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}else{p+=l*8;}`;
-                                break;
-                            case 'date':
-                                body += `if(p+l*8<=b.length){for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}}else{p+=l*8;}`;
-                                break;
-                            case 'int64':
-                                body += `if(p+l*8<=b.length){for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}}else{p+=l*8;}`;
-                                break;
-                        }
-
-                        body += `}\n`;
-                    }
-                    else if (et.base === 'string') {
-                        // Typed array<string>: varint count + per-element [varint len][utf8 data]
-                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let s=a[i],sl=s.length;`;
-                        body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}`;
-                        body += `else{let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}}\n`;
-                    }
-                    else if (et.base === 'bytes') {
-                        // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
-                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let v=a[i],vl=v.length;p=_wv(b,p,vl);if(p+vl<=b.length){b.set(v,p);}p+=vl;}}\n`;
-                    }
-                    else if (et.base === 'object' && et.hash !== undefined) {
-                        // Typed array<object(hash)>: varint count + per-element [varint payloadLen][fields]
-                        let refParam = refHashes.get(et.hash);
-
-                        if (refParam) {
-                            body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){`;
-                            body += `let _lp=p;p+=1;let _end=${refParam}(a[i],b,p);let _dl=_end-p;`;
-                            body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
-                            body += `else{let _vl=_dl<16384?2:_dl<2097152?3:_dl<268435456?4:5;b.copyWithin(_lp+_vl,_lp+1,_end);_wv(b,_lp,_dl);p=_end+_vl-1;}}}\n`;
-                        }
-                        else {
-                            // Referenced schema not compiled — tagged fallback
-                            body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
-                        }
-                    }
-                    else {
-                        // Container element types: varint count + tagged elements
-                        body += `{let a=${val},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
-                    }
-                }
-                else {
-                    // Generic path — one shared classifier picks the narrowest lossless width;
-                    // flag = typeId+1 (0 stays "generic tagged elements"), count u32, raw LE elements.
-                    body += packedArrayEncodeSrc(val, d);
-                }
-
+                body += emitArrayEncode(f, i, d, refHashes);
                 break;
 
             case 'object':
-                if (f.refHash !== undefined) {
-                    let rp = refHashes.get(f.refHash);
-
-                    if (rp) {
-                        // Reserve 1 byte for the varint payload-length prefix; for payloads
-                        // >=128 the varint needs extra bytes, so shift the payload right first.
-                        body += `{let _lp=p;p+=1;let _end=${rp}(${val},b,p);let _dl=_end-p;`;
-                        body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
-                        body += `else{let _vl=_dl<16384?2:_dl<2097152?3:_dl<268435456?4:5;b.copyWithin(_lp+_vl,_lp+1,_end);_wv(b,_lp,_dl);p=_end+_vl-1;}}\n`;
-                    }
-                    else {
-                        body += `p=_encObj(${val},b,p);\n`;
-                    }
-                }
-                else {
-                    body += `p=_encObj(${val},b,p);\n`;
-                }
-
+                body += emitObjectEncode(f, i, d, refHashes);
                 break;
 
             case 'typedarray':
@@ -447,152 +636,11 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'array':
-                if (f.elementType) {
-                    let et = f.elementType;
-
-                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
-                        et.base === 'uint16' || et.base === 'int16' ||
-                        et.base === 'uint32' || et.base === 'int32' ||
-                        et.base === 'float64' || et.base === 'date' || et.base === 'int64') {
-                        // Typed array: varint count + raw fixed-size elements
-                        body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-
-                        if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8') {
-                            body += `if(p+l>b.length)throw new Error('Codec2: truncated array');`;
-                        }
-                        else if (et.base === 'uint16' || et.base === 'int16') {
-                            body += `if(p+l*2>b.length)throw new Error('Codec2: truncated array');`;
-                        }
-                        else if (et.base === 'uint32' || et.base === 'int32') {
-                            body += `if(p+l*4>b.length)throw new Error('Codec2: truncated array');`;
-                        }
-                        else {
-                            body += `if(p+l*8>b.length)throw new Error('Codec2: truncated array');`;
-                        }
-
-                        body += `let a=new Array(l);`;
-
-                        switch (et.base) {
-                            case 'boolean':
-                                body += `for(let i=0;i<l;i++){a[i]=!!b[p];p+=1;}`;
-                                break;
-                            case 'uint8':
-                                body += `for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;`;
-                                break;
-                            case 'int8':
-                                body += `for(let i=0;i<l;i++){a[i]=(b[p]<<24)>>24;p+=1;}`;
-                                break;
-                            case 'uint16':
-                                body += `for(let i=0;i<l;i++){a[i]=b[p]|(b[p+1]<<8);p+=2;}`;
-                                break;
-                            case 'int16':
-                                body += `for(let i=0;i<l;i++){a[i]=((b[p]|(b[p+1]<<8))<<16)>>16;p+=2;}`;
-                                break;
-                            case 'uint32':
-                                body += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;}`;
-                                break;
-                            case 'int32':
-                                body += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}`;
-                                break;
-                            case 'float64':
-                                body += `for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}`;
-                                break;
-                            case 'date':
-                                body += `for(let i=0;i<l;i++){a[i]=new Date(${d.readF64('p')});p+=8;}`;
-                                break;
-                            case 'int64':
-                                body += `for(let i=0;i<l;i++){a[i]=_rBI64.call(b,p);p+=8;}`;
-                                break;
-                        }
-
-                        body += `f${i}=a;}\n`;
-                    }
-                    else if (et.base === 'string') {
-                        // Typed array<string>: varint count + per-element [varint len][utf8 data]
-                        body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-                        body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{_rv(b,p);sl=_vrs.v;p=_vrs.p;}if(p+sl>b.length)throw new Error('SBC: truncated');a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
-                        body += `f${i}=a;}\n`;
-                    }
-                    else if (et.base === 'bytes') {
-                        // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
-                        body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-                        body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}if(p+bl>b.length)throw new Error('SBC: truncated');a[i]=new Uint8Array(b.subarray(p,p+bl));p+=bl;}`;
-                        body += `f${i}=a;}\n`;
-                    }
-                    else if (et.base === 'object' && et.hash !== undefined) {
-                        // Typed array<object(hash)>: varint count + per-element [varint payloadLen][fields]
-                        let refParam = refHashes.get(et.hash);
-
-                        if (refParam) {
-                            body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                            body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-                            body += `let a=new Array(l);`;
-                            body += `for(let i=0;i<l;i++){let _dl=b[p];`;
-                            body += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
-                            body += `else{_rv(b,p);_dl=_vrs.v;p=_vrs.p;if(p+_dl>b.length)throw new Error('SBC: truncated');a[i]=${refParam}(b,p,_d+1);p+=_dl;}}`;
-                            body += `f${i}=a;}\n`;
-                        }
-                        else {
-                            // Referenced schema not compiled — tagged fallback
-                            body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                            body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-                            body += `let a=new Array(l);`;
-                            body += `for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}`;
-                            body += `f${i}=a;}\n`;
-                        }
-                    }
-                    else {
-                        // Container element types: varint count + tagged elements
-                        body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-                        body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}`;
-                        body += `f${i}=a;}\n`;
-                    }
-                }
-                else {
-                    body += packedArrayDecodeSrc(`f${i}`, d) + `\n`;
-                }
-
+                body += emitArrayDecode(f, i, d, refHashes);
                 break;
 
             case 'object':
-                if (f.refHash !== undefined) {
-                    let rp = refHashes.get(f.refHash);
-
-                    if (rp) {
-                        // 1-byte length fast path; else a multi-byte varint prefixes the payload.
-                        body += `{let _dl=b[p];`;
-                        body += `if(_dl<128){p+=1;f${i}=${rp}(b,p,_d+1);p+=_dl;}`;
-                        body += `else{_rv(b,p);_dl=_vrs.v;p=_vrs.p;if(p+_dl>b.length)throw new Error('SBC: truncated');f${i}=${rp}(b,p,_d+1);p+=_dl;}}\n`;
-                    }
-                    else {
-                        // Ref schema not compiled — generic path
-                        body += `{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
-                        body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
-                        body += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                        body += `_s=_reg.get(_h)||_lk(_h);`;
-                        body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{throw new Error('Codec2: unknown schema hash '+_h);}`;
-                        body += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
-                        body += `else{let e=_dte(b,p,b.length,_d+1);f${i}=_dec(b,p,e,_d+1);p=e;}}\n`;
-                    }
-                }
-                else {
-                    // Inline tag-8/18 fast path: skip decodeTagEnd + decodeSbc switch overhead
-                    body += `{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){`;
-                    body += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
-                    body += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
-                    body += `_s=_reg.get(_h)||_lk(_h);`;
-                    body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{throw new Error('Codec2: unknown schema hash '+_h);}`;
-                    body += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
-                    body += `else{let e=_dte(b,p,b.length,_d+1);f${i}=_dec(b,p,e,_d+1);p=e;}}\n`;
-                }
-
+                body += emitObjectDecode(f, i, d, refHashes);
                 break;
 
             case 'typedarray':
@@ -734,136 +782,10 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                 body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('SBC: truncated');f${i}=new Uint8Array(b.subarray(p,p+l));p+=l;}${nc}\n`;
                 break;
             case 'array':
-                if (f.elementType) {
-                    let et = f.elementType;
-
-                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
-                        et.base === 'uint16' || et.base === 'int16' ||
-                        et.base === 'uint32' || et.base === 'int32' ||
-                        et.base === 'float64' || et.base === 'date' || et.base === 'int64') {
-                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-
-                        if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8') {
-                            body += `if(p+l>b.length)throw new Error('Codec2: truncated array');`;
-                        }
-                        else if (et.base === 'uint16' || et.base === 'int16') {
-                            body += `if(p+l*2>b.length)throw new Error('Codec2: truncated array');`;
-                        }
-                        else if (et.base === 'uint32' || et.base === 'int32') {
-                            body += `if(p+l*4>b.length)throw new Error('Codec2: truncated array');`;
-                        }
-                        else {
-                            body += `if(p+l*8>b.length)throw new Error('Codec2: truncated array');`;
-                        }
-
-                        body += `let a=new Array(l);`;
-
-                        switch (et.base) {
-                            case 'boolean':
-                                body += `for(let i=0;i<l;i++){a[i]=!!b[p];p+=1;}`;
-                                break;
-                            case 'uint8':
-                                body += `for(let i=0;i<l;i++){a[i]=b[p+i];}p+=l;`;
-                                break;
-                            case 'int8':
-                                body += `for(let i=0;i<l;i++){a[i]=(b[p]<<24)>>24;p+=1;}`;
-                                break;
-                            case 'uint16':
-                                body += `for(let i=0;i<l;i++){a[i]=b[p]|(b[p+1]<<8);p+=2;}`;
-                                break;
-                            case 'int16':
-                                body += `for(let i=0;i<l;i++){a[i]=((b[p]|(b[p+1]<<8))<<16)>>16;p+=2;}`;
-                                break;
-                            case 'uint32':
-                                body += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;}`;
-                                break;
-                            case 'int32':
-                                body += `for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))|0;p+=4;}`;
-                                break;
-                            case 'float64':
-                                body += `for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}`;
-                                break;
-                            case 'date':
-                                body += `for(let i=0;i<l;i++){a[i]=new Date(${d.readF64('p')});p+=8;}`;
-                                break;
-                            case 'int64':
-                                body += `for(let i=0;i<l;i++){a[i]=_rBI64.call(b,p);p+=8;}`;
-                                break;
-                        }
-
-                        body += `f${i}=a;}${nc}\n`;
-                    }
-                    else if (et.base === 'string') {
-                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-                        body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{_rv(b,p);sl=_vrs.v;p=_vrs.p;}if(p+sl>b.length)throw new Error('SBC: truncated');a[i]=${d.readStr('p', 'sl')};p+=sl;}`;
-                        body += `f${i}=a;}${nc}\n`;
-                    }
-                    else if (et.base === 'bytes') {
-                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-                        body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}if(p+bl>b.length)throw new Error('SBC: truncated');a[i]=new Uint8Array(b.subarray(p,p+bl));p+=bl;}`;
-                        body += `f${i}=a;}${nc}\n`;
-                    }
-                    else if (et.base === 'object' && et.hash !== undefined) {
-                        let refParam = refHashes.get(et.hash);
-
-                        if (refParam) {
-                            body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                            body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-                            body += `let a=new Array(l);`;
-                            body += `for(let i=0;i<l;i++){let _dl=b[p];`;
-                            body += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
-                            body += `else{_rv(b,p);_dl=_vrs.v;p=_vrs.p;if(p+_dl>b.length)throw new Error('SBC: truncated');a[i]=${refParam}(b,p,_d+1);p+=_dl;}}`;
-                            body += `f${i}=a;}${nc}\n`;
-                        }
-                        else {
-                            body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                            body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-                            body += `let a=new Array(l);`;
-                            body += `for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}`;
-                            body += `f${i}=a;}${nc}\n`;
-                        }
-                    }
-                    else {
-                        body += `${no}{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        body += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
-                        body += `let a=new Array(l);`;
-                        body += `for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}`;
-                        body += `f${i}=a;}${nc}\n`;
-                    }
-                }
-                else {
-                    body += `${no}` + packedArrayDecodeSrc(`f${i}`, d) + `${nc}\n`;
-                }
-
+                body += `${no}${emitArrayDecode(f, i, d, refHashes)}${nc}\n`;
                 break;
             case 'object':
-                if (f.refHash !== undefined) {
-                    let rp = refHashes.get(f.refHash);
-
-                    if (rp) {
-                        body += `${no}{let _dl=b[p];`;
-                        body += `if(_dl<128){p+=1;f${i}=${rp}(b,p,_d+1);p+=_dl;}`;
-                        body += `else{_rv(b,p);_dl=_vrs.v;p=_vrs.p;if(p+_dl>b.length)throw new Error('SBC: truncated');f${i}=${rp}(b,p,_d+1);p+=_dl;}}${nc}\n`;
-                    }
-                    else {
-                        body += `${no}{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h)||_lk(_h);`;
-                        body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{throw new Error('Codec2: unknown schema hash '+_h);}`;
-                        body += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
-                        body += `else{let e=_dte(b,p,b.length,_d+1);f${i}=_dec(b,p,e,_d+1);p=e;}}${nc}\n`;
-                    }
-                }
-                else {
-                    body += `${no}{if(p+9>b.length)throw new Error('SBC: truncated');if(b[p]===8||b[p]===18){let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,_s=_reg.get(_h)||_lk(_h);`;
-                    body += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${i}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${i}=_s.decodeFn(b,p+9,_d+1);}else{f${i}=null;}}else{throw new Error('Codec2: unknown schema hash '+_h);}`;
-                    body += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
-                    body += `else{let e=_dte(b,p,b.length,_d+1);f${i}=_dec(b,p,e,_d+1);p=e;}}${nc}\n`;
-                }
-
+                body += `${no}${emitObjectDecode(f, i, d, refHashes)}${nc}\n`;
                 break;
             case 'typedarray': case 'mixed':
                 body += `${no}{let e=_dte(b,p,b.length,_d+1);f${i}=_dec(b,p,e,_d+1);p=e;}${nc}\n`;
@@ -1051,9 +973,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
 
-                body += `{let s=${v},sl=s.length;`;
-                body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}`;
-                body += `else{let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}\n`;
+                body += emitStringEncode(f, i, d, refHashes);
 
                 if (f.nullable) {
                     body += `}\n`;
@@ -1077,78 +997,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
 
-                if (f.elementType) {
-                    let et = f.elementType;
-
-                    if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8' ||
-                        et.base === 'uint16' || et.base === 'int16' ||
-                        et.base === 'uint32' || et.base === 'int32' ||
-                        et.base === 'float64' || et.base === 'date' || et.base === 'int64') {
-                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);`;
-
-                        switch (et.base) {
-                            case 'boolean':
-                                body += `for(let i=0;i<l;i++){b[p]=a[i]?1:0;p+=1;}`;
-                                break;
-                            case 'uint8':
-                                body += `for(let i=0;i<l;i++){b[p+i]=a[i];}p+=l;`;
-                                break;
-                            case 'int8':
-                                body += `for(let i=0;i<l;i++){b[p]=a[i]&0xFF;p+=1;}`;
-                                break;
-                            case 'uint16':
-                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
-                                break;
-                            case 'int16':
-                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;p+=2;}`;
-                                break;
-                            case 'uint32':
-                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
-                                break;
-                            case 'int32':
-                                body += `for(let i=0;i<l;i++){let v=a[i];b[p]=v&0xFF;b[p+1]=(v>>>8)&0xFF;b[p+2]=(v>>>16)&0xFF;b[p+3]=(v>>>24)&0xFF;p+=4;}`;
-                                break;
-                            case 'float64':
-                                body += `if(p+l*8<=b.length){for(let i=0;i<l;i++){${d.writeF64('p', 'a[i]')};p+=8;}}else{p+=l*8;}`;
-                                break;
-                            case 'date':
-                                body += `if(p+l*8<=b.length){for(let i=0;i<l;i++){${d.writeF64('p', 'a[i].getTime()')};p+=8;}}else{p+=l*8;}`;
-                                break;
-                            case 'int64':
-                                body += `if(p+l*8<=b.length){for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}}else{p+=l*8;}`;
-                                break;
-                        }
-
-                        body += `}\n`;
-                    }
-                    else if (et.base === 'string') {
-                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let s=a[i],sl=s.length;`;
-                        body += `if(sl<17){b[p]=sl;p+=1;let _ok=1;for(let _k=0;_k<sl;_k++){let _c=s.charCodeAt(_k);if(_c>127){_ok=0;break;}b[p+_k]=_c;}if(_ok){p+=sl;}else{p-=1;let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}`;
-                        body += `else{let l=_bl(s);p=_wv(b,p,l);if(p+l<=b.length){${d.writeStr('s', 'p', 'l')};}p+=l;}}}\n`;
-                    }
-                    else if (et.base === 'bytes') {
-                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){let v=a[i],vl=v.length;p=_wv(b,p,vl);if(p+vl<=b.length){b.set(v,p);}p+=vl;}}\n`;
-                    }
-                    else if (et.base === 'object' && et.hash !== undefined) {
-                        let refParam = refHashes.get(et.hash);
-
-                        if (refParam) {
-                            body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){`;
-                            body += `let _lp=p;p+=1;let _end=${refParam}(a[i],b,p);let _dl=_end-p;`;
-                            body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
-                            body += `else{let _vl=_dl<16384?2:_dl<2097152?3:_dl<268435456?4:5;b.copyWithin(_lp+_vl,_lp+1,_end);_wv(b,_lp,_dl);p=_end+_vl-1;}}}\n`;
-                        }
-                        else {
-                            body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
-                        }
-                    }
-                    else {
-                        body += `{let a=${v},l=a.length;p=_wv(b,p,l);for(let i=0;i<l;i++){p=_enc(a[i],b,p);}}\n`;
-                    }
-                }
-                else {
-                    body += packedArrayEncodeSrc(v, d);
-                }
+                body += emitArrayEncode(f, i, d, refHashes);
 
                 if (f.nullable) {
                     body += `}\n`;
@@ -1160,21 +1009,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
 
-                if (f.refHash !== undefined) {
-                    let rp = refHashes.get(f.refHash);
-
-                    if (rp) {
-                        body += `{let _lp=p;p+=1;let _end=${rp}(${v},b,p);let _dl=_end-p;`;
-                        body += `if(_dl<128){b[_lp]=_dl;p=_end;}`;
-                        body += `else{let _vl=_dl<16384?2:_dl<2097152?3:_dl<268435456?4:5;b.copyWithin(_lp+_vl,_lp+1,_end);_wv(b,_lp,_dl);p=_end+_vl-1;}}\n`;
-                    }
-                    else {
-                        body += `p=_encObj(${v},b,p);\n`;
-                    }
-                }
-                else {
-                    body += `p=_encObj(${v},b,p);\n`;
-                }
+                body += emitObjectEncode(f, i, d, refHashes);
 
                 if (f.nullable) {
                     body += `}\n`;
