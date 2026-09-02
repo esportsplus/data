@@ -5,8 +5,9 @@ import { MAX_ARRAY_COUNT } from './constants';
 import { byteLen, classifyPackedArray, readBI64, readF64, readStr, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 import { inferAndRegister } from './schema';
 
-import type { PersistentStore, SchemaRegistry } from './types';
+import type { SchemaCache } from './cache';
 import type { Schema, SbcHelpers } from './codegen';
+import type { PersistentStore, SchemaRegistry } from './types';
 
 
 // int64 bounds — writeBigInt64LE throws RangeError above these on Node and silently
@@ -33,6 +34,7 @@ type EncodeContext = {
     matchSchema: (obj: Record<string, unknown>) => Schema | null;
     registry: SchemaRegistry;
     revalidateCached: (obj: Record<string, unknown>, schema: Schema) => boolean;
+    schemaCache: SchemaCache;
     setCache: (schema: Schema, obj: object) => void;
     store: PersistentStore | null;
     weakCache: WeakMap<object, Schema>;
@@ -630,7 +632,7 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
                 schema = ectx.matchSchema(obj);
 
                 if (!schema) {
-                    schema = inferAndRegister(obj, ectx.registry, ectx.helpers, ectx.store, ectx.lastSortedKeys ?? undefined);
+                    schema = inferAndRegister(obj, ectx.registry, ectx.helpers, ectx.store, ectx.schemaCache, ectx.lastSortedKeys ?? undefined);
                 }
 
                 ectx.setCache(schema, obj);

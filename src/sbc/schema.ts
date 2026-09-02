@@ -2,10 +2,9 @@ import { FIELD_SIZES, FNV_OFFSET, FNV_PRIME, KNOWN_TYPES } from './constants';
 import { compileSchema } from './codegen';
 import { readBI64, readF64 } from './platform';
 
+import type { SchemaCache } from './cache';
 import type { FieldDef, ParsedType, Schema, SbcHelpers } from './codegen';
 import type { FieldSpec, PersistentStore, SchemaRegistry } from './types';
-
-import cache from './cache';
 
 
 function computeShapeHash(keys: string[], types: string[]): number {
@@ -193,7 +192,7 @@ function hashTypesOf(types: string[], nullable: boolean[]): string[] {
 // record supplying a non-null value for that key, upgrades in place to the resolved base type
 // under its OWN hash. A null observed for a field of an already-resolved non-nullable schema
 // upgrades the same way, so both arrival orders converge on one final hash.
-function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers, store: PersistentStore | null, sortedKeys?: string[]): Schema {
+function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry, helpers: SbcHelpers, store: PersistentStore | null, schemaCache: SchemaCache, sortedKeys?: string[]): Schema {
     let keys = sortedKeys ?? Object.keys(obj).sort(),
         n = keys.length,
         isNull: boolean[] = new Array(n),
@@ -383,7 +382,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         storedFields[i] = { name: keys[i]!, nullable: nullable[i], type: types[i]! };
     }
 
-    cache.set(hash, { fields: storedFields, hash });
+    schemaCache.set(hash, { fields: storedFields, hash });
 
     if (store && !provisional) {
         store.set(hash, { fields: storedFields, hash });

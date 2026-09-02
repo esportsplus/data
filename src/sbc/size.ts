@@ -8,8 +8,9 @@ import { FIELD_SIZES } from './constants';
 import { byteLen, classifyPackedArray, TYPED_ARRAY_BPE, TYPED_ARRAY_IDS } from './platform';
 import { inferAndRegister, varintSize } from './schema';
 
-import type { PersistentStore, SchemaRegistry } from './types';
+import type { SchemaCache } from './cache';
 import type { FieldDef, Schema, SbcHelpers } from './codegen';
+import type { PersistentStore, SchemaRegistry } from './types';
 
 
 type SizeContext = {
@@ -18,6 +19,7 @@ type SizeContext = {
     matchSchema(obj: Record<string, unknown>): Schema | null;
     registry: SchemaRegistry;
     revalidateCached(obj: Record<string, unknown>, schema: Schema): boolean;
+    schemaCache: SchemaCache;
     setCache(schema: Schema, obj: object): void;
     store: PersistentStore | null;
     weakCache: WeakMap<object, Schema>;
@@ -136,7 +138,7 @@ function resolveObjSchema(ctx: SizeContext, obj: Record<string, unknown>): Schem
         schema = ctx.matchSchema(obj);
 
         if (!schema) {
-            schema = inferAndRegister(obj, ctx.registry, ctx.helpers, ctx.store);
+            schema = inferAndRegister(obj, ctx.registry, ctx.helpers, ctx.store, ctx.schemaCache);
         }
 
         ctx.setCache(schema, obj);

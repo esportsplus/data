@@ -227,7 +227,7 @@ const codec = (options?: CodecOptions): {
             schema = matchSchema(obj);
 
             if (!schema) {
-                schema = inferAndRegister(obj, registry, helpers, store, lastSortedKeys ?? undefined);
+                schema = inferAndRegister(obj, registry, helpers, store, schemaCache, lastSortedKeys ?? undefined);
             }
 
             setCache(schema, obj);
@@ -279,6 +279,7 @@ const codec = (options?: CodecOptions): {
         matchSchema,
         registry,
         revalidateCached,
+        schemaCache,
         setCache,
         store,
         weakCache,
@@ -686,7 +687,7 @@ const codec = (options?: CodecOptions): {
                 schema = matchSchema(obj);
 
                 if (!schema) {
-                    schema = inferAndRegister(obj, registry, helpers, store, lastSortedKeys ?? undefined);
+                    schema = inferAndRegister(obj, registry, helpers, store, schemaCache, lastSortedKeys ?? undefined);
                 }
 
                 setCache(schema, obj);
@@ -904,6 +905,7 @@ const codec = (options?: CodecOptions): {
         matchSchema,
         registry,
         revalidateCached,
+        schemaCache,
         setCache,
         store,
         weakCache,
