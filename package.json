@@ -1,16 +1,16 @@
 {
     "author": "ICJR",
     "dependencies": {
-        "@esportsplus/utilities": "^0.28.0"
+        "@esportsplus/utilities": "^0.28.1"
     },
     "description": "Compile-time data validation utility",
     "devDependencies": {
-        "@esportsplus/typescript": "^0.31.0",
-        "@types/node": "^26.1.1",
-        "msgpackr": "^2.0.4",
-        "protobufjs": "^8.7.1",
-        "vite": "^8.1.5",
-        "vitest": "^4.1.10"
+        "@esportsplus/typescript": "^0.33.4",
+        "@types/node": "^26.4.1",
+        "msgpackr": "^2.1.0",
+        "protobufjs": "^8.8.0",
+        "vite": "^8.2.2",
+        "vitest": "^5.0.0"
     },
     "exports": {
         ".": {
