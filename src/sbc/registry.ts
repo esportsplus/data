@@ -15,19 +15,19 @@ function deserializeRegistry(data: Uint8Array, defineSchemaFn: (fields: FieldSpe
         pos = 0;
 
     if (pos + 2 > len) {
-        throw new Error('Codec2: registry data truncated at schema count');
+        throw new Error('@esportsplus/data: codec registry data truncated at schema count');
     }
 
     let schemaCount = data[pos]! | (data[pos + 1]! << 8);
     pos += 2;
 
     if (schemaCount > MAX_SCHEMA_COUNT) {
-        throw new Error('Codec2: schema count ' + schemaCount + ' exceeds limit');
+        throw new Error('@esportsplus/data: codec schema count ' + schemaCount + ' exceeds limit');
     }
 
     for (let i = 0; i < schemaCount; i++) {
         if (pos + 6 > len) {
-            throw new Error('Codec2: registry data truncated at schema ' + i);
+            throw new Error('@esportsplus/data: codec registry data truncated at schema ' + i);
         }
 
         let hash = (data[pos]! | (data[pos + 1]! << 8) | (data[pos + 2]! << 16) | (data[pos + 3]! << 24)) >>> 0;
@@ -40,41 +40,41 @@ function deserializeRegistry(data: Uint8Array, defineSchemaFn: (fields: FieldSpe
 
         for (let j = 0; j < fieldCount; j++) {
             if (pos + 2 > len) {
-                throw new Error('Codec2: registry data truncated at field name length');
+                throw new Error('@esportsplus/data: codec registry data truncated at field name length');
             }
 
             let nameLen = data[pos]! | (data[pos + 1]! << 8);
             pos += 2;
 
             if (nameLen === 0) {
-                throw new Error('Codec2: empty field name in registry data');
+                throw new Error('@esportsplus/data: codec empty field name in registry data');
             }
 
             if (pos + nameLen > len) {
-                throw new Error('Codec2: registry data truncated at field name');
+                throw new Error('@esportsplus/data: codec registry data truncated at field name');
             }
 
             let name = readStr(data, pos, nameLen);
 
             if (!IDENTIFIER.test(name)) {
-                throw new Error('Codec2: invalid field name in registry data: ' + name);
+                throw new Error('@esportsplus/data: codec invalid field name in registry data: ' + name);
             }
 
             pos += nameLen;
 
             if (pos + 2 > len) {
-                throw new Error('Codec2: registry data truncated at field type length');
+                throw new Error('@esportsplus/data: codec registry data truncated at field type length');
             }
 
             let typeLen = data[pos]! | (data[pos + 1]! << 8);
             pos += 2;
 
             if (typeLen === 0) {
-                throw new Error('Codec2: empty field type in registry data');
+                throw new Error('@esportsplus/data: codec empty field type in registry data');
             }
 
             if (pos + typeLen > len) {
-                throw new Error('Codec2: registry data truncated at field type');
+                throw new Error('@esportsplus/data: codec registry data truncated at field type');
             }
 
             let type = readStr(data, pos, typeLen);
@@ -86,7 +86,7 @@ function deserializeRegistry(data: Uint8Array, defineSchemaFn: (fields: FieldSpe
             parseFieldType(type);
 
             if (pos + 1 > len) {
-                throw new Error('Codec2: registry data truncated at field flags');
+                throw new Error('@esportsplus/data: codec registry data truncated at field flags');
             }
 
             let flags = data[pos]!;
@@ -111,7 +111,7 @@ function deserializeRegistry(data: Uint8Array, defineSchemaFn: (fields: FieldSpe
         let computed = computeShapeHash(keys, types);
 
         if (computed !== hash) {
-            throw new Error('Codec2: registry hash mismatch — declared ' + hash + ', computed ' + computed);
+            throw new Error('@esportsplus/data: codec registry hash mismatch — declared ' + hash + ', computed ' + computed);
         }
 
         // Skip if already registered — now a lookup on a verified key

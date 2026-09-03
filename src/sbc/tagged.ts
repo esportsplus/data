@@ -35,11 +35,11 @@ type EncodeContext = {
 
 function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: number, depth: number): unknown {
     if (depth > 64) {
-        throw new Error('Codec2: max decode depth exceeded');
+        throw new Error('@esportsplus/data: codec max decode depth exceeded');
     }
 
     if (offset >= end) {
-        throw new Error('Codec2: empty buffer');
+        throw new Error('@esportsplus/data: codec empty buffer');
     }
 
     let tag = buf[offset]!;
@@ -50,14 +50,14 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
         case 2: return true;
         case 3:
             if (offset + 2 > end) {
-                throw new Error('Codec2: truncated uint8 at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated uint8 at offset ' + offset);
             }
 
             return buf[offset + 1]!;
 
         case 4:
             if (offset + 9 > end) {
-                throw new Error('Codec2: truncated float64 at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated float64 at offset ' + offset);
             }
 
             return readF64.call(buf, offset + 1);
@@ -66,7 +66,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
             let sLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
             if (offset + 5 + sLen > end) {
-                throw new Error('Codec2: truncated string at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated string at offset ' + offset);
             }
 
             return readStr(buf, offset + 5, sLen);
@@ -76,7 +76,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
             let bLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
             if (offset + 5 + bLen > end) {
-                throw new Error('Codec2: truncated bytes at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated bytes at offset ' + offset);
             }
 
             // Always a plain Uint8Array COPY (README contract): constructor === Uint8Array,
@@ -86,13 +86,13 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
 
         case 7: {
             if (offset + 5 > end) {
-                throw new Error('Codec2: truncated array at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated array at offset ' + offset);
             }
 
             let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
             if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                throw new Error('@esportsplus/data: codec array count ' + count + ' exceeds limit');
             }
 
             let arr = new Array(count),
@@ -110,13 +110,13 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
 
         case 8: {
             if (offset + 9 > end) {
-                throw new Error('Codec2: truncated tag-8/18 header');
+                throw new Error('@esportsplus/data: codec truncated tag-8/18 header');
             }
 
             let dataLen = (buf[offset + 5]! | (buf[offset + 6]! << 8) | (buf[offset + 7]! << 16) | (buf[offset + 8]! << 24)) >>> 0;
 
             if (offset + 9 + dataLen > end) {
-                throw new Error('Codec2: truncated tag-8 object at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated tag-8 object at offset ' + offset);
             }
 
             let hash = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
@@ -125,7 +125,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
                     : (dctx.schemas.get(hash) ?? dctx.resolveSchema(hash));
 
             if (!schema || !schema.decodeFn) {
-                throw new Error('Codec2: unknown schema hash ' + hash);
+                throw new Error('@esportsplus/data: codec unknown schema hash ' + hash);
             }
 
             // lastDecodeFn must move with lastDecodeHash: decode()'s cross-call fast-path dispatches
@@ -140,20 +140,20 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
 
         case 18: {
             if (offset + 9 > end) {
-                throw new Error('Codec2: truncated tag-8/18 header');
+                throw new Error('@esportsplus/data: codec truncated tag-8/18 header');
             }
 
             let dataLen = (buf[offset + 5]! | (buf[offset + 6]! << 8) | (buf[offset + 7]! << 16) | (buf[offset + 8]! << 24)) >>> 0;
 
             if (offset + 9 + dataLen > end) {
-                throw new Error('Codec2: truncated tag-18 object at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated tag-18 object at offset ' + offset);
             }
 
             let hash = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0,
                 schema = dctx.schemas.get(hash) ?? dctx.resolveSchema(hash);
 
             if (!schema) {
-                throw new Error('Codec2: unknown schema hash ' + hash);
+                throw new Error('@esportsplus/data: codec unknown schema hash ' + hash);
             }
 
             if (schema.compressedDecodeFn) {
@@ -165,21 +165,21 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
 
         case 9:
             if (offset + 9 > end) {
-                throw new Error('Codec2: truncated int64 at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated int64 at offset ' + offset);
             }
 
             return readBI64.call(buf, offset + 1);
 
         case 10:
             if (offset + 9 > end) {
-                throw new Error('Codec2: truncated date at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated date at offset ' + offset);
             }
 
             return new Date(readF64.call(buf, offset + 1));
 
         case 11:
             if (offset + 5 > end) {
-                throw new Error('Codec2: truncated int32 at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated int32 at offset ' + offset);
             }
 
             return (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) | 0;
@@ -188,7 +188,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
             // packed number[] — [12][u8 typeId][u32 byteLen][raw LE elements], tag 17's
             // payload layout decoded into a plain Array (never a TypedArray) at the classified width.
             if (offset + 6 > end) {
-                throw new Error('Codec2: truncated packed array at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated packed array at offset ' + offset);
             }
 
             let typeId = buf[offset + 1]!,
@@ -196,21 +196,21 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
                 packedLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
 
             if (bpe === undefined) {
-                throw new Error('Codec2: unknown packed array typeId ' + typeId);
+                throw new Error('@esportsplus/data: codec unknown packed array typeId ' + typeId);
             }
 
             if (packedLen % bpe !== 0) {
-                throw new Error('Codec2: packed array byteLength not aligned');
+                throw new Error('@esportsplus/data: codec packed array byteLength not aligned');
             }
 
             let count = packedLen / bpe;
 
             if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                throw new Error('@esportsplus/data: codec array count ' + count + ' exceeds limit');
             }
 
             if (offset + 6 + packedLen > end) {
-                throw new Error('Codec2: truncated packed array at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated packed array at offset ' + offset);
             }
 
             let arr = new Array(count),
@@ -261,7 +261,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
                     }
                     break;
                 default:
-                    throw new Error('Codec2: unsupported packed array typeId ' + typeId);
+                    throw new Error('@esportsplus/data: codec unsupported packed array typeId ' + typeId);
             }
 
             return arr;
@@ -269,7 +269,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
 
         case 17: {
             if (offset + 6 > end) {
-                throw new Error('Codec2: truncated typed array at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated typed array at offset ' + offset);
             }
 
             let typeId = buf[offset + 1]!;
@@ -277,17 +277,17 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
             let Ctor = TYPED_ARRAY_CTORS[typeId];
 
             if (!Ctor) {
-                throw new Error('Codec2: unknown typed array typeId ' + typeId);
+                throw new Error('@esportsplus/data: codec unknown typed array typeId ' + typeId);
             }
 
             let bpe = TYPED_ARRAY_BPE[typeId]!;
 
             if (bLen % bpe !== 0) {
-                throw new Error('Codec2: typed array byteLength not aligned');
+                throw new Error('@esportsplus/data: codec typed array byteLength not aligned');
             }
 
             if (offset + 6 + bLen > end) {
-                throw new Error('Codec2: truncated typed array at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated typed array at offset ' + offset);
             }
 
             // Bounds check above confines [start, start + bLen) to the view window, so
@@ -299,18 +299,18 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
         }
 
         default:
-            throw new Error('Codec2: unknown tag ' + tag + ' at offset ' + offset);
+            throw new Error('@esportsplus/data: codec unknown tag ' + tag + ' at offset ' + offset);
     }
 }
 
 
 function decodeTagEnd(buf: Uint8Array, offset: number, end: number, depth: number): number {
     if (depth > 64) {
-        throw new Error('Codec2: max decode depth exceeded');
+        throw new Error('@esportsplus/data: codec max decode depth exceeded');
     }
 
     if (offset >= end) {
-        throw new Error('Codec2: empty buffer');
+        throw new Error('@esportsplus/data: codec empty buffer');
     }
 
     let tag = buf[offset]!;
@@ -320,13 +320,13 @@ function decodeTagEnd(buf: Uint8Array, offset: number, end: number, depth: numbe
             return offset + 1;
         case 3:
             if (offset + 2 > end) {
-                throw new Error('Codec2: truncated uint8 at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated uint8 at offset ' + offset);
             }
 
             return offset + 2;
         case 4: case 9: case 10:
             if (offset + 9 > end) {
-                throw new Error('Codec2: truncated fixed-width value at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated fixed-width value at offset ' + offset);
             }
 
             return offset + 9;
@@ -334,7 +334,7 @@ function decodeTagEnd(buf: Uint8Array, offset: number, end: number, depth: numbe
             let sLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
             if (offset + 5 + sLen > end) {
-                throw new Error('Codec2: truncated string at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated string at offset ' + offset);
             }
 
             return offset + 5 + sLen;
@@ -343,20 +343,20 @@ function decodeTagEnd(buf: Uint8Array, offset: number, end: number, depth: numbe
             let bLen = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
             if (offset + 5 + bLen > end) {
-                throw new Error('Codec2: truncated bytes at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated bytes at offset ' + offset);
             }
 
             return offset + 5 + bLen;
         }
         case 7: {
             if (offset + 5 > end) {
-                throw new Error('Codec2: truncated array at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated array at offset ' + offset);
             }
 
             let count = (buf[offset + 1]! | (buf[offset + 2]! << 8) | (buf[offset + 3]! << 16) | (buf[offset + 4]! << 24)) >>> 0;
 
             if (count > MAX_ARRAY_COUNT) {
-                throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                throw new Error('@esportsplus/data: codec array count ' + count + ' exceeds limit');
             }
 
             let p = offset + 5;
@@ -369,51 +369,51 @@ function decodeTagEnd(buf: Uint8Array, offset: number, end: number, depth: numbe
         }
         case 8: case 18: {
             if (offset + 9 > end) {
-                throw new Error('Codec2: truncated tag-8/18 header');
+                throw new Error('@esportsplus/data: codec truncated tag-8/18 header');
             }
 
             let dataLen = (buf[offset + 5]! | (buf[offset + 6]! << 8) | (buf[offset + 7]! << 16) | (buf[offset + 8]! << 24)) >>> 0;
 
             if (offset + 9 + dataLen > end) {
-                throw new Error('Codec2: truncated tag-8/18 object at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated tag-8/18 object at offset ' + offset);
             }
 
             return offset + 9 + dataLen;
         }
         case 11:
             if (offset + 5 > end) {
-                throw new Error('Codec2: truncated int32 at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated int32 at offset ' + offset);
             }
 
             return offset + 5;
         case 12: {
             if (offset + 6 > end) {
-                throw new Error('Codec2: truncated packed array at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated packed array at offset ' + offset);
             }
 
             let packedLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
 
             if (offset + 6 + packedLen > end) {
-                throw new Error('Codec2: truncated packed array at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated packed array at offset ' + offset);
             }
 
             return offset + 6 + packedLen;
         }
         case 17: {
             if (offset + 6 > end) {
-                throw new Error('Codec2: truncated typed array at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated typed array at offset ' + offset);
             }
 
             let bLen = (buf[offset + 2]! | (buf[offset + 3]! << 8) | (buf[offset + 4]! << 16) | (buf[offset + 5]! << 24)) >>> 0;
 
             if (offset + 6 + bLen > end) {
-                throw new Error('Codec2: truncated typed array at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated typed array at offset ' + offset);
             }
 
             return offset + 6 + bLen;
         }
         default:
-            throw new Error('Codec2: unknown tag ' + tag + ' at offset ' + offset);
+            throw new Error('@esportsplus/data: codec unknown tag ' + tag + ' at offset ' + offset);
     }
 }
 
@@ -465,7 +465,7 @@ function encodePlainObject(ectx: EncodeContext, obj: Record<string, unknown>, bu
 function unrepresentable(value: unknown): never {
     let ctor = value == null ? undefined : (value as { constructor?: { name?: string } }).constructor;
 
-    throw new Error('Codec2: unrepresentable value of type ' + (ctor?.name ?? typeof value));
+    throw new Error('@esportsplus/data: codec unrepresentable value of type ' + (ctor?.name ?? typeof value));
 }
 
 
@@ -478,7 +478,7 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
     switch (typeof value) {
         case 'bigint':
             if (value < INT64_MIN || value >= INT64_OVERFLOW) {
-                throw new Error('Codec2: bigint out of int64 range');
+                throw new Error('@esportsplus/data: codec bigint out of int64 range');
             }
 
             buf[pos] = 9;

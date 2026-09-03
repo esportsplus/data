@@ -81,7 +81,7 @@ function parseFieldType(type: string): ParsedType {
         let inner = type.slice(6, -1);
 
         if (!inner) {
-            throw new Error('Codec2: empty array element type');
+            throw new Error('@esportsplus/data: codec empty array element type');
         }
 
         return { base: 'array', elementType: parseFieldType(inner) };
@@ -92,14 +92,14 @@ function parseFieldType(type: string): ParsedType {
             hash = Number(hashStr);
 
         if (!hashStr || !Number.isFinite(hash) || !Number.isInteger(hash) || hash < 0) {
-            throw new Error('Codec2: invalid object hash: ' + hashStr);
+            throw new Error('@esportsplus/data: codec invalid object hash: ' + hashStr);
         }
 
         return { base: 'object', hash: hash >>> 0 };
     }
 
     if (!(type in KNOWN_TYPES)) {
-        throw new Error('Codec2: unknown field type: ' + type);
+        throw new Error('@esportsplus/data: codec unknown field type: ' + type);
     }
 
     return { base: type };
@@ -230,7 +230,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
 
     if (existing) {
         if (!fieldsMatch(existing, keys, types, nullable)) {
-            throw new Error('Codec2: schema hash collision — two distinct schemas share hash ' + hash);
+            throw new Error('@esportsplus/data: codec schema hash collision — two distinct schemas share hash ' + hash);
         }
 
         return existing;
@@ -302,7 +302,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
 
         if (existing) {
             if (!fieldsMatch(existing, keys, types, nullable)) {
-                throw new Error('Codec2: schema hash collision — two distinct schemas share hash ' + hash);
+                throw new Error('@esportsplus/data: codec schema hash collision — two distinct schemas share hash ' + hash);
             }
 
             return existing;
@@ -322,7 +322,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
     }
 
     if (nullableCount > 16) {
-        throw new Error('Codec2: max 16 nullable fields per schema');
+        throw new Error('@esportsplus/data: codec max 16 nullable fields per schema');
     }
 
     let boolFields: number[] = [],

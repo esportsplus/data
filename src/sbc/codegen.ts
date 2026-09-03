@@ -115,10 +115,10 @@ function packedArrayEncodeSrc(val: string, d: CodegenDriver): string {
 // _bpe width, per-typeId switch OUTSIDE the loop (no per-element width branch, no per-element alloc).
 function packedArrayDecodeSrc(assign: string, d: CodegenDriver): string {
     return `{let _f=b[p],l=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0;`
-        + `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');let a=new Array(l);p+=5;`
+        + `if(l>${MAX_ARRAY_COUNT})throw new Error('@esportsplus/data: codec array count '+l+' exceeds limit');let a=new Array(l);p+=5;`
         + `if(_f===0){for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}}`
-        + `else{let _t=_f-1,_bp=_bpe[_t];if(_bp===undefined)throw new Error('Codec2: unknown packed array flag '+_f);`
-        + `if(p+l*_bp>b.length)throw new Error('Codec2: truncated array');switch(_t){`
+        + `else{let _t=_f-1,_bp=_bpe[_t];if(_bp===undefined)throw new Error('@esportsplus/data: codec unknown packed array flag '+_f);`
+        + `if(p+l*_bp>b.length)throw new Error('@esportsplus/data: codec truncated array');switch(_t){`
         + `case 1:for(let i=0;i<l;i++){a[i]=${d.readF64('p')};p+=8;}break;`
         + `case 2:for(let i=0;i<l;i++){a[i]=(b[p]<<24)>>24;p+=1;}break;`
         + `case 3:for(let i=0;i<l;i++){a[i]=((b[p]|(b[p+1]<<8))<<16)>>16;p+=2;}break;`
@@ -126,7 +126,7 @@ function packedArrayDecodeSrc(assign: string, d: CodegenDriver): string {
         + `case 5:case 6:for(let i=0;i<l;i++){a[i]=b[p];p+=1;}break;`
         + `case 7:for(let i=0;i<l;i++){a[i]=b[p]|(b[p+1]<<8);p+=2;}break;`
         + `case 8:for(let i=0;i<l;i++){a[i]=(b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0;p+=4;}break;`
-        + `default:throw new Error('Codec2: unsupported packed array flag '+_f);}}`
+        + `default:throw new Error('@esportsplus/data: codec unsupported packed array flag '+_f);}}`
         + `${assign}=a;}`;
 }
 
@@ -176,7 +176,7 @@ function emitArrayEncode(field: FieldDef, index: number, driver: CodegenDriver, 
                                 source += `if(p+l*8<=b.length){for(let i=0;i<l;i++){${driver.writeF64('p', 'a[i].getTime()')};p+=8;}}else{p+=l*8;}`;
                                 break;
                             case 'int64':
-                                source += `if(p+l*8<=b.length){for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}}else{p+=l*8;}`;
+                                source += `if(p+l*8<=b.length){for(let i=0;i<l;i++){let _bi=a[i];if(_bi<-9223372036854775808n||_bi>=9223372036854775808n)throw new Error('@esportsplus/data: codec bigint out of int64 range');_wBI64.call(b,_bi,p);p+=8;}}else{p+=l*8;}`;
                                 break;
                         }
 
@@ -280,19 +280,19 @@ function emitArrayDecode(field: FieldDef, index: number, driver: CodegenDriver, 
                         et.base === 'float64' || et.base === 'date' || et.base === 'int64') {
                         // Typed array: varint count + raw fixed-size elements
                         source += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        source += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        source += `if(l>${MAX_ARRAY_COUNT})throw new Error('@esportsplus/data: codec array count '+l+' exceeds limit');`;
 
                         if (et.base === 'boolean' || et.base === 'uint8' || et.base === 'int8') {
-                            source += `if(p+l>b.length)throw new Error('Codec2: truncated array');`;
+                            source += `if(p+l>b.length)throw new Error('@esportsplus/data: codec truncated array');`;
                         }
                         else if (et.base === 'uint16' || et.base === 'int16') {
-                            source += `if(p+l*2>b.length)throw new Error('Codec2: truncated array');`;
+                            source += `if(p+l*2>b.length)throw new Error('@esportsplus/data: codec truncated array');`;
                         }
                         else if (et.base === 'uint32' || et.base === 'int32') {
-                            source += `if(p+l*4>b.length)throw new Error('Codec2: truncated array');`;
+                            source += `if(p+l*4>b.length)throw new Error('@esportsplus/data: codec truncated array');`;
                         }
                         else {
-                            source += `if(p+l*8>b.length)throw new Error('Codec2: truncated array');`;
+                            source += `if(p+l*8>b.length)throw new Error('@esportsplus/data: codec truncated array');`;
                         }
 
                         source += `let a=new Array(l);`;
@@ -335,7 +335,7 @@ function emitArrayDecode(field: FieldDef, index: number, driver: CodegenDriver, 
                     else if (et.base === 'string') {
                         // Typed array<string>: varint count + per-element [varint len][utf8 data]
                         source += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        source += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        source += `if(l>${MAX_ARRAY_COUNT})throw new Error('@esportsplus/data: codec array count '+l+' exceeds limit');`;
                         source += `let a=new Array(l);`;
                         source += `for(let i=0;i<l;i++){let sl=b[p];if(sl<128){p+=1;}else{_rv(b,p);sl=_vrs.v;p=_vrs.p;}if(p+sl>b.length)throw new Error('SBC: truncated');a[i]=${driver.readStr('p', 'sl')};p+=sl;}`;
                         source += `f${index}=a;}\n`;
@@ -343,7 +343,7 @@ function emitArrayDecode(field: FieldDef, index: number, driver: CodegenDriver, 
                     else if (et.base === 'bytes') {
                         // Typed array<bytes>: varint count + per-element [varint len][raw bytes]
                         source += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        source += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        source += `if(l>${MAX_ARRAY_COUNT})throw new Error('@esportsplus/data: codec array count '+l+' exceeds limit');`;
                         source += `let a=new Array(l);`;
                         source += `for(let i=0;i<l;i++){let bl=b[p];if(bl<128){p+=1;}else{_rv(b,p);bl=_vrs.v;p=_vrs.p;}if(p+bl>b.length)throw new Error('SBC: truncated');a[i]=new Uint8Array(b.subarray(p,p+bl));p+=bl;}`;
                         source += `f${index}=a;}\n`;
@@ -354,7 +354,7 @@ function emitArrayDecode(field: FieldDef, index: number, driver: CodegenDriver, 
 
                         if (refParam) {
                             source += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                            source += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            source += `if(l>${MAX_ARRAY_COUNT})throw new Error('@esportsplus/data: codec array count '+l+' exceeds limit');`;
                             source += `let a=new Array(l);`;
                             source += `for(let i=0;i<l;i++){let _dl=b[p];`;
                             source += `if(_dl<128){p+=1;a[i]=${refParam}(b,p,_d+1);p+=_dl;}`;
@@ -364,7 +364,7 @@ function emitArrayDecode(field: FieldDef, index: number, driver: CodegenDriver, 
                         else {
                             // Referenced schema not compiled — tagged fallback
                             source += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                            source += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                            source += `if(l>${MAX_ARRAY_COUNT})throw new Error('@esportsplus/data: codec array count '+l+' exceeds limit');`;
                             source += `let a=new Array(l);`;
                             source += `for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}`;
                             source += `f${index}=a;}\n`;
@@ -373,7 +373,7 @@ function emitArrayDecode(field: FieldDef, index: number, driver: CodegenDriver, 
                     else {
                         // Container element types: varint count + tagged elements
                         source += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}`;
-                        source += `if(l>${MAX_ARRAY_COUNT})throw new Error('Codec2: array count '+l+' exceeds limit');`;
+                        source += `if(l>${MAX_ARRAY_COUNT})throw new Error('@esportsplus/data: codec array count '+l+' exceeds limit');`;
                         source += `let a=new Array(l);`;
                         source += `for(let i=0;i<l;i++){let e=_dte(b,p,b.length,_d+1);a[i]=_dec(b,p,e,_d+1);p=e;}`;
                         source += `f${index}=a;}\n`;
@@ -406,7 +406,7 @@ function emitObjectDecode(field: FieldDef, index: number, driver: CodegenDriver,
                         source += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                         source += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
                         source += `_s=_reg.get(_h)||_lk(_h);`;
-                        source += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${index}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${index}=_s.decodeFn(b,p+9,_d+1);}else{f${index}=null;}}else{throw new Error('Codec2: unknown schema hash '+_h);}`;
+                        source += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${index}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${index}=_s.decodeFn(b,p+9,_d+1);}else{f${index}=null;}}else{throw new Error('@esportsplus/data: codec unknown schema hash '+_h);}`;
                         source += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
                         source += `else{let e=_dte(b,p,b.length,_d+1);f${index}=_dec(b,p,e,_d+1);p=e;}}\n`;
                     }
@@ -417,7 +417,7 @@ function emitObjectDecode(field: FieldDef, index: number, driver: CodegenDriver,
                     source += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                     source += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
                     source += `_s=_reg.get(_h)||_lk(_h);`;
-                    source += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${index}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${index}=_s.decodeFn(b,p+9,_d+1);}else{f${index}=null;}}else{throw new Error('Codec2: unknown schema hash '+_h);}`;
+                    source += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${index}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${index}=_s.decodeFn(b,p+9,_d+1);}else{f${index}=null;}}else{throw new Error('@esportsplus/data: codec unknown schema hash '+_h);}`;
                     source += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
                     source += `else{let e=_dte(b,p,b.length,_d+1);f${index}=_dec(b,p,e,_d+1);p=e;}}\n`;
                 }
@@ -482,7 +482,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
                 break;
 
             case 'int64':
-                body += `if(${val}<-9223372036854775808n||${val}>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');if(p+8<=b.length){_wBI64.call(b,${val},p);}p+=8;\n`;
+                body += `if(${val}<-9223372036854775808n||${val}>=9223372036854775808n)throw new Error('@esportsplus/data: codec bigint out of int64 range');if(p+8<=b.length){_wBI64.call(b,${val},p);}p+=8;\n`;
                 break;
 
             case 'date':
@@ -545,7 +545,7 @@ function compileEncoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
         )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint, classifyPackedArray, TYPED_ARRAY_BPE, ...refEncBindValues);
     }
     catch (e) {
-        throw new Error('Codec2: encoder compilation failed: ' + (e instanceof Error ? e.message : e));
+        throw new Error('@esportsplus/data: codec encoder compilation failed: ' + (e instanceof Error ? e.message : e), { cause: e });
     }
 }
 
@@ -628,11 +628,11 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
 
             case 'string':
                 // Inline varint read — single byte for lengths < 128 (common case)
-                body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('Codec2: truncated string');f${i}=${d.readStr('p', 'l')};p+=l;}\n`;
+                body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('@esportsplus/data: codec truncated string');f${i}=${d.readStr('p', 'l')};p+=l;}\n`;
                 break;
 
             case 'bytes':
-                body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('Codec2: truncated bytes');f${i}=new Uint8Array(b.subarray(p,p+l));p+=l;}\n`;
+                body += `{let l=b[p];if(l<128){p+=1;}else{_rv(b,p);l=_vrs.v;p=_vrs.p;}if(p+l>b.length)throw new Error('@esportsplus/data: codec truncated bytes');f${i}=new Uint8Array(b.subarray(p,p+l));p+=l;}\n`;
                 break;
 
             case 'array':
@@ -683,7 +683,7 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
         return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, helpers.lookupSchema, readVarint, _vr, Ctor, TYPED_ARRAY_BPE, ...refDecBindValues);
     }
     catch (e) {
-        throw new Error('Codec2: decoder compilation failed: ' + (e instanceof Error ? e.message : e));
+        throw new Error('@esportsplus/data: codec decoder compilation failed: ' + (e instanceof Error ? e.message : e), { cause: e });
     }
 }
 
@@ -815,7 +815,7 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
         )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, helpers.lookupSchema, readVarint, readZigzag, _vr, Ctor, TYPED_ARRAY_BPE, ...refDecBindValues);
     }
     catch (e) {
-        throw new Error('Codec2: compressed decoder compilation failed: ' + (e instanceof Error ? e.message : e));
+        throw new Error('@esportsplus/data: codec compressed decoder compilation failed: ' + (e instanceof Error ? e.message : e), { cause: e });
     }
 }
 
@@ -866,7 +866,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
                     body += `if(${v}!=null){_bm|=${1 << f.nullIndex};`;
                 }
 
-                body += `if(${v}<-9223372036854775808n||${v}>=9223372036854775808n)throw new Error('Codec2: bigint out of int64 range');if(p+8<=b.length){_wBI64.call(b,${v},p);}p+=8;\n`;
+                body += `if(${v}<-9223372036854775808n||${v}>=9223372036854775808n)throw new Error('@esportsplus/data: codec bigint out of int64 range');if(p+8<=b.length){_wBI64.call(b,${v},p);}p+=8;\n`;
 
                 if (f.nullable) {
                     body += `}\n`;
@@ -1061,7 +1061,7 @@ function compileCompressedEncoder(schema: Schema, d: CodegenDriver, helpers: Sbc
         )(...bindArgs, helpers.encodeSbc, helpers.encodeObj, writeVarint, writeZigzag, classifyPackedArray, TYPED_ARRAY_BPE, ...refEncBindValues);
     }
     catch (e) {
-        throw new Error('Codec2: compressed encoder compilation failed: ' + (e instanceof Error ? e.message : e));
+        throw new Error('@esportsplus/data: codec compressed encoder compilation failed: ' + (e instanceof Error ? e.message : e), { cause: e });
     }
 }
 

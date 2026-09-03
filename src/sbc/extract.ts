@@ -95,7 +95,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
                     pos = _vr.p;
 
                     if (count > MAX_ARRAY_COUNT) {
-                        throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                        throw new Error('@esportsplus/data: codec array count ' + count + ' exceeds limit');
                     }
 
                     let elemSize = f.elementType.base ? FIELD_SIZES[f.elementType.base] : 0;
@@ -104,7 +104,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
                         pos += count * elemSize;
 
                         if (pos > buffer.length) {
-                            throw new Error('Codec2: buffer too short for field at offset ' + pos);
+                            throw new Error('@esportsplus/data: codec buffer too short for field at offset ' + pos);
                         }
                     }
                     else if (f.elementType.base === 'string' || f.elementType.base === 'bytes') {
@@ -140,14 +140,14 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
                     pos += 5;
 
                     if (count > MAX_ARRAY_COUNT) {
-                        throw new Error('Codec2: array count ' + count + ' exceeds limit');
+                        throw new Error('@esportsplus/data: codec array count ' + count + ' exceeds limit');
                     }
 
                     if (flag > 0) {
                         pos += count * TYPED_ARRAY_BPE[flag - 1]!;
 
                         if (pos > buffer.length) {
-                            throw new Error('Codec2: buffer too short for field at offset ' + pos);
+                            throw new Error('@esportsplus/data: codec buffer too short for field at offset ' + pos);
                         }
                     }
                     else {
@@ -200,7 +200,7 @@ function extractField(ctx: ExtractContext, buffer: Uint8Array, fieldName: string
     // pos now points to target field data
     if (target.fixedSize > 0) {
         if (pos + target.fixedSize > buffer.length) {
-            throw new Error('Codec2: buffer too short for field at offset ' + pos);
+            throw new Error('@esportsplus/data: codec buffer too short for field at offset ' + pos);
         }
 
         return readFixedField(buffer, pos, target.type);

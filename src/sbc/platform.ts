@@ -270,7 +270,7 @@ function readVarint(buf: Uint8Array, pos: number): void {
     let len = buf.length;
 
     if (pos >= len) {
-        throw new Error('Codec2: varint read past end of buffer');
+        throw new Error('@esportsplus/data: codec varint read past end of buffer');
     }
 
     let b = buf[pos++]!,
@@ -279,7 +279,7 @@ function readVarint(buf: Uint8Array, pos: number): void {
     if (b < 128) { _vr.p = pos; _vr.v = value >>> 0; return; }
 
     if (pos >= len) {
-        throw new Error('Codec2: varint read past end of buffer');
+        throw new Error('@esportsplus/data: codec varint read past end of buffer');
     }
 
     b = buf[pos++]!;
@@ -288,7 +288,7 @@ function readVarint(buf: Uint8Array, pos: number): void {
     if (b < 128) { _vr.p = pos; _vr.v = value >>> 0; return; }
 
     if (pos >= len) {
-        throw new Error('Codec2: varint read past end of buffer');
+        throw new Error('@esportsplus/data: codec varint read past end of buffer');
     }
 
     b = buf[pos++]!;
@@ -297,7 +297,7 @@ function readVarint(buf: Uint8Array, pos: number): void {
     if (b < 128) { _vr.p = pos; _vr.v = value >>> 0; return; }
 
     if (pos >= len) {
-        throw new Error('Codec2: varint read past end of buffer');
+        throw new Error('@esportsplus/data: codec varint read past end of buffer');
     }
 
     b = buf[pos++]!;
@@ -306,14 +306,14 @@ function readVarint(buf: Uint8Array, pos: number): void {
     if (b < 128) { _vr.p = pos; _vr.v = value >>> 0; return; }
 
     if (pos >= len) {
-        throw new Error('Codec2: varint read past end of buffer');
+        throw new Error('@esportsplus/data: codec varint read past end of buffer');
     }
 
     b = buf[pos++]!;
     value |= (b & 0x0F) << 28;
 
     if (b & 0x80) {
-        throw new Error('Codec2: varint exceeds 5 bytes');
+        throw new Error('@esportsplus/data: codec varint exceeds 5 bytes');
     }
 
     _vr.p = pos;

@@ -48,7 +48,7 @@ function validateHinted(schema: Schema, obj: Record<string, unknown>): void {
 
         if (value === null || value === undefined) {
             if (!f.nullable) {
-                throw new Error("Codec2: field '" + name + "' is required (non-nullable)");
+                throw new Error("@esportsplus/data: codec field '" + name + "' is required (non-nullable)");
             }
 
             continue;
@@ -70,7 +70,7 @@ function validateHinted(schema: Schema, obj: Record<string, unknown>): void {
 
 function validateHintedArray(name: string, value: unknown, elementType: FieldDef['elementType']): void {
     if (!Array.isArray(value)) {
-        throw new Error("Codec2: field '" + name + "' expected array, got " + typeof value);
+        throw new Error("@esportsplus/data: codec field '" + name + "' expected array, got " + typeof value);
     }
 
     if (!elementType) {
@@ -83,7 +83,7 @@ function validateHintedArray(name: string, value: unknown, elementType: FieldDef
 
         if (elementType.hash !== undefined) {
             if (element === null || typeof element !== 'object' || Array.isArray(element) || ((element as object).constructor !== Object && (element as object).constructor !== undefined)) {
-                throw new Error("Codec2: field '" + elementName + "' expected plain object");
+                throw new Error("@esportsplus/data: codec field '" + elementName + "' expected plain object");
             }
         }
         else if (elementType.base !== 'mixed' && elementType.base !== 'typedarray') {
@@ -95,13 +95,13 @@ function validateHintedArray(name: string, value: unknown, elementType: FieldDef
 
 function validateHintedInt(name: string, value: unknown, type: string): void {
     if (typeof value !== 'number' || !Number.isInteger(value)) {
-        throw new Error("Codec2: field '" + name + "' expected " + type + ', got ' + (typeof value === 'number' ? value : typeof value));
+        throw new Error("@esportsplus/data: codec field '" + name + "' expected " + type + ', got ' + (typeof value === 'number' ? value : typeof value));
     }
 
     let range = HINTED_INT_RANGE[type]!;
 
     if (value < range[0] || value > range[1]) {
-        throw new Error("Codec2: field '" + name + "' value " + value + ' out of ' + type + ' range [' + range[0] + ', ' + range[1] + ']');
+        throw new Error("@esportsplus/data: codec field '" + name + "' value " + value + ' out of ' + type + ' range [' + range[0] + ', ' + range[1] + ']');
     }
 }
 
@@ -110,39 +110,39 @@ function validateHintedPrimitive(name: string, value: unknown, type: string): vo
     switch (type) {
         case 'int64':
             if (typeof value !== 'bigint') {
-                throw new Error("Codec2: field '" + name + "' expected bigint, got " + typeof value);
+                throw new Error("@esportsplus/data: codec field '" + name + "' expected bigint, got " + typeof value);
             }
 
             if (value < INT64_MIN || value >= INT64_OVERFLOW) {
-                throw new Error("Codec2: field '" + name + "' bigint out of int64 range");
+                throw new Error("@esportsplus/data: codec field '" + name + "' bigint out of int64 range");
             }
 
             break;
 
         case 'boolean':
             if (typeof value !== 'boolean') {
-                throw new Error("Codec2: field '" + name + "' expected boolean, got " + typeof value);
+                throw new Error("@esportsplus/data: codec field '" + name + "' expected boolean, got " + typeof value);
             }
 
             break;
 
         case 'bytes':
             if (!(value instanceof Uint8Array)) {
-                throw new Error("Codec2: field '" + name + "' expected bytes (Uint8Array)");
+                throw new Error("@esportsplus/data: codec field '" + name + "' expected bytes (Uint8Array)");
             }
 
             break;
 
         case 'date':
             if (!(value instanceof Date)) {
-                throw new Error("Codec2: field '" + name + "' expected date (Date)");
+                throw new Error("@esportsplus/data: codec field '" + name + "' expected date (Date)");
             }
 
             break;
 
         case 'float64':
             if (typeof value !== 'number') {
-                throw new Error("Codec2: field '" + name + "' expected float64, got " + typeof value);
+                throw new Error("@esportsplus/data: codec field '" + name + "' expected float64, got " + typeof value);
             }
 
             break;
@@ -158,7 +158,7 @@ function validateHintedPrimitive(name: string, value: unknown, type: string): vo
 
         case 'string':
             if (typeof value !== 'string') {
-                throw new Error("Codec2: field '" + name + "' expected string, got " + typeof value);
+                throw new Error("@esportsplus/data: codec field '" + name + "' expected string, got " + typeof value);
             }
 
             break;
@@ -247,7 +247,7 @@ const codec = (options?: CodecOptions): {
         let ctor = (obj as { constructor?: unknown } | null)?.constructor;
 
         if (ctor !== Object && ctor !== undefined) {
-            throw new Error('Codec2: unencodable value (' + ((ctor as { name?: string }).name ?? typeof obj) + ')');
+            throw new Error('@esportsplus/data: codec unencodable value (' + ((ctor as { name?: string }).name ?? typeof obj) + ')');
         }
 
         return encodePlainObject(ectx, obj, buf, pos);
@@ -512,7 +512,7 @@ const codec = (options?: CodecOptions): {
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
 
             if (9 + ((buffer[5]! | (buffer[6]! << 8) | (buffer[7]! << 16) | (buffer[8]! << 24)) >>> 0) > len) {
-                throw new Error('Codec2: truncated tag-8 object');
+                throw new Error('@esportsplus/data: codec truncated tag-8 object');
             }
 
             if (hash === dctx.lastDecodeHash && dctx.lastDecodeFn) {
@@ -533,7 +533,7 @@ const codec = (options?: CodecOptions): {
         // Tag 18 (compressed object) fast path
         if (buffer[0] === 18 && len >= 9 && len <= buffer.length) {
             if (9 + ((buffer[5]! | (buffer[6]! << 8) | (buffer[7]! << 16) | (buffer[8]! << 24)) >>> 0) > len) {
-                throw new Error('Codec2: truncated tag-18 object');
+                throw new Error('@esportsplus/data: codec truncated tag-18 object');
             }
 
             let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
@@ -573,13 +573,13 @@ const codec = (options?: CodecOptions): {
             }
 
             if (end > MAX_ENCODE_BUF) {
-                throw new Error('Codec2: encode buffer growth exceeded');
+                throw new Error('@esportsplus/data: codec encode buffer growth exceeded');
             }
 
             encodeBuf = allocBuf(Math.max(end, encodeBuf.length) * 2);
         }
 
-        throw new Error('Codec2: encode buffer growth exceeded');
+        throw new Error('@esportsplus/data: codec encode buffer growth exceeded');
     }
 
     function encodeObject(schema: Schema, obj: Record<string, unknown>, view: boolean, validate: boolean): Uint8Array {
@@ -689,7 +689,7 @@ const codec = (options?: CodecOptions): {
 
         if (tag === 8 || tag === 18) {
             if (offset + 9 > buffer.length) {
-                throw new Error('Codec2: truncated tag-8/18 header at offset ' + offset);
+                throw new Error('@esportsplus/data: codec truncated tag-8/18 header at offset ' + offset);
             }
 
             let dataLen = (buffer[offset + 5]! | (buffer[offset + 6]! << 8) | (buffer[offset + 7]! << 16) | (buffer[offset + 8]! << 24)) >>> 0;
@@ -709,7 +709,7 @@ const codec = (options?: CodecOptions): {
 
         for (let i = 0, n = sorted.length; i < n; i++) {
             if (!IDENTIFIER.test(sorted[i]!.name)) {
-                throw new Error('Codec2: invalid field name: ' + sorted[i]!.name);
+                throw new Error('@esportsplus/data: codec invalid field name: ' + sorted[i]!.name);
             }
         }
 
@@ -748,7 +748,7 @@ const codec = (options?: CodecOptions): {
         }
 
         if (nullableCount > 16) {
-            throw new Error('Codec2: max 16 nullable fields per schema');
+            throw new Error('@esportsplus/data: codec max 16 nullable fields per schema');
         }
 
         let boolFields: number[] = [],
@@ -814,7 +814,7 @@ const codec = (options?: CodecOptions): {
             let s = registry.schemas.get(hint);
 
             if (!s) {
-                throw new Error('Codec2: unknown schema hash ' + hint);
+                throw new Error('@esportsplus/data: codec unknown schema hash ' + hint);
             }
 
             return s;

@@ -38,7 +38,7 @@ function computeSize(ctx: SizeContext, value: unknown): number {
     switch (typeof value) {
         case 'bigint':
             if (value < INT64_MIN || value >= INT64_OVERFLOW) {
-                throw new Error('Codec2: bigint out of int64 range');
+                throw new Error('@esportsplus/data: codec bigint out of int64 range');
             }
 
             return 9;
@@ -372,7 +372,7 @@ function sizeVariableField(ctx: SizeContext, f: FieldDef, v: unknown): number {
         }
 
         default:
-            throw new Error('Codec2: size walker reached unknown field type ' + f.type);
+            throw new Error('@esportsplus/data: codec size walker reached unknown field type ' + f.type);
     }
 }
 
@@ -383,7 +383,7 @@ function sizeEncodeObj(ctx: SizeContext, v: unknown): number {
     let ctor = (v as { constructor?: unknown } | null)?.constructor;
 
     if (ctor !== Object && ctor !== undefined) {
-        throw new Error('Codec2: unencodable value (' + ((ctor as { name?: string }).name ?? typeof v) + ')');
+        throw new Error('@esportsplus/data: codec unencodable value (' + ((ctor as { name?: string }).name ?? typeof v) + ')');
     }
 
     let obj = v as Record<string, unknown>,
