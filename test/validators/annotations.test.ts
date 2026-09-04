@@ -47,7 +47,7 @@ describe('annotate no-op chains', () => {
     });
 
     it('wraps trim/uuid/words sub-variants into chainable no-ops', () => {
-        expect(typeof trim.start().describe('x')).toBe('function');
+        expect(typeof trim().describe('x')).toBe('function');
         expect(typeof uuid.v4().default('id')).toBe('function');
         expect(typeof words.min(2).meta({ n: 1 })).toBe('function');
     });

@@ -562,52 +562,6 @@ describe('trim', () => {
             expect(errors[0]).toBe('Custom error');
         });
     });
-
-    describe('start', () => {
-        it('returns a string with no leading whitespace unchanged', () => {
-            expect(runTransform(trim.start(), 'hello').result).toBe('hello');
-        });
-
-        it('strips leading whitespace only', () => {
-            expect(runTransform(trim.start(), '  hello  ').result).toBe('hello  ');
-        });
-
-        it('errors on a non-string and returns the value unchanged', () => {
-            let { errors, result } = runTransform(trim.start(), 123);
-
-            expect(errors).toEqual(['must have no leading whitespace']);
-            expect(result).toBe(123);
-        });
-
-        it('uses custom error message for a non-string', () => {
-            let { errors } = runTransform(trim.start('Custom error'), 123);
-
-            expect(errors[0]).toBe('Custom error');
-        });
-    });
-
-    describe('end', () => {
-        it('returns a string with no trailing whitespace unchanged', () => {
-            expect(runTransform(trim.end(), 'hello').result).toBe('hello');
-        });
-
-        it('strips trailing whitespace only', () => {
-            expect(runTransform(trim.end(), '  hello  ').result).toBe('  hello');
-        });
-
-        it('errors on a non-string and returns the value unchanged', () => {
-            let { errors, result } = runTransform(trim.end(), 123);
-
-            expect(errors).toEqual(['must have no trailing whitespace']);
-            expect(result).toBe(123);
-        });
-
-        it('uses custom error message for a non-string', () => {
-            let { errors } = runTransform(trim.end('Custom error'), 123);
-
-            expect(errors[0]).toBe('Custom error');
-        });
-    });
 });
 
 

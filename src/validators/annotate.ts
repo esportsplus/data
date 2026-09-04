@@ -10,6 +10,15 @@ type Annotate<V> =
 
 type AnnotateReturn<R> = R extends Annotatable ? Annotated<R> : R;
 
+// Higher-order signature so a generic factory (e.g. `trim`) keeps its type
+// parameter through annotation: matching `(...args: A) => R` lets inference
+// carry `R`'s generics, which the mapped `Annotate<V>` erases via `infer R`.
+// The `Annotate<V>` fallback still covers non-factory values.
+type Annotator = {
+    <A extends unknown[], R>(value: (...args: A) => R): (...args: A) => AnnotateReturn<R>;
+    <V>(value: V): Annotate<V>;
+};
+
 
 function attach<F extends Annotatable>(value: F): Annotated<F> {
     let annotated = value as unknown as Record<string, unknown>;
@@ -26,9 +35,9 @@ function identity(this: unknown): unknown {
 }
 
 
-const annotate = <V>(value: V): Annotate<V> => {
+const annotate = ((value: unknown): unknown => {
     if (typeof value !== 'function') {
-        return value as unknown as Annotate<V>;
+        return value;
     }
 
     let factory = value as unknown as (...args: unknown[]) => Annotatable,
@@ -41,8 +50,8 @@ const annotate = <V>(value: V): Annotate<V> => {
         wrapped[key] = typeof property === 'function' ? annotate(property) : property;
     }
 
-    return wrapped as unknown as Annotate<V>;
-};
+    return wrapped;
+}) as unknown as Annotator;
 
 const fn: {
     <T>(f: Transformer<T>): Annotated<Transformer<T>>;
