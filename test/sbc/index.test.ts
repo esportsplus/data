@@ -845,7 +845,7 @@ describe('Codec2', () => {
             // DataView is excluded from the typed-array branch and is not a plain
             // record, so the encoder rejects it with a named throw rather than
             // silently emitting tag 0 (null).
-            expect(() => c.encode(dv)).toThrow('Codec2: unrepresentable value of type DataView');
+            expect(() => c.encode(dv)).toThrow('@esportsplus/data: codec unrepresentable value of type DataView');
         });
     });
 
@@ -1111,7 +1111,7 @@ describe('Codec2', () => {
         it('throws when the declared length truncates an array', () => {
             let encoded = c.encode(Array.from({ length: 11 }, (_, i) => i));
 
-            expect(() => c.decode(encoded, 3)).toThrow(/^Codec2:/);
+            expect(() => c.decode(encoded, 3)).toThrow(/^@esportsplus\/data: codec/);
         });
 
         it('decode with length shorter than buffer ignores trailing bytes', () => {
@@ -1195,8 +1195,8 @@ describe('Codec2', () => {
                 wrapped[1] = 1;
                 wrapped.set(inner, 5);
 
-                expect(() => c.decode(inner)).toThrow(/^Codec2:/);
-                expect(() => c.decode(wrapped)).toThrow(/^Codec2:/);
+                expect(() => c.decode(inner)).toThrow(/^@esportsplus\/data: codec/);
+                expect(() => c.decode(wrapped)).toThrow(/^@esportsplus\/data: codec/);
             });
         }
     });
@@ -3466,13 +3466,13 @@ describe('Codec2', () => {
         it('decode: tag 15 throws unknown tag', () => {
             let buf = new Uint8Array([15, 0, 0, 0, 0]);
 
-            expect(() => c.decode(buf)).toThrow('Codec2: unknown tag 15');
+            expect(() => c.decode(buf)).toThrow('@esportsplus/data: codec unknown tag 15');
         });
 
         it('decode: tag 16 throws unknown tag', () => {
             let buf = new Uint8Array([16, 0, 0, 0, 0]);
 
-            expect(() => c.decode(buf)).toThrow('Codec2: unknown tag 16');
+            expect(() => c.decode(buf)).toThrow('@esportsplus/data: codec unknown tag 16');
         });
 
         it('defineSchema refuses a field typed map', () => {
@@ -3490,7 +3490,7 @@ describe('Codec2', () => {
         it('defineSchema refuses a field typed bigint (renamed to int64)', () => {
             let c = codec();
 
-            expect(() => c.defineSchema([{ name: 'big', type: 'bigint' }])).toThrow('Codec2: unknown field type: bigint');
+            expect(() => c.defineSchema([{ name: 'big', type: 'bigint' }])).toThrow('@esportsplus/data: codec unknown field type: bigint');
         });
 
         it('int64 (KNOWN_TYPES sanity): round-trips through tagged, compiled, compressed, and hinted paths', () => {
@@ -3709,13 +3709,13 @@ describe('Codec2', () => {
         it('defineSchema rejects field name with spaces', () => {
             let c = codec();
 
-            expect(() => c.defineSchema([{ name: 'bad field', type: 'uint8' }])).toThrow('Codec2: invalid field name');
+            expect(() => c.defineSchema([{ name: 'bad field', type: 'uint8' }])).toThrow('@esportsplus/data: codec invalid field name');
         });
 
         it('defineSchema rejects field name with special chars', () => {
             let c = codec();
 
-            expect(() => c.defineSchema([{ name: 'field@name!', type: 'string' }])).toThrow('Codec2: invalid field name');
+            expect(() => c.defineSchema([{ name: 'field@name!', type: 'string' }])).toThrow('@esportsplus/data: codec invalid field name');
         });
 
         it('defineSchema accepts valid field names', () => {
@@ -3749,7 +3749,7 @@ describe('Codec2', () => {
 
             let c2 = codec();
 
-            expect(() => c2.deserializeRegistry(corrupt)).toThrow('Codec2: invalid field name in registry data');
+            expect(() => c2.deserializeRegistry(corrupt)).toThrow('@esportsplus/data: codec invalid field name in registry data');
         });
     });
 
@@ -3761,7 +3761,7 @@ describe('Codec2', () => {
             // tag=8 but buffer only 5 bytes — needs 9 for full header
             let buf = new Uint8Array([8, 0, 0, 0, 0]);
 
-            expect(() => c.decodeAt(buf, 0)).toThrow('Codec2: truncated tag-8/18 header');
+            expect(() => c.decodeAt(buf, 0)).toThrow('@esportsplus/data: codec truncated tag-8/18 header');
         });
 
         it('decodeAt with 5-byte buffer tag=18 throws', () => {
@@ -3769,7 +3769,7 @@ describe('Codec2', () => {
 
             let buf = new Uint8Array([18, 0, 0, 0, 0]);
 
-            expect(() => c.decodeAt(buf, 0)).toThrow('Codec2: truncated tag-8/18 header');
+            expect(() => c.decodeAt(buf, 0)).toThrow('@esportsplus/data: codec truncated tag-8/18 header');
         });
     });
 
@@ -3792,7 +3792,7 @@ describe('Codec2', () => {
             let truncated = valid.slice(0, 11);
 
             // Requesting 'score' (3rd field) should fail because buffer is too short
-            expect(() => c.extractField(truncated, 'score')).toThrow('Codec2: buffer too short for field');
+            expect(() => c.extractField(truncated, 'score')).toThrow('@esportsplus/data: codec buffer too short for field');
         });
     });
 
@@ -3809,7 +3809,7 @@ describe('Codec2', () => {
             // With hint, the condition `len >= 9` fails, so it falls through to normal decode
             // Normal decode path sees tag=8, but buffer.length=6 < 9 — decodeSbc bounds check
             // correctly throws truncation error instead of reading OOB
-            expect(() => c.decode(buf, { schema: hash })).toThrow('Codec2: truncated tag-8/18 header');
+            expect(() => c.decode(buf, { schema: hash })).toThrow('@esportsplus/data: codec truncated tag-8/18 header');
         });
 
         it('decode with schema hint on 9+ byte tag-8 buffer uses hint fast path', () => {
@@ -4361,7 +4361,7 @@ describe('Codec2', () => {
 
             expect(() => c.encode({ data: [1, 'invalid'] }, {
                 schema: [{ name: 'data', type: 'array<uint8>' }],
-            })).toThrow('Codec2:');
+            })).toThrow('@esportsplus/data: codec');
         });
     });
 
@@ -4611,14 +4611,14 @@ describe('Codec2', () => {
         it('encode with an unknown numeric schema hint throws', () => {
             let c = codec();
 
-            expect(() => c.encode({ a: 1 }, { schema: 0xdeadbeef })).toThrow('Codec2: unknown schema hash 3735928559');
+            expect(() => c.encode({ a: 1 }, { schema: 0xdeadbeef })).toThrow('@esportsplus/data: codec unknown schema hash 3735928559');
         });
 
         it('decode with an unknown numeric schema hint still throws (D4 symmetry)', () => {
             let c = codec(),
                 buf = new Uint8Array([8, 0, 0, 0, 0, 0, 0, 0, 0]);
 
-            expect(() => c.decode(buf, { schema: 0xdeadbeef })).toThrow('Codec2: unknown schema hash');
+            expect(() => c.decode(buf, { schema: 0xdeadbeef })).toThrow('@esportsplus/data: codec unknown schema hash');
         });
     });
 });

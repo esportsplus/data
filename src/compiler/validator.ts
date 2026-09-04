@@ -10,6 +10,7 @@ import type { LiteralValue } from '../types';
 type ConfigValidator = {
     async: boolean;
     name: string;
+    transform: boolean;
 };
 
 type PropertyDefault = {
@@ -133,13 +134,32 @@ function forEachChildProp(prop: AnalyzedProperty, visit: (child: AnalyzedPropert
     }
 }
 
+// A transformer's return replaces the slot only when it pushed no error of its own: capture the
+// error count, call it, and assign back only if the count is unchanged. An assertion keeps the
+// bare call. Every transformer is ordered ahead of every assertion (parseConfig), so a later
+// assertion sees the replaced value and the returned data carries it.
 function configInvocations(validators: ConfigValidator[], varname: string): string {
     let parts: string[] = [];
 
     for (let i = 0, n = validators.length; i < n; i++) {
         let validator = validators[i];
 
-        parts.push(`${validator.async ? 'await ' : ''}${validator.name}(${varname}, ${CONFIG_VARIABLE});`);
+        if (validator.transform) {
+            let count = uid('e'),
+                result = uid('r');
+
+            parts.push(code`
+                let ${count} = ${ERRORS_VARIABLE}?.length ?? 0,
+                    ${result} = ${validator.async ? 'await ' : ''}${validator.name}(${varname}, ${CONFIG_VARIABLE});
+
+                if ((${ERRORS_VARIABLE}?.length ?? 0) === ${count}) {
+                    ${varname} = ${result};
+                }
+            `);
+        }
+        else {
+            parts.push(`${validator.async ? 'await ' : ''}${validator.name}(${varname}, ${CONFIG_VARIABLE});`);
+        }
     }
 
     return parts.join('\n');

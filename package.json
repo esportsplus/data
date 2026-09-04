@@ -33,6 +33,10 @@
             "types": "./build/runtime/index.d.ts",
             "default": "./build/runtime/index.js"
         },
+        "./transformers": {
+            "types": "./build/transformers/index.d.ts",
+            "default": "./build/transformers/index.js"
+        },
         "./validators": {
             "types": "./build/validators/index.d.ts",
             "default": "./build/validators/index.js"

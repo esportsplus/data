@@ -9,7 +9,7 @@ import length from '../../src/validators/length';
 import matches from '../../src/validators/matches';
 import normalize from '../../src/validators/normalize';
 import startsWith from '../../src/validators/starts-with';
-import trim from '../../src/validators/trim';
+import trim from '../../src/transformers/trim';
 import words from '../../src/validators/words';
 
 
@@ -513,92 +513,97 @@ describe('matches', () => {
 // ─── trim ───────────────────────────────────────────────────────────────────
 
 
+function runTransform(fn: (value: unknown, errors: { push(msg: string): void }) => unknown, value: unknown): { errors: string[]; result: unknown } {
+    let errors: string[] = [];
+
+    return { errors, result: fn(value, { push: (m) => errors.push(m) }) };
+}
+
+
 describe('trim', () => {
     describe('both', () => {
-        it('passes for already trimmed string', () => {
-            expectPass(trim(), 'hello');
+        it('returns an already trimmed string unchanged', () => {
+            let { errors, result } = runTransform(trim(), 'hello');
+
+            expect(result).toBe('hello');
+            expect(errors).toHaveLength(0);
         });
 
-        it('fails for leading whitespace', () => {
-            expectFail(trim(), '  hello');
+        it('strips leading whitespace', () => {
+            expect(runTransform(trim(), '  hello').result).toBe('hello');
         });
 
-        it('fails for trailing whitespace', () => {
-            expectFail(trim(), 'hello  ');
+        it('strips trailing whitespace', () => {
+            expect(runTransform(trim(), 'hello  ').result).toBe('hello');
         });
 
-        it('fails for both leading and trailing whitespace', () => {
-            expectFail(trim(), '  hello  ');
+        it('strips both leading and trailing whitespace', () => {
+            expect(runTransform(trim(), '  hello  ').result).toBe('hello');
         });
 
-        it('passes for empty string', () => {
-            expectPass(trim(), '');
+        it('returns an empty string unchanged', () => {
+            expect(runTransform(trim(), '').result).toBe('');
         });
 
-        it('passes for string with internal whitespace', () => {
-            expectPass(trim(), 'hello world');
+        it('keeps internal whitespace', () => {
+            expect(runTransform(trim(), '  hello world  ').result).toBe('hello world');
         });
 
-        it('fails for non-string', () => {
-            expectFail(trim(), 123);
+        it('errors on a non-string and returns the value unchanged', () => {
+            let { errors, result } = runTransform(trim(), 123);
+
+            expect(errors).toEqual(['must be trimmed']);
+            expect(result).toBe(123);
         });
 
-        it('uses custom error message', () => {
-            let errors: string[] = [];
-
-            trim('Custom error')('  bad  ', { push: (m) => errors.push(m) });
+        it('uses custom error message for a non-string', () => {
+            let { errors } = runTransform(trim('Custom error'), 123);
 
             expect(errors[0]).toBe('Custom error');
         });
     });
 
     describe('start', () => {
-        it('passes for no leading whitespace', () => {
-            expectPass(trim.start(), 'hello');
+        it('returns a string with no leading whitespace unchanged', () => {
+            expect(runTransform(trim.start(), 'hello').result).toBe('hello');
         });
 
-        it('fails for leading whitespace', () => {
-            expectFail(trim.start(), '  hello');
+        it('strips leading whitespace only', () => {
+            expect(runTransform(trim.start(), '  hello  ').result).toBe('hello  ');
         });
 
-        it('passes for trailing whitespace only', () => {
-            expectPass(trim.start(), 'hello  ');
+        it('errors on a non-string and returns the value unchanged', () => {
+            let { errors, result } = runTransform(trim.start(), 123);
+
+            expect(errors).toEqual(['must have no leading whitespace']);
+            expect(result).toBe(123);
         });
 
-        it('fails for non-string', () => {
-            expectFail(trim.start(), 123);
-        });
-
-        it('uses custom error message', () => {
-            let errors: string[] = [];
-
-            trim.start('Custom error')('  bad', { push: (m) => errors.push(m) });
+        it('uses custom error message for a non-string', () => {
+            let { errors } = runTransform(trim.start('Custom error'), 123);
 
             expect(errors[0]).toBe('Custom error');
         });
     });
 
     describe('end', () => {
-        it('passes for no trailing whitespace', () => {
-            expectPass(trim.end(), 'hello');
+        it('returns a string with no trailing whitespace unchanged', () => {
+            expect(runTransform(trim.end(), 'hello').result).toBe('hello');
         });
 
-        it('fails for trailing whitespace', () => {
-            expectFail(trim.end(), 'hello  ');
+        it('strips trailing whitespace only', () => {
+            expect(runTransform(trim.end(), '  hello  ').result).toBe('  hello');
         });
 
-        it('passes for leading whitespace only', () => {
-            expectPass(trim.end(), '  hello');
+        it('errors on a non-string and returns the value unchanged', () => {
+            let { errors, result } = runTransform(trim.end(), 123);
+
+            expect(errors).toEqual(['must have no trailing whitespace']);
+            expect(result).toBe(123);
         });
 
-        it('fails for non-string', () => {
-            expectFail(trim.end(), 123);
-        });
-
-        it('uses custom error message', () => {
-            let errors: string[] = [];
-
-            trim.end('Custom error')('bad  ', { push: (m) => errors.push(m) });
+        it('uses custom error message for a non-string', () => {
+            let { errors } = runTransform(trim.end('Custom error'), 123);
 
             expect(errors[0]).toBe('Custom error');
         });

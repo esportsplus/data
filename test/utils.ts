@@ -50,6 +50,23 @@ function transformWith(plugins: Plugin[], code: string): string {
     return coordinator.transform(plugins, code, sourceFile, { checker, program }, ROOT, shared).code;
 }
 
+// Transforms against the REAL project program (the tsconfig the vite/ts-patch plugins use),
+// so package and relative imports resolve to their declared types — the scratch checker used by
+// compile() collapses cross-module function aliases to `any`, which hides a config entry's return
+// type and defeats transformer classification. `code` supplies its own imports; the fixture is a
+// virtual file under src/ so `./…` specifiers resolve against sibling modules.
+function transformProject(code: string): string {
+    let configPath = languageService.findConfig(ROOT) ?? '',
+        fileName = ROOT + '/src/__compiler-project-fixture.ts',
+        updated = languageService.update(configPath, fileName, code),
+        sourceFile = updated.program.getSourceFile(fileName) ?? languageService.parse(fileName, code),
+        result = coordinator.transform([plugin], code, sourceFile, { checker: updated.checker, program: updated.program }, ROOT, new Map());
+
+    languageService.invalidate(configPath, fileName);
+
+    return result.code;
+}
+
 // build<T>() now compiles to a hoisted plain object `{ toJsonSchema, validate }`, so unwrap
 // the `.validate` member here — every pre-existing suite keeps its `v(input)` call shape. The
 // hoisted validator body references sibling module-level consts (schema, config factories,
@@ -120,4 +137,4 @@ function evaluateModule(code: string, injected: Record<string, unknown> = {}, ex
 }
 
 
-export { compile, createValidator, evaluateModule, mightNeedTransform, transformCode, transformRaw, transformWith };
+export { compile, createValidator, evaluateModule, mightNeedTransform, transformCode, transformProject, transformRaw, transformWith };

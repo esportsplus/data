@@ -1,22 +1,24 @@
-import type { Annotated, ValidatorFunction } from '~/types';
+import type { Annotated, ErrorType, Transformer, ValidatorFunction } from '~/types';
 
+
+type Annotatable = (value: never, errors: ErrorType) => unknown;
 
 type Annotate<V> =
     V extends (...args: infer A) => infer R
         ? ((...args: A) => AnnotateReturn<R>) & { [K in keyof V]: Annotate<V[K]> }
         : V;
 
-type AnnotateReturn<R> = R extends ValidatorFunction<infer T> ? Annotated<T> : R;
+type AnnotateReturn<R> = R extends Annotatable ? Annotated<R> : R;
 
 
-function attach<T>(value: ValidatorFunction<T>): Annotated<T> {
-    let annotated = value as ValidatorFunction<T> & Record<string, unknown>;
+function attach<F extends Annotatable>(value: F): Annotated<F> {
+    let annotated = value as unknown as Record<string, unknown>;
 
     annotated.default = identity;
     annotated.describe = identity;
     annotated.meta = identity;
 
-    return annotated as unknown as Annotated<T>;
+    return annotated as unknown as Annotated<F>;
 }
 
 function identity(this: unknown): unknown {
@@ -29,7 +31,7 @@ const annotate = <V>(value: V): Annotate<V> => {
         return value as unknown as Annotate<V>;
     }
 
-    let factory = value as unknown as (...args: unknown[]) => ValidatorFunction<unknown>,
+    let factory = value as unknown as (...args: unknown[]) => Annotatable,
         source = value as unknown as Record<string, unknown>,
         wrapped = ((...args: unknown[]) => attach(factory(...args))) as unknown as Record<string, unknown>;
 
@@ -42,7 +44,10 @@ const annotate = <V>(value: V): Annotate<V> => {
     return wrapped as unknown as Annotate<V>;
 };
 
-const fn = <T>(f: ValidatorFunction<T>): Annotated<T> => attach(f);
+const fn: {
+    <T>(f: Transformer<T>): Annotated<Transformer<T>>;
+    <T>(f: ValidatorFunction<T>): Annotated<ValidatorFunction<T>>;
+} = attach;
 
 
 export { annotate, fn };

@@ -55,14 +55,14 @@ describe('Codec2 compiled-decoder count limits', () => {
         ];
 
         for (let hash of shapes) {
-            expect(() => c.decode(objBuf(hash, HOSTILE_VARINT))).toThrow('Codec2: array count ' + HOSTILE_COUNT + ' exceeds limit');
+            expect(() => c.decode(objBuf(hash, HOSTILE_VARINT))).toThrow('@esportsplus/data: codec array count ' + HOSTILE_COUNT + ' exceeds limit');
         }
     });
 
     it('the tagged decoder throws the identical error on the same declared count', () => {
         let c = codec();
 
-        expect(() => c.decode(taggedArrayBuf(HOSTILE_COUNT))).toThrow('Codec2: array count ' + HOSTILE_COUNT + ' exceeds limit');
+        expect(() => c.decode(taggedArrayBuf(HOSTILE_COUNT))).toThrow('@esportsplus/data: codec array count ' + HOSTILE_COUNT + ' exceeds limit');
     });
 
     it('accepts a count of exactly 2^20 — compiled path', () => {
@@ -140,8 +140,8 @@ describe('Codec2 compiled-decoder count limits', () => {
             let plain = buildSchema([{ name: 'f', type: 'array<' + type + '>' }]),
                 compressed = buildSchema([{ name: 'f', type: 'array<' + type + '>' }], true);
 
-            expect(() => plain.decodeFn!(payload, 0, 0)).toThrow('Codec2: truncated array');
-            expect(() => compressed.compressedDecodeFn!(payload, 0, 0)).toThrow('Codec2: truncated array');
+            expect(() => plain.decodeFn!(payload, 0, 0)).toThrow('@esportsplus/data: codec truncated array');
+            expect(() => compressed.compressedDecodeFn!(payload, 0, 0)).toThrow('@esportsplus/data: codec truncated array');
         }
     });
 });
@@ -150,10 +150,10 @@ describe('Codec2 compiled-decoder count limits', () => {
 // Unit-level harness for the encoder/decoder arms — bypasses the codec() registry so the
 // generated function source is directly inspectable via encodeFn.toString().
 const STUB_HELPERS: SbcHelpers = {
-    decodeSbc: () => { throw new Error('Codec2: unexpected decodeSbc call in unit test'); },
-    decodeTagEnd: () => { throw new Error('Codec2: unexpected decodeTagEnd call in unit test'); },
-    encodeObj: () => { throw new Error('Codec2: unexpected encodeObj call in unit test'); },
-    encodeSbc: () => { throw new Error('Codec2: unexpected encodeSbc call in unit test'); },
+    decodeSbc: () => { throw new Error('@esportsplus/data: codec unexpected decodeSbc call in unit test'); },
+    decodeTagEnd: () => { throw new Error('@esportsplus/data: codec unexpected decodeTagEnd call in unit test'); },
+    encodeObj: () => { throw new Error('@esportsplus/data: codec unexpected encodeObj call in unit test'); },
+    encodeSbc: () => { throw new Error('@esportsplus/data: codec unexpected encodeSbc call in unit test'); },
     lookupSchema: () => null,
     registry: new Map(),
 };

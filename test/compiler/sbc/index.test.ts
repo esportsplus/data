@@ -273,13 +273,13 @@ describe('codec2 schema hints runtime', () => {
         expect(() => c.decode(
             new Uint8Array([8, 0, 0, 0, 0, 0, 0, 0, 0]),
             { schema: 99999 }
-        )).toThrow('Codec2: unknown schema hash');
+        )).toThrow('@esportsplus/data: codec unknown schema hash');
     });
 
     test('encode with unknown hash throws', () => {
         let c = codec();
 
-        expect(() => c.encode({ name: 'test' }, { schema: 12345 })).toThrow('Codec2: unknown schema hash 12345');
+        expect(() => c.encode({ name: 'test' }, { schema: 12345 })).toThrow('@esportsplus/data: codec unknown schema hash 12345');
     });
 
     test('encode with view option and schema hint', () => {

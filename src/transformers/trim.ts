@@ -1,36 +1,48 @@
-import type { ValidatorFunction } from '~/types';
+import type { Transformer } from '~/types';
 
 
-type F = (error?: string) => ValidatorFunction<unknown>;
+type F = (error?: string) => Transformer<unknown>;
 
 
 const trim: F & { end: F; start: F } = Object.assign(
-    (error?: string): ValidatorFunction<unknown> => {
+    (error?: string): Transformer<unknown> => {
         let msg = error || 'must be trimmed';
 
         return (value, errors) => {
-            if (typeof value !== 'string' || value !== value.trim()) {
+            if (typeof value !== 'string') {
                 errors.push(msg);
+
+                return value;
             }
+
+            return value.trim();
         };
     },
     {
-        end: (error?: string): ValidatorFunction<unknown> => {
+        end: (error?: string): Transformer<unknown> => {
             let msg = error || 'must have no trailing whitespace';
 
             return (value, errors) => {
-                if (typeof value !== 'string' || value !== value.trimEnd()) {
+                if (typeof value !== 'string') {
                     errors.push(msg);
+
+                    return value;
                 }
+
+                return value.trimEnd();
             };
         },
-        start: (error?: string): ValidatorFunction<unknown> => {
+        start: (error?: string): Transformer<unknown> => {
             let msg = error || 'must have no leading whitespace';
 
             return (value, errors) => {
-                if (typeof value !== 'string' || value !== value.trimStart()) {
+                if (typeof value !== 'string') {
                     errors.push(msg);
+
+                    return value;
                 }
+
+                return value.trimStart();
             };
         }
     }
