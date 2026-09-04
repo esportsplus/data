@@ -34,7 +34,7 @@ describe('Codec2 extractField count limits', () => {
 
         let buf = objBuf(hash, HOSTILE_VARINT);
 
-        expect(() => c.extractField(buf, 'z')).toThrow('Codec2: array count ' + HOSTILE_COUNT + ' exceeds limit');
+        expect(() => c.extractField(buf, 'z')).toThrow('@esportsplus/data: codec array count ' + HOSTILE_COUNT + ' exceeds limit');
     });
 
     it('throws when a preceding generic-array field declares a count above 2^20', () => {
@@ -45,7 +45,7 @@ describe('Codec2 extractField count limits', () => {
         // fire before the flag-driven skip math (pos += count * TYPED_ARRAY_BPE[flag - 1]).
         let buf = objBuf(hash, new Uint8Array([6, 0x80, 0x84, 0x1E, 0x00]));
 
-        expect(() => c.extractField(buf, 'z')).toThrow('Codec2: array count ' + HOSTILE_COUNT + ' exceeds limit');
+        expect(() => c.extractField(buf, 'z')).toThrow('@esportsplus/data: codec array count ' + HOSTILE_COUNT + ' exceeds limit');
     });
 
     it('extracts a field that follows a normal array without throwing', () => {

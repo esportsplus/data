@@ -77,7 +77,7 @@ describe('PersistentStore lazy resolution (cold)', () => {
 
         let reader = codec({ store: nullStore });
 
-        expect(() => reader.decode(buf)).toThrow(/Codec2: unknown schema hash \d+/);
+        expect(() => reader.decode(buf)).toThrow(/@esportsplus\/data: codec unknown schema hash \d+/);
     });
 
     it('memoizes a store hit: a second decode of the same hash adds no further get()', () => {

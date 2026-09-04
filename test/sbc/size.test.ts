@@ -41,7 +41,7 @@ function expectSameThrow(value: unknown): void {
             encMsg = (e as Error).message;
         }
 
-        expect(encMsg).toMatch(/^Codec2:/);
+        expect(encMsg).toMatch(/^@esportsplus\/data: codec/);
         expect(() => instance.computeSize(value)).toThrow(encMsg!);
     }
 }
@@ -202,7 +202,7 @@ describe('Codec2 computeSize — exact encoded byte length', () => {
     });
 
 
-    // === CLAUSE 4 — non-encodable values throw the Codec2: class ===
+    // === CLAUSE 4 — non-encodable values throw the @esportsplus/data: codec class ===
 
     describe('clause 4 — computeSize throws on non-encodable values', () => {
         it('throws Codec2 on a non-encodable function', () => {

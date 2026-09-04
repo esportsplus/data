@@ -180,7 +180,7 @@ describe('CodecOptions.cache isolation', () => {
 
         // a's shape landed in the module singleton; b owns a separate cache and has
         // no store to fall back on, so the shape is genuinely unresolvable to it.
-        expect(() => b.decode(buf)).toThrow('Codec2:');
+        expect(() => b.decode(buf)).toThrow('@esportsplus/data: codec');
     });
 
     it('an isolated codec does not publish inferred shapes to the default cache', () => {
@@ -189,7 +189,7 @@ describe('CodecOptions.cache isolation', () => {
 
         let buf = a.encode({ id: 7, name: 'x' });
 
-        expect(() => b.decode(buf)).toThrow('Codec2:');
+        expect(() => b.decode(buf)).toThrow('@esportsplus/data: codec');
     });
 
     it('an isolated codec consults its own store instead of the shared cache', () => {
@@ -199,7 +199,7 @@ describe('CodecOptions.cache isolation', () => {
 
         let buf = a.encode({ id: 7, name: 'x' });
 
-        expect(() => b.decode(buf)).toThrow('Codec2:');
+        expect(() => b.decode(buf)).toThrow('@esportsplus/data: codec');
 
         // The store lookup a singleton hit would have skipped actually happened.
         expect(store.gets).toBeGreaterThanOrEqual(1);

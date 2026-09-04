@@ -83,28 +83,28 @@ describe('Encodable runtime backstop', () => {
     it('throws a named error for a Map at an untyped call site', () => {
         let c = codec();
 
-        expect(() => c.encode(new Map() as never)).toThrow('Codec2: unrepresentable value of type Map');
+        expect(() => c.encode(new Map() as never)).toThrow('@esportsplus/data: codec unrepresentable value of type Map');
     });
 
     it('throws the named error for a DataView instead of encoding tag 0', () => {
         let c = codec();
 
-        expect(() => c.encode(new DataView(new ArrayBuffer(8)) as never)).toThrow('Codec2: unrepresentable value of type DataView');
+        expect(() => c.encode(new DataView(new ArrayBuffer(8)) as never)).toThrow('@esportsplus/data: codec unrepresentable value of type DataView');
     });
 
     it('throws the named error for a class instance instead of encoding {}', () => {
         let c = codec();
 
-        expect(() => c.encode(new Widget() as never)).toThrow('Codec2: unrepresentable value of type Widget');
+        expect(() => c.encode(new Widget() as never)).toThrow('@esportsplus/data: codec unrepresentable value of type Widget');
     });
 
     it('throws the named error for a Set, WeakMap, RegExp and Promise', () => {
         let c = codec();
 
-        expect(() => c.encode(new Set() as never)).toThrow('Codec2: unrepresentable value of type Set');
-        expect(() => c.encode(new WeakMap() as never)).toThrow('Codec2: unrepresentable value of type WeakMap');
-        expect(() => c.encode(/x/ as never)).toThrow('Codec2: unrepresentable value of type RegExp');
-        expect(() => c.encode(Promise.resolve() as never)).toThrow('Codec2: unrepresentable value of type Promise');
+        expect(() => c.encode(new Set() as never)).toThrow('@esportsplus/data: codec unrepresentable value of type Set');
+        expect(() => c.encode(new WeakMap() as never)).toThrow('@esportsplus/data: codec unrepresentable value of type WeakMap');
+        expect(() => c.encode(/x/ as never)).toThrow('@esportsplus/data: codec unrepresentable value of type RegExp');
+        expect(() => c.encode(Promise.resolve() as never)).toThrow('@esportsplus/data: codec unrepresentable value of type Promise');
     });
 
     it('still encodes null and undefined as tag 0', () => {
@@ -120,7 +120,7 @@ describe('decode path is unchanged', () => {
     it('throws the unknown-tag error for a retired tag', () => {
         let c = codec();
 
-        expect(() => c.decode(Uint8Array.from([15]))).toThrow('Codec2: unknown tag 15');
-        expect(() => c.decode(Uint8Array.from([16]))).toThrow('Codec2: unknown tag 16');
+        expect(() => c.decode(Uint8Array.from([15]))).toThrow('@esportsplus/data: codec unknown tag 15');
+        expect(() => c.decode(Uint8Array.from([16]))).toThrow('@esportsplus/data: codec unknown tag 16');
     });
 });

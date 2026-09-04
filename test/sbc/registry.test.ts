@@ -58,7 +58,7 @@ describe('deserializeRegistry wire-hash verification', () => {
 
         expect(declared).not.toBe(declaredOriginal);
         expect(() => c2.deserializeRegistry(corrupted)).toThrow(
-            new RegExp('Codec2: registry hash mismatch — declared ' + declared + ', computed ' + declaredOriginal),
+            new RegExp('@esportsplus/data: codec registry hash mismatch — declared ' + declared + ', computed ' + declaredOriginal),
         );
     });
 
@@ -72,7 +72,7 @@ describe('deserializeRegistry wire-hash verification', () => {
         let store = makeCountingStore(),
             c2 = codec({ store });
 
-        expect(() => c2.deserializeRegistry(corrupted)).toThrow('Codec2: registry hash mismatch');
+        expect(() => c2.deserializeRegistry(corrupted)).toThrow('@esportsplus/data: codec registry hash mismatch');
         expect(store.sets).toBe(0);
 
         // A single-schema blob throws at index 0 before any registration, so serializing
