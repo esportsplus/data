@@ -560,8 +560,11 @@ function isReadonly(node: ts.Node): boolean {
 function stringIndexInfo(type: ts.Type, checker: ts.Checker): ts.IndexInfo | undefined {
     let infos = checker.getIndexInfosOfType(type);
 
+    // A branded key (`Record<Brand<string, ...>, V>`) resolves to a `string & {...}`
+    // intersection whose flags are Intersection, not String, so match on the resolved
+    // base type instead of the raw flag or the whole record's entries are dropped.
     for (let i = 0, n = infos.length; i < n; i++) {
-        if ((infos[i].keyType.flags & ts.TypeFlags.String) !== 0) {
+        if (resolveBrandedType(infos[i].keyType, checker).base === 'string') {
             return infos[i];
         }
     }

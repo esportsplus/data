@@ -310,6 +310,35 @@ describe('Record validation copies own keys only', () => {
 });
 
 
+describe('Record key type is resolved through brands', () => {
+    it('copies entries for a plain string key', () => {
+        let validate = createValidator(`
+            type Data = { r: Record<string, number> };
+            validator.build<Data>();
+        `);
+
+        let result = validate({ r: { a: 1, b: 2 } });
+
+        expect(result.ok).toBe(true);
+        expect(result.data.r).toEqual({ a: 1, b: 2 });
+    });
+
+    it('copies entries when the key is a branded string', () => {
+        let validate = createValidator(`
+            type Brand<T, B extends string> = T & { __brand: B };
+            type Key = Brand<string, 'Key'>;
+            type Data = { r: Record<Key, number> };
+            validator.build<Data>();
+        `);
+
+        let result = validate({ r: { a: 1, b: 2 } });
+
+        expect(result.ok).toBe(true);
+        expect(result.data.r).toEqual({ a: 1, b: 2 });
+    });
+});
+
+
 describe('Nullable non-union property short-circuits null (E-P1)', () => {
     it('accepts null without invoking the configured validator', () => {
         let calls = 0,
