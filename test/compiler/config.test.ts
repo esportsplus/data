@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { max, min } from '../../src/validators';
 import { transformCode } from '../utils';
+import type { ValidatorConfig } from '../../src/types';
 
 
 type Result = { data: unknown; errors?: Array<{ message: string; path: string }>; ok: boolean };
@@ -155,6 +156,67 @@ describe('validator.build config pipeline', () => {
             validate({ name: 'abcd' });
 
             expect(calls).toBe(1);
+        });
+    });
+
+    describe('transformers', () => {
+        it('runs a transformer before an assertion listed ahead of it', () => {
+            let validate = build(
+                `type User = { name: string };
+                 const validate = validator.build<User>({ name: [max(2, 'too long'), (value) => typeof value === 'string' ? value.trim() : value] });`,
+                { max }
+            );
+
+            let result = validate({ name: '  hi  ' }) as Result;
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual({ name: 'hi' });
+        });
+
+        it('applies an inline arrow transformer to the output', () => {
+            let validate = build(
+                `type User = { name: string };
+                 const validate = validator.build<User>({ name: (value) => typeof value === 'string' ? value.toUpperCase() : value });`
+            );
+
+            let result = validate({ name: 'abc' }) as Result;
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual({ name: 'ABC' });
+        });
+
+        it('awaits an async transformer and assigns its result', async () => {
+            let source = `type User = { name: string };
+                 const validate = validator.build<User>({ name: async (value) => { await tick(); return typeof value === 'string' ? value.trim() : value; } });`,
+                validate = build(source, { tick: async () => {} });
+
+            expect(transformCode(source)).toContain('async (_input)');
+
+            let result = await validate({ name: '  hi  ' });
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual({ name: 'hi' });
+        });
+
+        it('ignores a transformer return when the transformer pushed an error', () => {
+            let validate = build(
+                `type User = { name: string };
+                 const validate = validator.build<User>({ name: (value, errors) => { errors.push('bad'); return 'REPLACED'; } });`
+            );
+
+            let result = validate({ name: 'keep' }) as Result;
+
+            expect(result.ok).toBe(false);
+            expect(result.errors).toEqual([{ message: 'bad', path: 'name' }]);
+            expect(result.data).toEqual({ name: 'keep' });
+        });
+
+        it('accepts a mix of Transformer and ValidatorFunction in one array', () => {
+            let config: ValidatorConfig<{ name: string }> = {
+                name: [(value, errors) => { if (!value) { errors.push('empty'); } }, (value) => value.trim()]
+            };
+
+            expect(Array.isArray(config.name)).toBe(true);
         });
     });
 

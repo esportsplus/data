@@ -67,20 +67,23 @@ interface ValidationError {
     path: string;
 }
 
+type Transformer<T> = (value: T, errors: ErrorType) => T | Promise<T>;
+
 type ValidatorConfig<T> = {
     [K in keyof T]?:
+        | Transformer<T[K]>
         | ValidatorFunction<T[K]>
-        | ValidatorFunction<T[K]>[]
+        | (Transformer<T[K]> | ValidatorFunction<T[K]>)[]
 };
 
 type ValidatorFn<T> = (input: unknown) => ValidationResult<T> | Promise<ValidationResult<T>>;
 
 type ValidatorFunction<T> = (value: T, errors: ErrorType) => void | Promise<void>;
 
-type Annotated<T> = ValidatorFunction<T> & {
-    default(value: T): Annotated<T>;
-    describe(text: string): Annotated<T>;
-    meta(values: Record<string, unknown>): Annotated<T>;
+type Annotated<F extends (value: never, errors: ErrorType) => unknown> = F & {
+    default(value: Parameters<F>[0]): Annotated<F>;
+    describe(text: string): Annotated<F>;
+    meta(values: Record<string, unknown>): Annotated<F>;
 };
 
 type AnnotationDefault = {
@@ -116,6 +119,7 @@ export type {
     JsonSchema,
     LiteralValue,
     Schema,
+    Transformer,
     ValidationError,
     ValidationResult,
     Validator,

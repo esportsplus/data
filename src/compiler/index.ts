@@ -68,6 +68,59 @@ function isAsyncFunction(node: ts.Expression): boolean {
     return false;
 }
 
+// A config entry is a transformer when its declared return type carries a value the compiler
+// must assign back to the slot. Classify by the first call signature's return type: unwrap a
+// `Promise<X>` wrapper, then treat a return whose every (union) constituent is void/undefined/never
+// as an assertion. Anything else (a real value, `unknown`, an inferred inline-arrow body) is a
+// transformer. An unresolved callee (no type, no signature) degrades to an assertion.
+function isTransformer(base: ts.Expression, checker: ts.Checker): boolean {
+    let type = checker.getTypeAtLocation(base);
+
+    if (type === undefined) {
+        return false;
+    }
+
+    let signatures = checker.getSignaturesOfType(type, ts.SignatureKind.Call);
+
+    if (signatures.length === 0) {
+        return false;
+    }
+
+    let returnType = checker.getReturnTypeOfSignature(signatures[0]);
+
+    if (returnType === undefined) {
+        return false;
+    }
+
+    let constituents = returnType.isUnionType() ? returnType.getTypes() : [returnType];
+
+    for (let i = 0, n = constituents.length; i < n; i++) {
+        if (!isVoidLike(unwrapPromise(constituents[i], checker))) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function isVoidLike(type: ts.Type): boolean {
+    return (type.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Never)) !== 0;
+}
+
+function unwrapPromise(type: ts.Type, checker: ts.Checker): ts.Type {
+    let symbol = type.getSymbol();
+
+    if (symbol !== undefined && symbol.name === 'Promise' && type.isTypeReference()) {
+        let args = checker.getTypeArguments(type);
+
+        if (args.length > 0) {
+            return args[0];
+        }
+    }
+
+    return type;
+}
+
 // `imports.includes` resolves LOCAL BINDINGS built from named specifiers only, so a namespace
 // import (`import * as data from '@esportsplus/data'`) contributes no name and can never match
 // through it. Resolve that binding here so ns.validator.<m><T>() is detected, while still keying
@@ -99,7 +152,7 @@ function namespaceLocalName(sourceFile: ts.SourceFile): string | undefined {
 // Per-property config: parse the ValidatorConfig object literal, hoist each validator
 // expression to a module-level const (factory calls run once at module eval), and record
 // the hoisted name + AST-derived asyncness so the generator can invoke it per property.
-function parseConfig(configArg: ts.Expression, analyzed: AnalyzedType, sourceFile: ts.SourceFile): ParsedConfig {
+function parseConfig(configArg: ts.Expression, analyzed: AnalyzedType, sourceFile: ts.SourceFile, checker: ts.Checker): ParsedConfig {
     if (!ts.isObjectLiteralExpression(configArg)) {
         return { hasAsync: false, hoisted: [] };
     }
@@ -130,10 +183,11 @@ function parseConfig(configArg: ts.Expression, analyzed: AnalyzedType, sourceFil
             continue;
         }
 
-        let expressions = ts.isArrayLiteralExpression(entry.initializer)
+        let assertions: ConfigValidator[] = [],
+            expressions = ts.isArrayLiteralExpression(entry.initializer)
                 ? entry.initializer.elements
                 : [entry.initializer],
-            configValidators: ConfigValidator[] = [];
+            transformers: ConfigValidator[] = [];
 
         for (let j = 0, m = expressions.length; j < m; j++) {
             let expression = expressions[j];
@@ -144,15 +198,20 @@ function parseConfig(configArg: ts.Expression, analyzed: AnalyzedType, sourceFil
 
             let base = peelAnnotations(expression, sourceFile).base,
                 async = isAsyncFunction(base),
+                transform = isTransformer(base, checker),
                 variable = uid('v');
 
             hoisted.push(`const ${variable} = ${base.getText(sourceFile)};`);
-            configValidators.push({ async, name: variable });
+            (transform ? transformers : assertions).push({ async, name: variable, transform });
 
             if (async) {
                 hasAsync = true;
             }
         }
+
+        // Every transformer runs before every assertion regardless of authored order, so a later
+        // assertion validates the replaced value; source order is preserved within each group.
+        let configValidators = [...transformers, ...assertions];
 
         if (configValidators.length > 0) {
             map.set(key, configValidators);
@@ -217,7 +276,7 @@ function transform(call: DetectedCall, ctx: TransformContext, validators: Map<st
     }
 
     let config = call.configArg
-            ? parseConfig(call.configArg, analyzed, ctx.sourceFile)
+            ? parseConfig(call.configArg, analyzed, ctx.sourceFile, ctx.checker)
             : undefined,
         defaults = new Map<string, PropertyDefault>(),
         extracted = call.configArg

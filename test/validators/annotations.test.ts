@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { email, fn, min, trim, uuid, words } from '../../src/validators';
+import { email, fn, min, uuid, words } from '../../src/validators';
+import { trim } from '../../src/transformers';
 import type { ErrorType } from '../../src/types';
 
 

@@ -606,8 +606,9 @@ const v = validator.build<User>({
 });
 ```
 
-Built-in validators live at `@esportsplus/data/validators` (never the package root — the root
-export surface is only `codec`, `validator`, and shared types).
+Built-in validators live at `@esportsplus/data/validators`, and built-in transformers live at
+`@esportsplus/data/transformers` (never the package root — the root export surface is only
+`codec`, `validator`, and shared types).
 
 #### Built-in Validators
 
@@ -620,11 +621,30 @@ README documents by name:
 | `min(n)` | Minimum value/length |
 | `max(n)` | Maximum value/length |
 | `range(min, max)` | Value/length between min and max |
-| `trim()` / `trim.start()` / `trim.end()` | Asserts the string has no leading/trailing whitespace (does not trim it) |
+| `trim()` / `trim.start()` / `trim.end()` | **Transformer** — trims leading/trailing whitespace and returns the trimmed string; lives at `@esportsplus/data/transformers` (not `/validators`) |
 | `normalize()` / `.nfd()` / `.nfkc()` / `.nfkd()` | Asserts the string is already Unicode-normalized in the given form (does not normalize it) |
 
-`trim`/`normalize` are **assertions**, not transforms: they push an error when the input isn't
-already in the expected form; they never mutate the value.
+A config function can be either an **assertion** or a **transformer**:
+
+```typescript
+type Transformer<T> = (value: T, errors: ErrorType) => T | Promise<T>;
+```
+
+A function that returns a value replaces the property's value with what it returns; one that
+returns `void` is an assertion that only validates. Inline arrows are classified by their inferred
+return type; factory calls (like `trim()`) by their declared return type.
+
+- **Transformers run first.** Every transformer for a property runs before every assertion for
+  that property, regardless of their order in the config array (a stable partition — source order
+  is preserved within each group). Assertions therefore always validate the transformed value.
+- **A transformer's return is ignored if it pushed any error** during its call — the slot is left
+  unchanged, and only when it added no errors is the returned value assigned. On a non-string
+  input, for example, `trim` pushes its error message and leaves the value untouched.
+- `trim` is now such a transformer, imported from `@esportsplus/data/transformers`
+  (`import { trim } from '@esportsplus/data/transformers'`). `normalize` remains an assertion in
+  `@esportsplus/data/validators`.
+- Brands registered via `validator.set()` remain **assertion-only** — a `return` there has no
+  receiver.
 
 #### Multiple Validators
 
@@ -860,6 +880,23 @@ const v = {
 Note the emitted error array is `_errors` (plural) and property checks run in alphabetical
 property order (`age`, `email`, `name`), not declaration order — both are generator details, not
 guarantees to code against.
+
+The compiler also reorders a property's config functions so every transformer runs before every
+assertion, regardless of array order. Given `{ name: [min(2), trim()] }`, the trim transformer is
+emitted ahead of the `min` assertion even though it is listed second (temp names below are
+generator-assigned and differ run to run):
+
+```javascript
+// { name: [min(2), trim()] } compiles the transformer (trim) BEFORE the assertion (min):
+let e_1 = _errors?.length ?? 0,
+    r_1 = v_trim(_output.name, _config);   // transformer runs first
+
+if ((_errors?.length ?? 0) === e_1) {
+    _output.name = r_1;                    // return applied only if it pushed no error
+}
+
+v_min(_output.name, _config);              // assertion sees the trimmed value
+```
 
 **Generated validator optimizations:**
 

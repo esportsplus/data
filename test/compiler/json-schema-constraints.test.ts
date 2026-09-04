@@ -358,7 +358,7 @@ describe('extractConstraints', () => {
 
     describe('degrade paths', () => {
         it('degrades an unknown builtin, keeping recognized siblings', () => {
-            let result = extract(build("import { min, trim } from '@esportsplus/data/validators';", '{ name: string }', '{ name: [trim(), min(1)] }'));
+            let result = extract(build("import { min } from '@esportsplus/data/validators';\nimport { trim } from '@esportsplus/data/transformers';", '{ name: string }', '{ name: [trim(), min(1)] }'));
 
             expect(result.get('name')).toEqual({ minLength: 1 });
         });
