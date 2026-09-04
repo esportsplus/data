@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { max, min } from '../../src/validators';
-import { transformCode } from '../utils';
+import { trim } from '../../src/transformers';
+import { transformCode, transformProject } from '../utils';
 import type { ValidatorConfig } from '../../src/types';
 
 
@@ -17,6 +18,21 @@ function build(source: string, injected: Record<string, unknown> = {}): Validato
     let body = transformCode(source)
             .split('\n')
             .filter((line) => !/^\s*import\b/.test(line) && !/^\s*type\b/.test(line))
+            .join('\n'),
+        keys = Object.keys(injected);
+
+    // eslint-disable-next-line no-new-func
+    return new Function(...keys, `${body}\nreturn validate.validate;`)(...keys.map((key) => injected[key])) as Validator;
+}
+
+// Same eval strategy as build(), but compiled against the REAL project program (transformProject)
+// so an imported factory's declared return type resolves — the only way a built-in transformer such
+// as trim() is classified as a transformer rather than degrading to an assertion. The fixture must
+// carry its own imports; they are dropped before eval and the factories are injected instead.
+function buildProject(source: string, injected: Record<string, unknown> = {}): Validator {
+    let body = transformProject(source)
+            .split('\n')
+            .filter((line) => !/^\s*import\b/.test(line) && !/^\s*type\b/.test(line) && !/^\s*export\b/.test(line))
             .join('\n'),
         keys = Object.keys(injected);
 
@@ -217,6 +233,36 @@ describe('validator.build config pipeline', () => {
             };
 
             expect(Array.isArray(config.name)).toBe(true);
+        });
+
+        it('classifies and applies the built-in trim() transformer end-to-end', () => {
+            let validate = buildProject(
+                `import { validator } from '@esportsplus/data';
+                 import { trim } from './transformers';
+                 type User = { name: string };
+                 const validate = validator.build<User>({ name: trim() });`,
+                { trim }
+            );
+
+            let result = validate({ name: '  spaced  ' }) as Result;
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual({ name: 'spaced' });
+        });
+
+        it('runs the built-in trim() transformer before an assertion listed ahead of it', () => {
+            let validate = buildProject(
+                `import { validator } from '@esportsplus/data';
+                 import { trim } from './transformers';
+                 type User = { name: string };
+                 const validate = validator.build<User>({ name: [max(2, 'too long'), trim()] });`,
+                { max, trim }
+            );
+
+            let result = validate({ name: '  hi  ' }) as Result;
+
+            expect(result.ok).toBe(true);
+            expect(result.data).toEqual({ name: 'hi' });
         });
     });
 
