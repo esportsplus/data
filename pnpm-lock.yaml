@@ -14,8 +14,8 @@ importers:
   .:
     dependencies:
       '@esportsplus/utilities':
-        specifier: ^0.28.1
-        version: 0.28.1
+        specifier: ^0.28.3
+        version: 0.28.3
       esbuild:
         specifier: '>=0.17.0'
         version: 0.27.2
@@ -24,8 +24,8 @@ importers:
         version: 5.9.3
     devDependencies:
       '@esportsplus/typescript':
-        specifier: ^0.33.4
-        version: 0.33.4
+        specifier: ^0.34.1
+        version: 0.34.1
       '@types/node':
         specifier: ^26.4.1
         version: 26.4.1
@@ -200,18 +200,15 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@esportsplus/cli-passthrough@0.0.15':
-    resolution: {integrity: sha512-HOO2MAJ2KcHRMND9Obo9/CRdsgud4e3sqggj1d0xuD4XQMzBW02yF/c1bV6BAMR1o2PDaEdoufL/dkLVyuiD2g==}
+  '@esportsplus/cli-passthrough@0.0.18':
+    resolution: {integrity: sha512-Vk37QhV09aW/PKkwGULox5lYupMyZHl06XZtrxwltk0TDJCdkAgMGteG7AU4qohurlDC3GDhnv16lItYl7dfkw==}
 
-  '@esportsplus/typescript@0.33.4':
-    resolution: {integrity: sha512-5r3Xjam5BEmn7xqwKHHpRAGyzfVVk2z+chMH7lMs08N6wyOGsfFsJgvTwXKZkG37EL/+CgnguaJYKpsZo+Wttg==}
+  '@esportsplus/typescript@0.34.1':
+    resolution: {integrity: sha512-NZZ7hrt/8eUPylub0vnvViMvwJajU+e+Q2kQ0IkxU5Z/X5fuHrnRziP76MZ1pHDkMLMkW8i6y922zUB6B5ctSw==}
     hasBin: true
 
-  '@esportsplus/utilities@0.28.0':
-    resolution: {integrity: sha512-mQuQ+EPd68d6dGoCZlG3s0dkUtQq7yMsUW7IYqhJobNx5SQ4IqtFbfcAob/EICfwQRy3GYzS2nbHpA9oogSHFw==}
-
-  '@esportsplus/utilities@0.28.1':
-    resolution: {integrity: sha512-P+JUyDDL9kY1xMe5PA1nqr16PPqAJTBrnNshXaMdRIZ4Ito/aZIHLVC5pdHlXUXT1Exd3yxhYH4WuFL8zJ5utw==}
+  '@esportsplus/utilities@0.28.3':
+    resolution: {integrity: sha512-3VkKFM0m2hwZ/N7WXSQecaV+bIS1vf2aqM104l1q/ootoBOASvqqbQlD3CjVRm+SJIY//RspuZFR7DyXGUHKhA==}
 
   '@jridgewell/resolve-uri@3.1.2':
     resolution: {integrity: sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw==}
@@ -1030,21 +1027,19 @@ snapshots:
   '@esbuild/win32-x64@0.27.2':
     optional: true
 
-  '@esportsplus/cli-passthrough@0.0.15': {}
+  '@esportsplus/cli-passthrough@0.0.18': {}
 
-  '@esportsplus/typescript@0.33.4':
+  '@esportsplus/typescript@0.34.1':
     dependencies:
-      '@esportsplus/cli-passthrough': 0.0.15
-      '@esportsplus/utilities': 0.28.0
+      '@esportsplus/cli-passthrough': 0.0.18
+      '@esportsplus/utilities': 0.28.3
       '@types/node': 26.4.1
       tsc-alias: 1.9.4
       typescript: 7.0.2
       vscode-languageserver: 10.1.1
       vscode-languageserver-textdocument: 1.0.14
 
-  '@esportsplus/utilities@0.28.0': {}
-
-  '@esportsplus/utilities@0.28.1': {}
+  '@esportsplus/utilities@0.28.3': {}
 
   '@jridgewell/resolve-uri@3.1.2': {}
 
@@ -1221,7 +1216,7 @@ snapshots:
   anymatch@3.1.3:
     dependencies:
       normalize-path: 3.0.0
-      picomatch: 4.0.5
+      picomatch: 4.0.7
 
   array-union@2.1.0: {}
 
@@ -1406,7 +1401,7 @@ snapshots:
   micromatch@4.0.8:
     dependencies:
       braces: 3.0.3
-      picomatch: 4.0.5
+      picomatch: 4.0.7
 
   msgpackr-extract@3.0.4:
     dependencies:
@@ -1465,7 +1460,7 @@ snapshots:
 
   readdirp@3.6.0:
     dependencies:
-      picomatch: 4.0.5
+      picomatch: 4.0.7
 
   resolve-pkg-maps@1.0.0: {}
 
