@@ -2,6 +2,7 @@
 // Zero per-field branching: all type checks happen at compile time
 
 import { MAX_ARRAY_COUNT } from './constants';
+import { SchemaMissError } from './errors';
 import { _vr, classifyPackedArray, codegenDriver, readVarint, readZigzag, TYPED_ARRAY_BPE, writeVarint, writeZigzag } from './platform';
 import type { CodegenDriver } from './platform';
 
@@ -406,7 +407,7 @@ function emitObjectDecode(field: FieldDef, index: number, driver: CodegenDriver,
                         source += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                         source += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
                         source += `_s=_reg.get(_h)||_lk(_h);`;
-                        source += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${index}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${index}=_s.decodeFn(b,p+9,_d+1);}else{f${index}=null;}}else{throw new Error('@esportsplus/data: codec unknown schema hash '+_h);}`;
+                        source += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${index}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${index}=_s.decodeFn(b,p+9,_d+1);}else{f${index}=null;}}else{throw new _miss(_h);}`;
                         source += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
                         source += `else{let e=_dte(b,p,b.length,_d+1);f${index}=_dec(b,p,e,_d+1);p=e;}}\n`;
                     }
@@ -417,7 +418,7 @@ function emitObjectDecode(field: FieldDef, index: number, driver: CodegenDriver,
                     source += `let _h=(b[p+1]|(b[p+2]<<8)|(b[p+3]<<16)|(b[p+4]<<24))>>>0,`;
                     source += `_dl=(b[p+5]|(b[p+6]<<8)|(b[p+7]<<16)|(b[p+8]<<24))>>>0,`;
                     source += `_s=_reg.get(_h)||_lk(_h);`;
-                    source += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${index}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${index}=_s.decodeFn(b,p+9,_d+1);}else{f${index}=null;}}else{throw new Error('@esportsplus/data: codec unknown schema hash '+_h);}`;
+                    source += `if(_s){if(b[p]===18&&_s.compressedDecodeFn){f${index}=_s.compressedDecodeFn(b,p+9,_d+1);}else if(_s.decodeFn){f${index}=_s.decodeFn(b,p+9,_d+1);}else{f${index}=null;}}else{throw new _miss(_h);}`;
                     source += `if(p+9+_dl>b.length)throw new Error('SBC: truncated');p+=9+_dl;}`;
                     source += `else{let e=_dte(b,p,b.length,_d+1);f${index}=_dec(b,p,e,_d+1);p=e;}}\n`;
                 }
@@ -678,9 +679,9 @@ function compileDecoder(schema: Schema, d: CodegenDriver, helpers: SbcHelpers): 
         refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
 
     try {
-        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_lk', '_rv', '_vrs', '_Ctor', '_bpe', ...refDecParamNames, `return function decode(b,pos,_d){${body}}`);
+        let factory = new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_lk', '_miss', '_rv', '_vrs', '_Ctor', '_bpe', ...refDecParamNames, `return function decode(b,pos,_d){${body}}`);
 
-        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, helpers.lookupSchema, readVarint, _vr, Ctor, TYPED_ARRAY_BPE, ...refDecBindValues);
+        return factory(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, helpers.lookupSchema, SchemaMissError, readVarint, _vr, Ctor, TYPED_ARRAY_BPE, ...refDecBindValues);
     }
     catch (e) {
         throw new Error('@esportsplus/data: codec decoder compilation failed: ' + (e instanceof Error ? e.message : e), { cause: e });
@@ -811,8 +812,8 @@ function compileCompressedDecoder(schema: Schema, d: CodegenDriver, helpers: Sbc
         refDecBindValues = [...refHashes.keys()].map(h => helpers.registry.get(h)!.decodeFn!);
 
     try {
-        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_lk', '_rv', '_rz', '_vrs', '_Ctor', '_bpe', ...refDecParamNames, `return function decodeC(b,pos,_d){${body}}`)
-        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, helpers.lookupSchema, readVarint, readZigzag, _vr, Ctor, TYPED_ARRAY_BPE, ...refDecBindValues);
+        return (new Function(d.decoderParams(), '_dec', '_dte', '_reg', '_lk', '_miss', '_rv', '_rz', '_vrs', '_Ctor', '_bpe', ...refDecParamNames, `return function decodeC(b,pos,_d){${body}}`)
+        )(...bindArgs, helpers.decodeSbc, helpers.decodeTagEnd, helpers.registry, helpers.lookupSchema, SchemaMissError, readVarint, readZigzag, _vr, Ctor, TYPED_ARRAY_BPE, ...refDecBindValues);
     }
     catch (e) {
         throw new Error('@esportsplus/data: codec compressed decoder compilation failed: ' + (e instanceof Error ? e.message : e), { cause: e });

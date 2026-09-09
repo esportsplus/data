@@ -2,6 +2,7 @@
 // Extracted from codec() closure; state threaded via DecodeContext / EncodeContext
 
 import { INT64_MIN, INT64_OVERFLOW, MAX_ARRAY_COUNT } from './constants';
+import { SchemaMissError } from './errors';
 import { byteLen, classifyPackedArray, readBI64, readF64, readStr, TYPED_ARRAY_BPE, TYPED_ARRAY_CTORS, TYPED_ARRAY_IDS, writeBI64, writeF64, writeUtf8 } from './platform';
 import { inferAndRegister } from './schema';
 
@@ -125,7 +126,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
                     : (dctx.schemas.get(hash) ?? dctx.resolveSchema(hash));
 
             if (!schema || !schema.decodeFn) {
-                throw new Error('@esportsplus/data: codec unknown schema hash ' + hash);
+                throw new SchemaMissError(hash);
             }
 
             // lastDecodeFn must move with lastDecodeHash: decode()'s cross-call fast-path dispatches
@@ -153,7 +154,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
                 schema = dctx.schemas.get(hash) ?? dctx.resolveSchema(hash);
 
             if (!schema) {
-                throw new Error('@esportsplus/data: codec unknown schema hash ' + hash);
+                throw new SchemaMissError(hash);
             }
 
             if (schema.compressedDecodeFn) {

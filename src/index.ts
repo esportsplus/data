@@ -24,17 +24,20 @@ const validator: Validator = {
 };
 
 
-export { codec } from './sbc/index';
+export { codec, createAsyncCache, createCache, resolvable, SchemaMissError } from './sbc/index';
 export { validator };
 export * from './types';
 
 export type {
+    AsyncCache,
+    Cache,
     CodecOptions,
     DecodeOptions,
     EncodeOptions,
     FieldSpec,
     PersistentStore,
     Schema,
+    SchemaCache,
     SchemaRegistry,
     StoredSchema,
 } from './sbc/index';

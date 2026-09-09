@@ -11,6 +11,7 @@ TypeScript validation and binary encoding. Validators are generated at compile t
 - **Branded Type Validators**: Register validators for branded types
 - **Schema Pre-Registration**: Define schemas upfront with `defineSchema` for known object shapes
 - **Persistent Schema Store**: Share schemas across codec instances or persist to storage
+- **Deferred Schema Resolution**: Resolve decode-time schema misses over I/O by pairing `resolvable` with an async batch-fetch cache
 
 ## Installation
 
@@ -220,6 +221,85 @@ let c = codec({
 });
 ```
 
+### Schema Cache
+
+The codec resolves object shapes through a bounded, SIEVE-evicted cache. By default every codec
+shares one process-wide singleton, so codecs built with `codec()` also share resolved shapes. Pass
+a dedicated cache to isolate a codec — a `store` alone does not isolate it, because a singleton hit
+short-circuits the store lookup.
+
+```typescript
+import { codec, createCache } from '@esportsplus/data';
+
+let cache = createCache<number, StoredSchema>();
+
+let c = codec({ cache });
+```
+
+`createCache<K, V>(maxSize?)` is generic over key and value; `maxSize` defaults to 1024.
+`SchemaCache` is the codec's instantiation — `Cache<number, StoredSchema>`. Pass `maxSize: Infinity`
+to build a cache that never evicts — use it when the cache is the authority others read from (see
+Resolving Decode Misses).
+
+```typescript
+type Cache<K, V> = {
+    clear(): void;
+    get(key: K): V | null;
+    set(key: K, value: V): void;
+};
+
+type SchemaCache = Cache<number, StoredSchema>;
+```
+
+### Resolving Decode Misses
+
+`decode()` throws a `SchemaMissError` when it meets a tag-8/18 object whose schema hash is unknown
+to the registry, cache, and store. The error carries the unresolved hash on `.hash`, so a resolver
+can fetch the shape and retry instead of matching the message string.
+
+`createAsyncCache(cache, fetch)` wraps a sync `Cache` with a user-supplied
+`fetch: (keys: K[]) => Promise<Map<K, V>>`. It exposes only `all(keys)`, which reads hits from the
+sync cache, batches every miss into ONE `fetch` call, writes the results back into the sync cache,
+and returns the merged map. In-flight keys are deduped across concurrent `all()` calls; a rejected
+fetch rejects the dependent `all()` and clears the in-flight marks so the next call retries.
+
+```typescript
+type AsyncCache<K, V> = {
+    all(keys: readonly K[]): Promise<Map<K, V>>;
+};
+```
+
+`resolvable(codec, asyncCache)` returns an async `decode(buffer)` that retries a sync decode across
+`SchemaMissError`s, fetching the missing shape through the async cache between attempts. An internal
+`attempted` guard errors out — rather than looping forever — when a fetched entry still does not
+resolve the hash.
+
+The intended pattern: a decode miss over the wire is resolved by pairing `resolvable` with a
+`createAsyncCache` whose `fetch` batches the missing hashes to a server endpoint. Give the codec and
+the async cache the **same** cache instance so a fetched shape lands where `decode()` looks it up —
+an `Infinity`-sized cache makes that shared cache a non-evicting authority.
+
+```typescript
+import { codec, createAsyncCache, createCache, resolvable } from '@esportsplus/data';
+
+// One shared, non-evicting cache is the authority both the codec and fetch write into
+let cache = createCache<number, StoredSchema>(Infinity);
+
+let c = codec({ cache });
+
+// fetch batches missing hashes to a server endpoint in one request
+let schemas = createAsyncCache(cache, async (hashes) => {
+    let res = await fetch('/schemas?hashes=' + hashes.join(','));
+
+    return new Map(await res.json()); // Map<number, StoredSchema>
+});
+
+let decode = resolvable(c, schemas);
+
+// A SchemaMissError triggers one batched fetch, caches the shape, and retries
+let value = await decode(buffer);
+```
+
 ### Schema Hints (Encode/Decode)
 
 Pass schema hints to skip runtime matching:
@@ -289,6 +369,7 @@ c.computeSize(new Map()); // throws: Codec2: unrepresentable value of type Map
 function codec(options?: CodecOptions): SbcCodec;
 
 type CodecOptions = {
+    cache?: SchemaCache;
     compress?: boolean;
     store?: PersistentStore;
 };

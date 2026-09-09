@@ -864,6 +864,11 @@ const codec = (options?: CodecOptions): {
 
 
 export { codec };
+export { createAsyncCache } from './async';
+export { createCache } from './cache';
+export { SchemaMissError } from './errors';
+export { resolvable } from './resolve';
 export type { CodecOptions, DecodeOptions, Encodable, EncodeOptions, FieldSpec, PersistentStore, SchemaRegistry } from './types';
 export type { Schema } from './codegen';
-export type { StoredSchema } from './cache';
+export type { AsyncCache } from './async';
+export type { Cache, SchemaCache, StoredSchema } from './cache';

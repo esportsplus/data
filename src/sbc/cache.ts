@@ -1,20 +1,22 @@
-// Codec2 — SIEVE-evicted bounded schema cache
+// Codec2 — SIEVE-evicted bounded cache
 
 import type { FieldSpec } from './types';
 
-type CacheEntry = {
-    hash: number;
-    next: CacheEntry | null;
-    prev: CacheEntry | null;
-    schema: StoredSchema;
+type Cache<K, V> = {
+    clear(): void;
+    get(key: K): V | null;
+    set(key: K, value: V): void;
+};
+
+type CacheEntry<K, V> = {
+    key: K;
+    next: CacheEntry<K, V> | null;
+    prev: CacheEntry<K, V> | null;
+    value: V;
     visited: boolean;
 };
 
-type SchemaCache = {
-    clear(): void;
-    get(hash: number): StoredSchema | null;
-    set(hash: number, schema: StoredSchema): void;
-};
+type SchemaCache = Cache<number, StoredSchema>;
 
 type StoredSchema = {
     fields: FieldSpec[];
@@ -28,11 +30,12 @@ const DEFAULT_MAX_SIZE = 1024;
 // Each instance owns its entry graph, so two codecs given separate caches cannot
 // resolve each other's shapes — the isolation `CodecOptions.store` alone cannot give,
 // because a global cache hit short-circuits the per-codec store lookup entirely.
-const createCache = (maxSize: number = DEFAULT_MAX_SIZE): SchemaCache => {
-    let hand: CacheEntry | null = null,
-        head: CacheEntry | null = null,
-        map = new Map<number, CacheEntry>(),
-        tail: CacheEntry | null = null;
+// `maxSize: Infinity` never evicts — use it when the cache is the authority others read from.
+const createCache = <K = number, V = StoredSchema>(maxSize: number = DEFAULT_MAX_SIZE): Cache<K, V> => {
+    let hand: CacheEntry<K, V> | null = null,
+        head: CacheEntry<K, V> | null = null,
+        map = new Map<K, CacheEntry<K, V>>(),
+        tail: CacheEntry<K, V> | null = null;
 
     function evictOne(): void {
         let o = hand ?? tail;
@@ -48,10 +51,10 @@ const createCache = (maxSize: number = DEFAULT_MAX_SIZE): SchemaCache => {
 
         hand = o.prev;
         unlinkEntry(o);
-        map.delete(o.hash);
+        map.delete(o.key);
     }
 
-    function unlinkEntry(entry: CacheEntry): void {
+    function unlinkEntry(entry: CacheEntry<K, V>): void {
         if (entry.prev) {
             entry.prev.next = entry.next;
         }
@@ -76,11 +79,11 @@ const createCache = (maxSize: number = DEFAULT_MAX_SIZE): SchemaCache => {
     return {
         clear(): void {
             hand = head = tail = null;
-            map = new Map<number, CacheEntry>();
+            map = new Map<K, CacheEntry<K, V>>();
         },
 
-        get(hash: number): StoredSchema | null {
-            let entry = map.get(hash);
+        get(key: K): V | null {
+            let entry = map.get(key);
 
             if (!entry) {
                 return null;
@@ -88,11 +91,11 @@ const createCache = (maxSize: number = DEFAULT_MAX_SIZE): SchemaCache => {
 
             entry.visited = true;
 
-            return entry.schema;
+            return entry.value;
         },
 
-        set(hash: number, schema: StoredSchema): void {
-            let entry = map.get(hash);
+        set(key: K, value: V): void {
+            let entry = map.get(key);
 
             if (entry) {
                 entry.visited = true;
@@ -104,7 +107,7 @@ const createCache = (maxSize: number = DEFAULT_MAX_SIZE): SchemaCache => {
                 evictOne();
             }
 
-            entry = { hash, next: null, prev: null, schema, visited: false };
+            entry = { key, next: null, prev: null, value, visited: false };
 
             if (head) {
                 entry.next = head;
@@ -115,12 +118,12 @@ const createCache = (maxSize: number = DEFAULT_MAX_SIZE): SchemaCache => {
             }
 
             head = entry;
-            map.set(hash, entry);
+            map.set(key, entry);
         },
     };
 }
 
 
-export default createCache();
+export default createCache<number, StoredSchema>();
 export { createCache };
-export type { SchemaCache, StoredSchema };
+export type { Cache, SchemaCache, StoredSchema };
