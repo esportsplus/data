@@ -124,6 +124,9 @@ A declared schema is honored for every object whose keys AND value types match �
 first shape the codec happens to see — so pre-registering ahead of the first `encode()` call
 guarantees the fast path regardless of call order.
 
+Field names are arbitrary non-empty strings — hyphens, dots, spaces, and unicode are all allowed
+(e.g. `prompt-stash`, `a.b`, `日本`), up to 65535 UTF-8 bytes — and keys are matched by exact string.
+
 #### Field Types
 
 | Type | Description |

@@ -1,10 +1,9 @@
 // Registry serialization/deserialization — wire format for schema exchange
 // Extracted from codec() closure; pure functions with explicit parameters
 
-import { IDENTIFIER } from '../constants';
 import { MAX_SCHEMA_COUNT } from './constants';
 import { allocBuf, byteLen, readStr, writeUtf8 } from './platform';
-import { computeShapeHash, parseFieldType } from './schema';
+import { computeShapeHash, parseFieldType, validateFieldName } from './schema';
 
 import type { FieldSpec } from './types';
 import type { Schema } from './codegen';
@@ -56,9 +55,7 @@ function deserializeRegistry(data: Uint8Array, defineSchemaFn: (fields: FieldSpe
 
             let name = readStr(data, pos, nameLen);
 
-            if (!IDENTIFIER.test(name)) {
-                throw new Error('@esportsplus/data: codec invalid field name in registry data: ' + name);
-            }
+            validateFieldName(name);
 
             pos += nameLen;
 

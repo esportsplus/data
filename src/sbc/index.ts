@@ -2,12 +2,11 @@
 // JIT-compiled per-shape encode/decode, zero per-field branching at runtime
 
 import { INT64_MIN, INT64_OVERFLOW, FIELD_SIZES } from './constants';
-import { IDENTIFIER } from '../constants';
 import { compileSchema } from './codegen';
 import { extractField } from './extract';
 import { allocBuf, allocUnsafe, copyBuf } from './platform';
 import { deserializeRegistry, serializeRegistry } from './registry';
-import { computeNameHash, computeShapeHash, inferAndRegister, inferType, parseFieldType } from './schema';
+import { computeNameHash, computeShapeHash, inferAndRegister, inferType, parseFieldType, validateFieldName } from './schema';
 import { computeSize } from './size';
 import { decodeSbc, decodeTagEnd, encodePlainObject, encodeSbc } from './tagged';
 
@@ -708,9 +707,7 @@ const codec = (options?: CodecOptions): {
         let sorted = fields.slice().sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 
         for (let i = 0, n = sorted.length; i < n; i++) {
-            if (!IDENTIFIER.test(sorted[i]!.name)) {
-                throw new Error('@esportsplus/data: codec invalid field name: ' + sorted[i]!.name);
-            }
+            validateFieldName(sorted[i]!.name);
         }
 
         let keys: string[] = new Array(sorted.length),

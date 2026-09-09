@@ -1,6 +1,6 @@
 import { FIELD_SIZES, FNV_OFFSET, FNV_PRIME, KNOWN_TYPES } from './constants';
 import { compileSchema } from './codegen';
-import { readBI64, readF64 } from './platform';
+import { byteLen, readBI64, readF64 } from './platform';
 
 import type { SchemaCache } from './cache';
 import type { FieldDef, ParsedType, Schema, SbcHelpers } from './codegen';
@@ -103,6 +103,13 @@ function parseFieldType(type: string): ParsedType {
     }
 
     return { base: type };
+}
+
+
+function validateFieldName(name: string): void {
+    if (name.length === 0 || byteLen(name) > 65535) {
+        throw new Error('@esportsplus/data: codec invalid field name: ' + name);
+    }
 }
 
 
@@ -309,6 +316,10 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         }
     }
 
+    for (let i = 0; i < n; i++) {
+        validateFieldName(keys[i]!);
+    }
+
     let fields: FieldDef[] = new Array(n),
         nullableCount = 0;
 
@@ -406,4 +417,4 @@ function readFixedField(buf: Uint8Array, pos: number, type: string): unknown {
 }
 
 
-export { computeNameHash, computeShapeHash, inferAndRegister, inferType, parseFieldType, readFixedField, varintSize };
+export { computeNameHash, computeShapeHash, inferAndRegister, inferType, parseFieldType, readFixedField, validateFieldName, varintSize };

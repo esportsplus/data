@@ -362,10 +362,10 @@ describe('Codec2', () => {
             expect(decoded.str).toBe('hello');
         });
 
-        it('object with empty string key', () => {
+        it('object with empty string key is rejected', () => {
             let data = { '': 'empty key' };
 
-            expect(c.decode(c.encode(data))).toEqual(data);
+            expect(() => c.encode(data)).toThrow('@esportsplus/data: codec invalid field name');
         });
 
         it('object with unicode keys', () => {
@@ -3706,16 +3706,16 @@ describe('Codec2', () => {
     // === BATCH C: SECURITY/CORRECTNESS FIX COVERAGE ===
 
     describe('field name validation', () => {
-        it('defineSchema rejects field name with spaces', () => {
+        it('defineSchema accepts field name with spaces', () => {
             let c = codec();
 
-            expect(() => c.defineSchema([{ name: 'bad field', type: 'uint8' }])).toThrow('@esportsplus/data: codec invalid field name');
+            expect(() => c.defineSchema([{ name: 'bad field', type: 'uint8' }])).not.toThrow();
         });
 
-        it('defineSchema rejects field name with special chars', () => {
+        it('defineSchema accepts field name with special chars', () => {
             let c = codec();
 
-            expect(() => c.defineSchema([{ name: 'field@name!', type: 'string' }])).toThrow('@esportsplus/data: codec invalid field name');
+            expect(() => c.defineSchema([{ name: 'field@name!', type: 'string' }])).not.toThrow();
         });
 
         it('defineSchema accepts valid field names', () => {
@@ -3729,7 +3729,7 @@ describe('Codec2', () => {
             ])).not.toThrow();
         });
 
-        it('deserializeRegistry rejects crafted buffer with invalid field name', () => {
+        it('deserializeRegistry rejects crafted buffer whose name no longer matches its hash', () => {
             let c1 = codec();
 
             // Register a valid schema first
@@ -3737,10 +3737,10 @@ describe('Codec2', () => {
 
             let blob = c1.serializeRegistry();
 
-            // Find the field name bytes in the blob and corrupt them with a space character
+            // Corrupting a name byte no longer trips a name gate (any non-empty string is valid);
+            // the declared hash was computed over 'ok', so the altered name fails the hash check.
             // Registry format: u16 schemaCount + [u32 hash + u16 fieldCount + fields...]
             // Field format: u16 nameLen + utf8 name + u16 typeLen + utf8 type + u8 flags
-            // For a single schema with field 'ok': offset 8 is where name data starts (after schemaCount+hash+fieldCount)
             // schemaCount(2) + hash(4) + fieldCount(2) + nameLen(2) = 10 bytes before name
             let corrupt = new Uint8Array(blob);
 
@@ -3749,7 +3749,7 @@ describe('Codec2', () => {
 
             let c2 = codec();
 
-            expect(() => c2.deserializeRegistry(corrupt)).toThrow('@esportsplus/data: codec invalid field name in registry data');
+            expect(() => c2.deserializeRegistry(corrupt)).toThrow('@esportsplus/data: codec registry hash mismatch');
         });
     });
 
