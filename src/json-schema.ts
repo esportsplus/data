@@ -83,7 +83,9 @@ function emitObject(prop: AnalyzedProperty, constraints?: Map<string, JsonSchema
         return { type: 'object' };
     }
 
-    let props: Record<string, JsonSchema> = {},
+    // A null-prototype dict keeps a property literally named `__proto__` as a real own key;
+    // a plain `{}` would invoke the inherited setter and silently drop it.
+    let props: Record<string, JsonSchema> = Object.create(null),
         required: string[] = [];
 
     for (let i = 0, n = properties.length; i < n; i++) {
@@ -158,7 +160,14 @@ function emitTuple(prop: AnalyzedProperty): JsonSchema {
         prefixItems.push(emit(tupleTypes[i]));
     }
 
-    return { items: false, minItems: requiredCount, prefixItems, type: 'array' };
+    // A tuple with a rest element is a prefixItems head plus an `items` tail; without one
+    // the tuple is closed and forbids extra items.
+    return {
+        items: prop.restType ? emit(prop.restType) : false,
+        minItems: requiredCount,
+        prefixItems,
+        type: 'array'
+    };
 }
 
 function emitUnion(prop: AnalyzedProperty): JsonSchema {
@@ -181,6 +190,14 @@ function emit(prop: AnalyzedProperty): JsonSchema {
     return wrapNullable(prop, emitStructural(prop));
 }
 
+function isSchemaRecord(value: unknown): value is Record<string, JsonSchema> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// Merge a nested constraint fragment into the matching structural branch rather than
+// replacing it: the runtime sends nested annotations as `properties`/`items`/
+// `additionalProperties`/`anyOf` fragments, and a plain overwrite would discard the
+// structural schema (type, required, closed objects, ...) of that branch.
 function mergeConstraint(schema: JsonSchema, fragment: JsonSchema): void {
     let source = fragment as Record<string, unknown>,
         target = schema as Record<string, unknown>,
@@ -197,7 +214,52 @@ function mergeConstraint(schema: JsonSchema, fragment: JsonSchema): void {
             continue;
         }
 
+        if (key === 'properties' && isSchemaRecord(target.properties) && isSchemaRecord(source.properties)) {
+            mergePropertyMap(target.properties, source.properties);
+
+            continue;
+        }
+
+        if ((key === 'items' || key === 'additionalProperties') &&
+            isSchemaRecord(target[key]) && isSchemaRecord(source[key])) {
+            mergeConstraint(target[key] as JsonSchema, source[key] as JsonSchema);
+
+            continue;
+        }
+
+        if (key === 'anyOf' && Array.isArray(target.anyOf) && Array.isArray(source.anyOf)) {
+            let length = Math.min(target.anyOf.length, (source.anyOf as JsonSchema[]).length);
+
+            for (let j = 0; j < length; j++) {
+                let branch = target.anyOf[j],
+                    incoming = (source.anyOf as JsonSchema[])[j];
+
+                if (isSchemaRecord(branch) && isSchemaRecord(incoming)) {
+                    mergeConstraint(branch, incoming);
+                }
+            }
+
+            continue;
+        }
+
         target[key] = source[key];
+    }
+}
+
+function mergePropertyMap(target: Record<string, JsonSchema>, source: Record<string, JsonSchema>): void {
+    let keys = Object.keys(source);
+
+    for (let i = 0, n = keys.length; i < n; i++) {
+        let key = keys[i],
+            existing = target[key],
+            incoming = source[key];
+
+        if (existing !== undefined && isSchemaRecord(existing) && isSchemaRecord(incoming)) {
+            mergeConstraint(existing, incoming);
+        }
+        else {
+            target[key] = incoming;
+        }
     }
 }
 

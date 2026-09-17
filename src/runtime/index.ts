@@ -128,8 +128,56 @@ function string(options?: NodeOptions): SchemaNode {
 }
 
 // The emitter reads `default`/`description` only through its per-property constraint channel
-// (structural emit ignores them), so route each root property's carried annotations back through
-// that same channel — exactly the compiler's foldAnnotations -> generateJsonSchema(root, folded) path.
+// (structural emit ignores them), so route each property's carried annotations back through that
+// same channel — exactly the compiler's foldAnnotations -> generateJsonSchema(root, folded) path.
+// Annotations live on every node, not just the root's direct properties, so walk each node's
+// structural children (object properties, array items, record values) and collect their fragments
+// too; the emitter deep-merges these nested fragments into the matching branch.
+function collectAnnotations(node: SchemaNode): JsonSchema | undefined {
+    let fragment: Record<string, unknown> = {};
+
+    if (node.default !== undefined) {
+        fragment.default = node.default;
+    }
+
+    if (node.description !== undefined) {
+        fragment.description = node.description;
+    }
+
+    if (node.type === 'object' && node.properties !== undefined) {
+        let nested: Record<string, JsonSchema> = Object.create(null);
+
+        for (let i = 0, n = node.properties.length; i < n; i++) {
+            let child = node.properties[i] as SchemaNode,
+                childFragment = collectAnnotations(child);
+
+            if (childFragment !== undefined) {
+                nested[child.name] = childFragment;
+            }
+        }
+
+        if (Object.keys(nested).length > 0) {
+            fragment.properties = nested;
+        }
+    }
+    else if (node.type === 'array' && node.itemType !== undefined) {
+        let itemFragment = collectAnnotations(node.itemType as SchemaNode);
+
+        if (itemFragment !== undefined) {
+            fragment.items = itemFragment;
+        }
+    }
+    else if (node.type === 'record' && node.indexType !== undefined) {
+        let valueFragment = collectAnnotations(node.indexType as SchemaNode);
+
+        if (valueFragment !== undefined) {
+            fragment.additionalProperties = valueFragment;
+        }
+    }
+
+    return Object.keys(fragment).length > 0 ? (fragment as JsonSchema) : undefined;
+}
+
 function toConstraints(node: SchemaNode): Map<string, JsonSchema> | undefined {
     if (node.type !== 'object' || node.properties === undefined) {
         return undefined;
@@ -140,18 +188,10 @@ function toConstraints(node: SchemaNode): Map<string, JsonSchema> | undefined {
 
     for (let i = 0, n = properties.length; i < n; i++) {
         let property = properties[i] as SchemaNode,
-            fragment: Record<string, unknown> = {};
+            fragment = collectAnnotations(property);
 
-        if (property.default !== undefined) {
-            fragment.default = property.default;
-        }
-
-        if (property.description !== undefined) {
-            fragment.description = property.description;
-        }
-
-        if (Object.keys(fragment).length > 0) {
-            constraints.set(property.name, fragment as JsonSchema);
+        if (fragment !== undefined) {
+            constraints.set(property.name, fragment);
         }
     }
 
