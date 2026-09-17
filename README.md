@@ -326,7 +326,13 @@ let buf2 = c.encode({ x: 3, y: 4 }, {
 ```
 
 An unknown schema hash — one never `defineSchema`'d or restored via `deserializeRegistry` —
-throws `Codec2: unknown schema hash <n>` rather than silently falling back to inference.
+throws `@esportsplus/data: codec unknown schema hash <n>` rather than silently falling back to
+inference.
+
+An explicit schema is a strict contract: the value must carry exactly the declared fields. A value
+with an own-property the schema never declared is rejected with
+`@esportsplus/data: codec unexpected field '<name>' not in schema` (a dotted path is used for nested
+references, e.g. `child.y`) instead of silently dropping it. Declared nullable fields may be absent.
 
 ### View Mode (Zero-Copy Encode)
 
@@ -705,7 +711,7 @@ README documents by name:
 | `min(n)` | Minimum value/length |
 | `max(n)` | Maximum value/length |
 | `range(min, max)` | Value/length between min and max |
-| `trim()` / `trim.start()` / `trim.end()` | **Transformer** — trims leading/trailing whitespace and returns the trimmed string; lives at `@esportsplus/data/transformers` (not `/validators`) |
+| `trim()` | **Transformer** — trims leading/trailing whitespace and returns the trimmed string; lives at `@esportsplus/data/transformers` (not `/validators`) |
 | `normalize()` / `.nfd()` / `.nfkc()` / `.nfkd()` | Asserts the string is already Unicode-normalized in the given form (does not normalize it) |
 
 A config function can be either an **assertion** or a **transformer**:
