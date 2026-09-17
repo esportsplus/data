@@ -1,5 +1,5 @@
 import { ts } from '@esportsplus/typescript';
-import { IDENTIFIER } from '../constants';
+import { escapeRegExp, IDENTIFIER } from '../constants';
 import type { LiteralValue } from '../types';
 
 
@@ -39,6 +39,7 @@ interface AnalyzeContext {
 }
 
 interface AnalyzedProperty {
+    bigintLiteral?: string;
     brand?: string;
     defs?: Map<TypeKey, AnalyzedProperty>;
     indexType?: AnalyzedProperty;
@@ -49,6 +50,7 @@ interface AnalyzedProperty {
     name: string;
     nullable?: boolean;
     optional: boolean;
+    pattern?: string;
     properties?: AnalyzedProperty[];
     readonly?: boolean;
     ref?: string;
@@ -264,12 +266,19 @@ function analyzePropertyType(
             return { name, optional, type: 'string' };
         }
 
-        // Template literal types (e.g., `${string}@${string}`) - treat as branded string
-        if (type.flags & ts.TypeFlags.TemplateLiteral) {
-            return { brand: 'template', name, optional, type: 'string' };
+        // Template literal types (e.g., `${string}@${string}`) carry a compile-time pattern the
+        // runtime check must enforce; a placeholder we cannot render exactly is a hard error
+        // rather than a silent widen to `string`.
+        if (type.isTemplateLiteralType()) {
+            return { brand: 'template', name, optional, pattern: '^(?:' + templatePlaceholderList(type, checker) + ')$', type: 'string' };
         }
 
-        if (type.flags & ts.TypeFlags.BigInt || type.flags & ts.TypeFlags.BigIntLiteral) {
+        // A bigint LITERAL keeps its exact value; an unbranded `bigint` is validated by typeof.
+        if (type.isBigIntLiteralType()) {
+            return { bigintLiteral: type.value.toString(), name, optional, type: 'bigint' };
+        }
+
+        if (type.flags & ts.TypeFlags.BigInt) {
             return { name, optional, type: 'bigint' };
         }
 
@@ -460,6 +469,85 @@ function analyzeUnionType(
     return { name, nullable, optional: true, type: 'null' };
 }
 
+// Render the inner pattern of a template literal type: literal text segments escaped,
+// placeholder spans replaced by a regex fragment that mirrors the placeholder's type.
+function templatePlaceholderList(type: ts.TemplateLiteralType, checker: ts.Checker): string {
+    let texts = type.texts,
+        types = type.getTypes(),
+        pattern = '';
+
+    for (let i = 0, n = types.length; i < n; i++) {
+        pattern += escapeRegExp(texts[i] ?? '');
+        pattern += templatePlaceholderPattern(types[i], checker);
+    }
+
+    pattern += escapeRegExp(texts[types.length] ?? '');
+
+    return pattern;
+}
+
+function templatePlaceholderPattern(type: ts.Type, checker: ts.Checker): string {
+    if (type.isStringLiteralType()) {
+        return escapeRegExp(type.value);
+    }
+
+    if (type.isNumberLiteralType()) {
+        return escapeRegExp(String(type.value));
+    }
+
+    if (type.isBigIntLiteralType()) {
+        return escapeRegExp(type.value.toString());
+    }
+
+    if (type.isBooleanLiteralType()) {
+        return type.value ? 'true' : 'false';
+    }
+
+    // The `boolean` intrinsic is internally a `true | false` union - classify it before peeling.
+    if (type.flags & ts.TypeFlags.Boolean) {
+        return '(?:true|false)';
+    }
+
+    if (type.isUnionType()) {
+        let parts: string[] = [],
+            constituents = type.getTypes();
+
+        for (let i = 0, n = constituents.length; i < n; i++) {
+            parts.push(templatePlaceholderPattern(constituents[i], checker));
+        }
+
+        return '(?:' + parts.join('|') + ')';
+    }
+
+    if (type.isTemplateLiteralType()) {
+        return templatePlaceholderList(type, checker);
+    }
+
+    if (type.flags & ts.TypeFlags.String) {
+        return '[\\s\\S]*';
+    }
+
+    if (type.flags & ts.TypeFlags.Number) {
+        // Mirrors TypeScript's `${number}` admission set: decimal (with fraction/exponent),
+        // hex/binary/octal integers, and leading whitespace (trailing whitespace is rejected).
+        return '\\s*(?:[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?|0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+)';
+    }
+
+    if (type.flags & ts.TypeFlags.BigInt) {
+        return '\\s*(?:[+-]?\\d+|0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+)';
+    }
+
+    if (type.flags & ts.TypeFlags.Null) {
+        return 'null';
+    }
+
+    if (type.flags & ts.TypeFlags.Undefined) {
+        return 'undefined';
+    }
+
+    throw new Error(`TypeAnalyzer: unsupported template literal placeholder '${checker.typeToString(type)}'`);
+}
+
 function defName(type: ts.Type): string {
     let symbol = type.getAliasSymbol() ?? type.getSymbol(),
         name = symbol?.name,
@@ -507,16 +595,30 @@ function extractProperties(type: ts.Type, checker: ts.Checker, ctx: AnalyzeConte
             throw new Error(`TypeAnalyzer: unable to resolve the type of property '${prop.name}'`);
         }
 
-        let analyzed = analyzePropertyType(
+        let optional = !!(prop.flags & ts.SymbolFlags.Optional),
+            declaration = prop.valueDeclaration?.resolve(),
+            analyzed = analyzePropertyType(
                 propType,
                 prop.name,
                 // Symbol's Optional flag is the source of truth for resolved types
                 // This correctly handles mapped types like Required<T> and Partial<T>
-                !!(prop.flags & ts.SymbolFlags.Optional),
+                optional,
                 checker,
                 ctx
-            ),
-            declaration = prop.valueDeclaration?.resolve();
+            );
+
+        // `bad?: never` resolves to `never | undefined` = `undefined`, so the resolved type
+        // loses the never. The declaration still spells it, and a PRESENT optional slot must
+        // reject (absence remains valid).
+        if (
+            optional &&
+            declaration !== undefined &&
+            (ts.isPropertySignatureDeclaration(declaration) || ts.isPropertyDeclaration(declaration)) &&
+            declaration.type !== undefined &&
+            declaration.type.kind === ts.SyntaxKind.NeverKeyword
+        ) {
+            analyzed = { name: prop.name, optional: true, type: 'never' };
+        }
 
         if (declaration !== undefined && isReadonly(declaration)) {
             analyzed.readonly = true;

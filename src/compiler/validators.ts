@@ -126,7 +126,9 @@ function parse(node: ts.CallExpression, checker: ts.Checker, name: string): Bran
     if (
         !ts.isPropertyAccessExpression(expr) ||
         !ts.isIdentifier(expr.expression) ||
-        expr.expression.text !== name ||
+        // Resolve the receiver to the package's own import binding: a shadowing local that
+        // merely shares the alias's text must not register a brand.
+        !imports.includes(checker, expr.expression, PACKAGE_NAME, name) ||
         expr.name.text !== 'set'
     ) {
         return null;

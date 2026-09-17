@@ -1,6 +1,8 @@
 import type { ReplacementIntent, TransformContext } from '@esportsplus/typescript/compiler';
+import { imports } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
 
+import { PACKAGE_NAME } from '../../constants';
 import { resolveBrandedType } from '../type-analyzer';
 import type { FieldSpec } from '../../sbc/types';
 
@@ -214,20 +216,75 @@ function getSchemaLiteral(typeArg: ts.TypeNode, checker: ts.Checker): string | n
     return result;
 }
 
-function hasDefineSchemaMethod(type: ts.Type, checker: ts.Checker): boolean {
-    let prop = checker.getPropertyOfType(type, 'defineSchema');
+type CodecBinding = {
+    local?: string;
+    namespace?: string;
+};
 
-    if (!prop) {
+
+function codecBinding(sourceFile: ts.SourceFile): CodecBinding {
+    let local: string | undefined,
+        namespace: string | undefined;
+
+    for (let info of imports.all(sourceFile, PACKAGE_NAME)) {
+        let name = info.specifiers.get('codec');
+
+        if (name !== undefined) {
+            local = name;
+        }
+
+        if (info.namespace !== undefined) {
+            namespace = info.namespace;
+        }
+    }
+
+    return { local, namespace };
+}
+
+// The `codec` factory itself: the package's named import (possibly aliased) or `ns.codec`.
+function isCodecFactory(expr: ts.Expression, checker: ts.Checker, binding: CodecBinding): boolean {
+    if (ts.isIdentifier(expr)) {
+        return binding.local !== undefined && imports.includes(checker, expr, PACKAGE_NAME, binding.local);
+    }
+
+    if (ts.isPropertyAccessExpression(expr) && expr.name.text === 'codec' && ts.isIdentifier(expr.expression)) {
+        return binding.namespace !== undefined && expr.expression.text === binding.namespace;
+    }
+
+    return false;
+}
+
+// A receiver is a real codec only when it traces back to the package's `codec` export - the
+// imported binding itself, `ns.codec`, `codec()`/`ns.codec()`, or a local initialized from one
+// of those - never when an unrelated object merely happens to carry a `defineSchema` method.
+function isCodecReceiver(expr: ts.Expression, checker: ts.Checker, binding: CodecBinding, depth: number = 0): boolean {
+    if (depth > 8) {
         return false;
     }
 
-    let propType = checker.getTypeOfSymbol(prop);
+    if (ts.isCallExpression(expr)) {
+        return isCodecFactory(expr.expression, checker, binding);
+    }
 
-    if (propType === undefined) {
+    if (ts.isIdentifier(expr)) {
+        if (binding.local !== undefined && imports.includes(checker, expr, PACKAGE_NAME, binding.local)) {
+            return true;
+        }
+
+        let declaration = checker.getSymbolAtLocation(expr)?.valueDeclaration?.resolve();
+
+        if (declaration !== undefined && ts.isVariableDeclaration(declaration) && declaration.initializer !== undefined) {
+            return isCodecReceiver(declaration.initializer, checker, binding, depth + 1);
+        }
+
         return false;
     }
 
-    return checker.getSignaturesOfType(propType, ts.SignatureKind.Call).length > 0;
+    if (ts.isPropertyAccessExpression(expr) && expr.name.text === 'codec' && ts.isIdentifier(expr.expression)) {
+        return binding.namespace !== undefined && expr.expression.text === binding.namespace;
+    }
+
+    return false;
 }
 
 function replaceCall(call: DetectedCall, ctx: TransformContext, schema: string): string {
@@ -303,7 +360,7 @@ function replaceCall(call: DetectedCall, ctx: TransformContext, schema: string):
     return `${receiverText}.${methodName}(${firstArgText},{...${secondArgText},"schema":${schema}})`;
 }
 
-function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.Checker, node: ts.Node): void {
+function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.Checker, node: ts.Node, binding: CodecBinding): void {
     if (
         ts.isCallExpression(node) &&
         node.typeArguments &&
@@ -314,9 +371,7 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.Checker,
             methodName = expr.name.text;
 
         if (methodName === 'decode' || methodName === 'encode') {
-            let receiverType = checker.getTypeAtLocation(expr.expression);
-
-            if (receiverType !== undefined && hasDefineSchemaMethod(receiverType, checker)) {
+            if (isCodecReceiver(expr.expression, checker, binding)) {
                 let typeArg = node.typeArguments[0],
                     type = checker.getTypeAtLocation(typeArg);
 
@@ -332,7 +387,7 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.Checker,
         }
     }
 
-    node.forEachChild(n => visit(calls, checker, n));
+    node.forEachChild(n => visit(calls, checker, n, binding));
 }
 
 
@@ -341,7 +396,7 @@ export default {
     transform: (ctx: TransformContext) => {
         let detected = new Map<ts.CallExpression, DetectedCall>();
 
-        visit(detected, ctx.checker, ctx.sourceFile);
+        visit(detected, ctx.checker, ctx.sourceFile, codecBinding(ctx.sourceFile));
 
         if (detected.size === 0) {
             return {};

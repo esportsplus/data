@@ -134,12 +134,16 @@ describe('Edge Cases', () => {
             validator.build<Data>();
         `);
 
-        it('excludes never properties from output', () => {
-            let result = validate({ name: 'test', _internal: 'anything' });
+        it('rejects a required never property', () => {
+            let present = validate({ name: 'test', _internal: 'anything' });
 
-            expect(result.ok).toBe(true);
-            expect(result.data).toEqual({ name: 'test' });
-            expect(result.data).not.toHaveProperty('_internal');
+            expect(present.ok).toBe(false);
+            expect(present.errors).toEqual([{ message: 'must not be provided', path: '_internal' }]);
+
+            let absent = validate({ name: 'test' });
+
+            expect(absent.ok).toBe(false);
+            expect(absent.errors![0].path).toBe('_internal');
         });
     });
 });

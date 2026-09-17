@@ -50,10 +50,11 @@ describe('Branded Strings (Template Literal Types)', () => {
             expect(result.data).toEqual({ email: 'test@example.com', name: 'John' });
         });
 
-        it('accepts any string (runtime only checks typeof)', () => {
+        it('rejects a string that does not match the template pattern', () => {
             let result = validate({ email: 'not-an-email', name: 'John' });
 
-            expect(result.ok).toBe(true);
+            expect(result.ok).toBe(false);
+            expect(result.errors![0].path).toBe('email');
         });
 
         it('rejects non-string value', () => {

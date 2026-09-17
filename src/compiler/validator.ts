@@ -3,7 +3,7 @@ import { IDENTIFIER } from '../constants';
 import type { AnalyzedProperty, AnalyzedType } from './type-analyzer';
 import { GeneratorContext, PathMode } from './types';
 import error, { ERRORS_VARIABLE, emitString, resolvePath } from './error';
-import validators from './validators';
+import validators, { type BrandedValidator } from './validators';
 import type { LiteralValue } from '../types';
 
 
@@ -70,6 +70,7 @@ const TYPE_VALIDATORS: Record<string, TypeValidator> = {
     function: generateFunctionValidation,
     literal: generateLiteralValidation,
     map: generateMapValidation,
+    never: generateNeverValidation,
     null: generateNullValidation,
     number: generateNumberValidation,
     object: generateObjectValidation,
@@ -225,6 +226,15 @@ function generateBigintValidation(
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
+    let literal = prop.bigintLiteral === undefined ? '' : code`
+        if (${source} !== ${prop.bigintLiteral}n) {
+            ${error.generate('invalid literal type', pathMode, context)}
+        }
+        else {
+            ${target} = ${source};
+        }
+    `;
+
     return code`
         {
             ${prop.nullable ? `if (${source} === null) { ${target} = null; } else {` : ''}
@@ -232,7 +242,7 @@ function generateBigintValidation(
                 ${error.generate('must be a bigint', pathMode, context)}
             }
             else {
-                ${target} = ${source};
+                ${literal || `${target} = ${source};`}
             }
             ${prop.nullable ? `}` : ''}
         }
@@ -389,6 +399,18 @@ function generateMapValidation(
     `;
 }
 
+function generateNeverValidation(
+    _: AnalyzedProperty,
+    _source: string,
+    _target: string,
+    pathMode: PathMode,
+    context: GeneratorContext
+): string {
+    // `never` admits no value at all: a required slot is unsatisfiable and an optional
+    // one is only satisfiable by absence (the optional guard never invokes this).
+    return error.generate('must not be provided', pathMode, context);
+}
+
 function generateNullValidation(
     _: AnalyzedProperty,
     source: string,
@@ -406,6 +428,24 @@ function generateNullValidation(
     `;
 }
 
+// Inline a registered brand body without letting a bare `return` in the user body
+// escape the generated validator: the body runs inside a thunk that reads/writes the
+// validator's value slot directly, so an early `return` only leaves the thunk and the
+// (possibly reassigned) value is preserved. Async bodies are awaited.
+function inlineBrand(validator: BrandedValidator, pathMode: PathMode, target: string, context: GeneratorContext): string {
+    if (validator.async) {
+        context.hasAsync = true;
+    }
+
+    let body = validators.inline(validator.body, pathMode, target);
+
+    return code`
+        ${validator.async ? 'await ' : ''}(${validator.async ? 'async ' : ''}() => {
+            ${body}
+        })();
+    `;
+}
+
 function generateNumberValidation(
     prop: AnalyzedProperty,
     source: string,
@@ -418,11 +458,7 @@ function generateNumberValidation(
         validator = prop.brand ? context.brandValidators.get(prop.brand) : undefined;
 
     if (validator) {
-        parts = validators.inline(validator.body, pathMode, target);
-
-        if (validator.async) {
-            context.hasAsync = true;
-        }
+        parts = inlineBrand(validator, pathMode, target, context);
     }
 
     // Unary + throws a TypeError on bigint and symbol, so coerce only once the value is
@@ -477,10 +513,6 @@ function generateObjectValidation(
 
     for (let i = 0, n = properties.length; i < n; i++) {
         let property = properties[i];
-
-        if (property.type === 'never') {
-            continue;
-        }
 
         let probe = propertyAccess(property.name, source),
             access = probe.expr,
@@ -682,15 +714,21 @@ function generateStringValidation(
 ): string {
     let parts = '';
 
-    // Template-literal brand carries no runtime check - validate as plain string
+    // Template-literal types carry a compile-time regex pattern; enforce it after the
+    // typeof gate so a matching string is the only value that survives.
+    if (prop.pattern !== undefined) {
+        parts += code`
+            if (!(new RegExp(${emitString(prop.pattern)})).test(${target})) {
+                ${error.generate('invalid literal type', pathMode, context)}
+            }
+        `;
+    }
+
+    // Template-literal brand carries no runtime brand check - validate as plain string
     if (prop.brand && prop.brand !== 'template' && context.brandValidators.has(prop.brand)) {
         let validator = context.brandValidators.get(prop.brand)!;
 
-        if (validator.async) {
-            context.hasAsync = true;
-        }
-
-        parts = validators.inline(validator.body, pathMode, target);
+        parts += inlineBrand(validator, pathMode, target, context);
     }
 
     return code`
@@ -834,6 +872,10 @@ function generateUnionValidation(prop: AnalyzedProperty, source: string, target:
 
             case 'bigint':
                 guard = `typeof ${source} === 'bigint'`;
+
+                if (branch.bigintLiteral !== undefined) {
+                    body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
+                }
                 break;
 
             case 'boolean':
@@ -876,7 +918,7 @@ function generateUnionValidation(prop: AnalyzedProperty, source: string, target:
             case 'string':
                 guard = `typeof ${source} === 'string'`;
 
-                if (branch.brand) {
+                if (branch.brand || branch.pattern !== undefined) {
                     body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
                 }
                 break;
@@ -962,10 +1004,6 @@ function generateRootParts(
 
     for (let i = 0, n = properties.length; i < n; i++) {
         let property = properties[i];
-
-        if (property.type === 'never') {
-            continue;
-        }
 
         let configValidators = config?.get(property.name),
             def = defaults?.get(property.name),

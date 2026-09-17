@@ -488,18 +488,11 @@ describe('Raw-function config removal', () => {
         expect(typeof reject).toBe('function');
     });
 
-    it('emits output identical to the no-config form for a raw-function config', () => {
-        let noConfig = transformCode(`
-            type User = { name: string };
-            validator.build<User>();
-        `);
-
-        let rawFunction = transformCode(`
+    it('rejects a raw-function config at compile time', () => {
+        expect(() => transformCode(`
             type User = { name: string };
             validator.build<User>(async (value, errors) => {});
-        `);
-
-        expect(rawFunction).toBe(noConfig);
+        `)).toThrow(/inline object literal/);
     });
 
     it('emits byte-identical output for an object-literal config', () => {

@@ -6,12 +6,11 @@ import { transformWith } from '../../utils';
 
 
 let preamble = `
+    import { codec as codecFactory } from '@esportsplus/data';
+
     type FieldSpec = { name: string; nullable?: boolean; type: string; };
-    declare const codec: {
-        decode<T>(buffer: Uint8Array, options?: { schema?: number | FieldSpec[] }): T;
-        defineSchema(fields: FieldSpec[]): number;
-        encode<T>(value: T, options?: boolean | { schema?: number | FieldSpec[]; view?: boolean }): Uint8Array;
-    };
+
+    const codec = codecFactory();
 `;
 
 

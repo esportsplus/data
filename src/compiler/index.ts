@@ -56,16 +56,66 @@ function extractMessages(type: ts.Type, parts: string[], messages: Map<string, s
     }
 }
 
-function isAsyncFunction(node: ts.Expression): boolean {
+function isAsyncExpression(node: ts.Expression, checker: ts.Checker): boolean {
     if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
         if (node.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword)) {
             return true;
         }
 
-        return node.body ? ast.test(node.body, ts.isAwaitExpression) : false;
+        if (node.body && ast.test(node.body, ts.isAwaitExpression)) {
+            return true;
+        }
     }
 
-    return false;
+    // Inline syntax is not the only source of asyncness: an identifier bound to an async
+    // function (or any callable whose declared return is a Promise) must be awaited too.
+    // Classify from the call signature's return type so the misdetection cannot recur.
+    let type = checker.getTypeAtLocation(node);
+
+    if (type === undefined) {
+        return false;
+    }
+
+    let signatures = checker.getSignaturesOfType(type, ts.SignatureKind.Call);
+
+    if (signatures.length === 0) {
+        return false;
+    }
+
+    let returnType = checker.getReturnTypeOfSignature(signatures[0]);
+
+    return returnType !== undefined && isPromiseType(returnType, checker);
+}
+
+function isPromiseType(type: ts.Type, checker: ts.Checker): boolean {
+    if (type.isUnionType()) {
+        let constituents = type.getTypes(),
+            hasPromise = false;
+
+        for (let i = 0, n = constituents.length; i < n; i++) {
+            let constituent = constituents[i];
+
+            if (isVoidLike(constituent)) {
+                continue;
+            }
+
+            if (isPromiseType(constituent, checker)) {
+                hasPromise = true;
+
+                continue;
+            }
+
+            // A union that also admits a non-Promise value (e.g. Transformer<T>'s `T | Promise<T>`)
+            // is not definitely async, so it must not force `await` + an `async` wrapper.
+            return false;
+        }
+
+        return hasPromise;
+    }
+
+    let symbol = type.getSymbol();
+
+    return symbol !== undefined && symbol.name === 'Promise';
 }
 
 // A config entry is a transformer when its declared return type carries a value the compiler
@@ -149,12 +199,171 @@ function namespaceLocalName(sourceFile: ts.SourceFile): string | undefined {
     return undefined;
 }
 
+// A config expression is hoisted to module scope, which is only sound when it neither
+// references a function-local binding (invisible there) nor - for an eagerly-evaluated
+// expression - a module lexical declared after the hoist point (TDZ). `checkConfigScope`
+// refuses to emit rather than silently produce a module-level reference that cannot resolve.
+type HoistReference = {
+    eager: boolean;
+    node: ts.Identifier;
+};
+
+function checkConfigScope(expr: ts.Expression, sourceFile: ts.SourceFile, checker: ts.Checker, hoisting: boolean): void {
+    let start = expr.getStart(sourceFile),
+        end = expr.getEnd(),
+        references: HoistReference[] = [];
+
+    collectHoistReferences(expr, true, references);
+
+    for (let i = 0, n = references.length; i < n; i++) {
+        let reference = references[i],
+            symbol = checker.getSymbolAtLocation(reference.node);
+
+        if (symbol === undefined) {
+            continue;
+        }
+
+        let declarations = symbol.declarations;
+
+        for (let j = 0, m = declarations.length; j < m; j++) {
+            let declaration = declarations[j].resolve();
+
+            if (declaration === undefined) {
+                continue;
+            }
+
+            let position = sourceFile.getLineAndCharacterOfPosition(reference.node.getStart());
+
+            // Bound inside the config expression itself (an arrow parameter, say) - safe.
+            if (declaration.getStart(sourceFile) >= start && declaration.getEnd() <= end) {
+                continue;
+            }
+
+            if (hasFunctionAncestor(declaration)) {
+                throw new Error(
+                    `${PACKAGE_NAME}: validator config references the function-local binding '${reference.node.text}' ` +
+                    `at ${sourceFile.fileName}:${position.line + 1}:${position.character + 1} - move the build to module scope or lift the binding to module scope`
+                );
+            }
+
+            if (hoisting && reference.eager && isLexicalDeclaration(declaration)) {
+                throw new Error(
+                    `${PACKAGE_NAME}: validator config references '${reference.node.text}' before its initialization ` +
+                    `at ${sourceFile.fileName}:${position.line + 1}:${position.character + 1} - the config factory is hoisted above this declaration`
+                );
+            }
+        }
+    }
+}
+
+// Walk only value references: property names, property-access member names and the contents
+// of nested functions (which run later) are excluded or marked non-eager.
+function collectHoistReferences(node: ts.Node, eager: boolean, out: HoistReference[]): void {
+    if (ts.isIdentifier(node)) {
+        out.push({ eager, node });
+
+        return;
+    }
+
+    if (ts.isPropertyAccessExpression(node)) {
+        collectHoistReferences(node.expression, eager, out);
+
+        return;
+    }
+
+    if (ts.isPropertyAssignment(node)) {
+        if (ts.isComputedPropertyName(node.name)) {
+            collectHoistReferences(node.name.expression, eager, out);
+        }
+
+        collectHoistReferences(node.initializer, eager, out);
+
+        return;
+    }
+
+    if (ts.isShorthandPropertyAssignment(node)) {
+        if (ts.isIdentifier(node.name)) {
+            out.push({ eager, node: node.name });
+        }
+
+        return;
+    }
+
+    // A function value is created eagerly, but its body and parameter defaults run later:
+    // references there are not subject to the TDZ, though a function-local binding from the
+    // enclosing scope is still invisible to the hoisted closure.
+    if (ts.isFunctionLikeDeclaration(node)) {
+        node.forEachChild((child) => collectHoistReferences(child, false, out));
+
+        return;
+    }
+
+    node.forEachChild((child) => collectHoistReferences(child, eager, out));
+}
+
+function computedPropertyKey(name: ts.PropertyName): string | null {
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name) || ts.isNumericLiteral(name)) {
+        return name.text;
+    }
+
+    if (ts.isComputedPropertyName(name)) {
+        let expr = name.expression;
+
+        if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr) || ts.isNumericLiteral(expr)) {
+            return expr.text;
+        }
+    }
+
+    return null;
+}
+
+function hasFunctionAncestor(node: ts.Node): boolean {
+    let current: ts.Node | undefined = node.parent;
+
+    while (current !== undefined && !ts.isSourceFile(current)) {
+        if (ts.isFunctionLikeDeclaration(current)) {
+            return true;
+        }
+
+        current = current.parent;
+    }
+
+    return false;
+}
+
+function isLexicalDeclaration(node: ts.Node): boolean {
+    if (ts.isVariableDeclaration(node) && ts.isVariableDeclarationList(node.parent)) {
+        return (node.parent.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const | ts.NodeFlags.Using)) !== 0;
+    }
+
+    // A class or (non-const) enum emits a lexical/IIFE initializer that runs in statement
+    // order; a hoisted config that reads it eagerly sees it uninitialized.
+    return ts.isClassDeclaration(node) || ts.isEnumDeclaration(node);
+}
+
+// A bare identifier or dot-property chain evaluates to the same value at module scope and at
+// validation time, so it is referenced in place instead of being hoisted (which would read a
+// module lexical in its TDZ). Anything else is a factory call/arrow and is hoisted.
+function isStableReference(expr: ts.Expression): boolean {
+    if (ts.isIdentifier(expr)) {
+        return true;
+    }
+
+    if (ts.isPropertyAccessExpression(expr)) {
+        return isStableReference(expr.expression);
+    }
+
+    return false;
+}
+
 // Per-property config: parse the ValidatorConfig object literal, hoist each validator
 // expression to a module-level const (factory calls run once at module eval), and record
 // the hoisted name + AST-derived asyncness so the generator can invoke it per property.
+// A stable reference is instead used in place. Unsupported forms (a non-object config, a
+// spread, a dynamic computed key) are compile errors - never a silently dropped config.
 function parseConfig(configArg: ts.Expression, analyzed: AnalyzedType, sourceFile: ts.SourceFile, checker: ts.Checker): ParsedConfig {
     if (!ts.isObjectLiteralExpression(configArg)) {
-        return { hasAsync: false, hoisted: [] };
+        throw new Error(`${PACKAGE_NAME}: validator config must be an inline object literal at ${sourceFile.fileName}; a variable, spread or function argument is not supported`);
     }
 
     let entries = configArg.properties,
@@ -170,39 +379,72 @@ function parseConfig(configArg: ts.Expression, analyzed: AnalyzedType, sourceFil
     for (let i = 0, n = entries.length; i < n; i++) {
         let entry = entries[i];
 
-        if (!ts.isPropertyAssignment(entry) || ts.isComputedPropertyName(entry.name)) {
-            continue;
+        if (ts.isSpreadAssignment(entry)) {
+            throw new Error(`${PACKAGE_NAME}: validator config spread properties are not supported in ${sourceFile.fileName}; list each property explicitly`);
         }
 
-        let name = entry.name,
-            key = ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)
-                ? name.text
-                : null;
+        let key: string | null = null,
+            initializer: ts.Expression,
+            direct = false;
+
+        if (ts.isShorthandPropertyAssignment(entry)) {
+            if (!ts.isIdentifier(entry.name)) {
+                throw new Error(`${PACKAGE_NAME}: validator config shorthand key is not an identifier at ${sourceFile.fileName}`);
+            }
+
+            key = entry.name.text;
+            initializer = entry.name;
+            direct = true;
+        }
+        else if (ts.isPropertyAssignment(entry)) {
+            key = computedPropertyKey(entry.name);
+            initializer = entry.initializer;
+
+            if (key === null) {
+                throw new Error(`${PACKAGE_NAME}: validator config computed key must be a static string at ${sourceFile.fileName}`);
+            }
+        }
+        else {
+            throw new Error(`${PACKAGE_NAME}: validator config entries must be property assignments at ${sourceFile.fileName}`);
+        }
 
         if (key === null || !propertyNames.has(key)) {
             continue;
         }
 
         let assertions: ConfigValidator[] = [],
-            expressions = ts.isArrayLiteralExpression(entry.initializer)
-                ? entry.initializer.elements
-                : [entry.initializer],
+            expressions = ts.isArrayLiteralExpression(initializer)
+                ? initializer.elements
+                : [initializer],
             transformers: ConfigValidator[] = [];
 
         for (let j = 0, m = expressions.length; j < m; j++) {
             let expression = expressions[j];
 
             if (ts.isSpreadElement(expression) || ts.isOmittedExpression(expression)) {
-                continue;
+                throw new Error(`${PACKAGE_NAME}: validator config arrays do not support spread or omitted elements at ${sourceFile.fileName}`);
             }
 
             let base = peelAnnotations(expression, sourceFile).base,
-                async = isAsyncFunction(base),
-                transform = isTransformer(base, checker),
-                variable = uid('v');
+                name: string;
 
-            hoisted.push(`const ${variable} = ${base.getText(sourceFile)};`);
-            (transform ? transformers : assertions).push({ async, name: variable, transform });
+            if (direct || isStableReference(base)) {
+                checkConfigScope(base, sourceFile, checker, false);
+                name = base.getText(sourceFile);
+            }
+            else {
+                checkConfigScope(base, sourceFile, checker, true);
+
+                let variable = uid('v');
+
+                hoisted.push(`const ${variable} = ${base.getText(sourceFile)};`);
+                name = variable;
+            }
+
+            let async = isAsyncExpression(base, checker),
+                transform = isTransformer(base, checker);
+
+            (transform ? transformers : assertions).push({ async, name, transform });
 
             if (async) {
                 hasAsync = true;
@@ -508,7 +750,9 @@ export default {
                 }
 
                 let configText = call.configArg ? call.configArg.getText(ctx.sourceFile) : '',
-                    typeIdentity = ctx.checker.typeToString(callType),
+                    // Key on the resolved type's identity, not its printed name: two same-named
+                    // aliases in different scopes are distinct types and must not collapse.
+                    typeIdentity = typeof callType.id === 'number' ? `#${callType.id}` : ctx.checker.typeToString(callType),
                     buildKey = JSON.stringify([typeIdentity, configText]),
                     buildName = builds.get(buildKey);
 

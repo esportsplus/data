@@ -214,17 +214,20 @@ describe('compiler annotation extraction', () => {
             expect((await pending).ok).toBe(true);
         });
 
-        // Async detection needs the base directly (config.test.ts precedent); an annotation
-        // chain forces a parenthesized base the landed isAsyncFunction does not unwrap, so a
-        // chained async config folds its annotation but is not marked async (deviation).
-        it('folds the annotation carried on an async config base', () => {
+        // Async detection is now type-based, so an annotation chain no longer hides the
+        // asyncness of its parenthesized base: the validator is awaited like any other.
+        it('folds the annotation carried on an async config base', async () => {
             let pojo = buildPojo(`
                 type As = { name: string };
                 const built = validator.build<As>({ name: (async (_v, _e) => { await Promise.resolve(); }).describe('async field') });
             `);
 
             expect(properties(pojo).name.description).toBe('async field');
-            expect((pojo.validate({ name: 'x' }) as Result).ok).toBe(true);
+
+            let pending = pojo.validate({ name: 'x' });
+
+            expect(pending).toBeInstanceOf(Promise);
+            expect((await pending).ok).toBe(true);
         });
     });
 
