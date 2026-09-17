@@ -60,6 +60,33 @@ function validateHinted(schema: Schema, obj: Record<string, unknown>, resolveRef
 
         validateHintedField(f, value, name, resolveRef);
     }
+
+    rejectUnexpectedFields('', obj, fields);
+}
+
+
+// Exact-or-fail: an explicit schema is a contract, so a value carrying own-properties the schema
+// never declared is rejected rather than silently dropped on the fixed-width write.
+function rejectUnexpectedFields(prefix: string, obj: Record<string, unknown>, fields: FieldDef[]): void {
+    let keys = Object.keys(obj);
+
+    if (keys.length === 0) {
+        return;
+    }
+
+    let declared = new Set<string>();
+
+    for (let i = 0, n = fields.length; i < n; i++) {
+        declared.add(fields[i]!.name);
+    }
+
+    for (let i = 0, n = keys.length; i < n; i++) {
+        let key = keys[i]!;
+
+        if (!declared.has(key)) {
+            throw new Error("@esportsplus/data: codec unexpected field '" + (prefix === '' ? key : prefix + '.' + key) + "' not in schema");
+        }
+    }
 }
 
 
@@ -112,6 +139,8 @@ function validateHintedObject(name: string, value: unknown, refHash: number, res
 
         validateHintedField(cf, cvalue, cname, resolveRef);
     }
+
+    rejectUnexpectedFields(name, obj, fields);
 }
 
 
