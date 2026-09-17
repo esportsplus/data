@@ -13,6 +13,23 @@ function check(value: unknown, errors: { push(message: string): void }, re: RegE
     }
 }
 
+function isValidHttpsUrl(value: string): boolean {
+    if (!HTTPS_REGEX.test(value)) {
+        return false;
+    }
+
+    try {
+        let parsed = new URL(value);
+
+        // HTTPS_REGEX alone accepts host-less values like "https://?" and
+        // "https:///"; require a parsed host just like the general url() validator.
+        return parsed.protocol === 'https:' && parsed.hostname.length > 0;
+    }
+    catch {
+        return false;
+    }
+}
+
 function isValidUrl(value: string): boolean {
     try {
         new URL(value);
@@ -44,7 +61,11 @@ const url: F & { http: F; https: F } = Object.assign(
         https: (error?: string): ValidatorFunction<unknown> => {
             let msg = error || 'must be a valid HTTPS URL';
 
-            return (value, errors) => check(value, errors, HTTPS_REGEX, msg);
+            return (value, errors) => {
+                if (typeof value !== 'string' || !isValidHttpsUrl(value)) {
+                    errors.push(msg);
+                }
+            };
         },
     }
 );

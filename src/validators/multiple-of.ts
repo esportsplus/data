@@ -2,10 +2,19 @@ import { PACKAGE_NAME } from '~/constants';
 import type { ErrorType } from '~/types';
 
 
+// Count of digits after the decimal point, accounting for exponential notation.
+// `(1e-7).toString()` is "1e-7" (no "."), so the naive split('.') approach
+// reported 0 decimals and collapsed the scaling to `0 % 0 = NaN`.
+function decimalPlaces(value: number): number {
+    let [mantissa, exponent] = value.toString().split('e'),
+        fraction = (mantissa.split('.')[1] || '').length,
+        power = exponent ? +exponent : 0;
+
+    return Math.max(0, fraction - power);
+}
+
 function floatSafeRemainder(value: number, step: number): number {
-    let valDecimals = (value.toString().split('.')[1] || '').length,
-        stepDecimals = (step.toString().split('.')[1] || '').length,
-        decimals = valDecimals > stepDecimals ? valDecimals : stepDecimals,
+    let decimals = Math.max(decimalPlaces(value), decimalPlaces(step)),
         scale = Math.pow(10, decimals),
         valInt = Math.round(value * scale),
         stepInt = Math.round(step * scale);

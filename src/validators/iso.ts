@@ -37,6 +37,16 @@ function isDateValid(value: string): boolean {
     return day <= daysInMonth(year, month);
 }
 
+function isDateTimeValid(value: string): boolean {
+    if (!DATE_TIME_REGEX.test(value)) {
+        return false;
+    }
+
+    // The regex only bounds day to 01-31; reuse the calendar check so impossible
+    // dates such as 2024-02-31 or 2023-02-29 are rejected.
+    return isDateValid(value.slice(0, 10));
+}
+
 function isDurationValid(value: string): boolean {
     if (!DURATION_REGEX.test(value)) {
         return false;
@@ -60,7 +70,11 @@ const iso: { date: F; dateTime: F; duration: F; time: F; timestamp: F; week: F }
     dateTime: (error?: string): ValidatorFunction<unknown> => {
         let msg = error || 'must be a valid ISO date-time';
 
-        return (value, errors) => check(value, errors, DATE_TIME_REGEX, msg);
+        return (value, errors) => {
+            if (typeof value !== 'string' || !isDateTimeValid(value)) {
+                errors.push(msg);
+            }
+        };
     },
     duration: (error?: string): ValidatorFunction<unknown> => {
         let msg = error || 'must be a valid ISO duration';
