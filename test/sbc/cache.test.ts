@@ -61,7 +61,7 @@ describe('SIEVE cache', () => {
         expect(cache.get(99999)).toBe(null);
     });
 
-    it('set on an existing hash keeps the first-written schema (collision guard)', () => {
+    it('set on an existing hash overwrites with the latest-written schema', () => {
         let first = makeSchema(900003, ['x', 'y']),
             second = makeSchema(900003, ['p', 'q', 'r']);
 
@@ -71,9 +71,10 @@ describe('SIEVE cache', () => {
         let result = cache.get(900003);
 
         expect(result).not.toBe(null);
-        expect(result!.fields.length).toBe(2);
-        expect(result!.fields[0]!.name).toBe('x');
-        expect(result!.fields[1]!.name).toBe('y');
+        expect(result!.fields.length).toBe(3);
+        expect(result!.fields[0]!.name).toBe('p');
+        expect(result!.fields[1]!.name).toBe('q');
+        expect(result!.fields[2]!.name).toBe('r');
     });
 });
 
@@ -104,17 +105,18 @@ describe('SIEVE cache eviction', () => {
             cache.set(base + i, makeSchema(base + i, ['g' + i]));
         }
 
-        // Re-set the oldest entry (the tail): first-writer-wins keeps its schema but marks it visited.
-        cache.set(base, makeSchema(base, ['ignored']));
+        // Re-set the oldest entry (the tail): the overwrite refreshes its value and
+        // marks it visited, so it survives the upcoming eviction pass.
+        cache.set(base, makeSchema(base, ['updated']));
 
         // The 1025th distinct insert triggers one eviction pass starting at the tail.
         cache.set(base + 1024, makeSchema(base + 1024, ['fresh']));
 
-        // The visited tail survived (fields unchanged); the adjacent unvisited entry was evicted.
+        // The visited tail survived (with its updated value); the adjacent unvisited entry was evicted.
         let survived = cache.get(base);
 
         expect(survived).not.toBe(null);
-        expect(survived!.fields[0]!.name).toBe('g0');
+        expect(survived!.fields[0]!.name).toBe('updated');
         expect(cache.get(base + 1)).toBe(null);
     });
 });

@@ -16,18 +16,23 @@ type Fetch<K, V> = (keys: K[]) => Promise<Map<K, V>>;
 
 
 const createAsyncCache = <K, V>(cache: Cache<K, V>, fetch: Fetch<K, V>): AsyncCache<K, V> => {
-    let inflight = new Map<K, Promise<void>>();
+    // In-flight entries carry the fetched Map itself, not just completion, so every
+    // waiter can return the values that were actually fetched — even the ones the
+    // bounded sync cache evicted immediately after insertion.
+    let inflight = new Map<K, Promise<Map<K, V>>>();
 
     return {
         async all(keys) {
             let hits = new Map<K, V>(),
                 misses: K[] = [],
-                waits: Promise<void>[] = [];
+                missSet = new Set<K>(),
+                waits: Promise<Map<K, V>>[] = [];
 
+            // Resolve cache hits and collect each distinct missing key exactly once.
             for (let i = 0, n = keys.length; i < n; i++) {
                 let key = keys[i]!;
 
-                if (hits.has(key)) {
+                if (hits.has(key) || missSet.has(key)) {
                     continue;
                 }
 
@@ -39,33 +44,45 @@ const createAsyncCache = <K, V>(cache: Cache<K, V>, fetch: Fetch<K, V>): AsyncCa
                     continue;
                 }
 
-                let pending = inflight.get(key);
+                missSet.add(key);
+                misses.push(key);
+            }
+
+            // Split misses into ones already in flight and ones this call must fetch.
+            let request: Promise<Map<K, V>> | null = null,
+                requested: K[] | null = null;
+
+            for (let i = 0, n = misses.length; i < n; i++) {
+                let key = misses[i]!,
+                    pending = inflight.get(key);
 
                 if (pending) {
                     waits.push(pending);
                 }
                 else {
-                    misses.push(key);
+                    (requested ??= []).push(key);
                 }
             }
 
-            if (misses.length) {
-                let request = fetch(misses)
+            if (requested) {
+                request = fetch(requested)
                     .then((fetched) => {
                         for (let [key, value] of fetched) {
                             cache.set(key, value);
                         }
+
+                        return fetched;
                     })
                     .finally(() => {
-                        for (let i = 0, n = misses.length; i < n; i++) {
-                            if (inflight.get(misses[i]!) === request) {
-                                inflight.delete(misses[i]!);
+                        for (let i = 0, n = requested!.length; i < n; i++) {
+                            if (inflight.get(requested![i]!) === request) {
+                                inflight.delete(requested![i]!);
                             }
                         }
                     });
 
-                for (let i = 0, n = misses.length; i < n; i++) {
-                    inflight.set(misses[i]!, request);
+                for (let i = 0, n = requested.length; i < n; i++) {
+                    inflight.set(requested[i]!, request);
                 }
 
                 waits.push(request);
@@ -80,7 +97,17 @@ const createAsyncCache = <K, V>(cache: Cache<K, V>, fetch: Fetch<K, V>): AsyncCa
 
                 for (let i = 0, n = waits.length; i < n; i++) {
                     try {
-                        await waits[i];
+                        let fetched = await waits[i];
+
+                        // Return the fetched values directly rather than re-reading the
+                        // bounded cache, which may already have evicted some of them.
+                        for (let j = 0, m = keys.length; j < m; j++) {
+                            let key = keys[j]!;
+
+                            if (!hits.has(key) && fetched.has(key)) {
+                                hits.set(key, fetched.get(key)!);
+                            }
+                        }
                     }
                     catch (error) {
                         if (!failed) {
@@ -92,18 +119,6 @@ const createAsyncCache = <K, V>(cache: Cache<K, V>, fetch: Fetch<K, V>): AsyncCa
 
                 if (failed) {
                     throw failure;
-                }
-
-                for (let i = 0, n = keys.length; i < n; i++) {
-                    let key = keys[i]!;
-
-                    if (!hits.has(key)) {
-                        let value = cache.get(key);
-
-                        if (value !== null) {
-                            hits.set(key, value);
-                        }
-                    }
                 }
             }
 

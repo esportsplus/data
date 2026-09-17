@@ -32,6 +32,14 @@ const DEFAULT_MAX_SIZE = 1024;
 // because a global cache hit short-circuits the per-codec store lookup entirely.
 // `maxSize: Infinity` never evicts — use it when the cache is the authority others read from.
 const createCache = <K = number, V = StoredSchema>(maxSize: number = DEFAULT_MAX_SIZE): Cache<K, V> => {
+    // A bounded cache must be able to hold at least one entry: `set()` loops
+    // `while (map.size >= maxSize)` and an empty graph cannot make progress, so
+    // `maxSize <= 0` (or NaN) would spin forever. `Infinity` stays valid and
+    // simply never evicts.
+    if (!(maxSize >= 1)) {
+        throw new Error(`@esportsplus/data: cache maxSize must be >= 1, received ${String(maxSize)}`);
+    }
+
     let hand: CacheEntry<K, V> | null = null,
         head: CacheEntry<K, V> | null = null,
         map = new Map<K, CacheEntry<K, V>>(),
@@ -98,6 +106,9 @@ const createCache = <K = number, V = StoredSchema>(maxSize: number = DEFAULT_MAX
             let entry = map.get(key);
 
             if (entry) {
+                // Overwrite the stored value and refresh its recency (SIEVE visited
+                // bit), matching the bounded-cache contract rather than first-write-wins.
+                entry.value = value;
                 entry.visited = true;
 
                 return;
