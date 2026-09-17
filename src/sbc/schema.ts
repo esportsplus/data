@@ -1,4 +1,4 @@
-import { FIELD_SIZES, FNV_OFFSET, FNV_PRIME, KNOWN_TYPES } from './constants';
+import { FIELD_SIZES, FNV_OFFSET, FNV_PRIME, KNOWN_TYPES, WIRE_VERSION } from './constants';
 import { compileSchema } from './codegen';
 import { byteLen, readBI64, readF64 } from './platform';
 
@@ -7,29 +7,37 @@ import type { FieldDef, ParsedType, Schema, SbcHelpers } from './codegen';
 import type { FieldSpec, PersistentStore, SchemaRegistry } from './types';
 
 
+// FNV-1a mixed with a 32-bit length prefix before every string. Length-prefixing makes the
+// hash input unambiguous: field names are arbitrary JS strings, so a delimiter byte (the old
+// 0xFF/0xFE scheme) could be smuggled into a name and collide `['a','b']` with
+// `['a\u00ffuint8\u00feb']`. Mixing WIRE_VERSION in retires every pre-v2 hash domain.
+function hashString(h: number, s: string): number {
+    let n = s.length,
+        i = 0;
+
+    h ^= WIRE_VERSION;
+    h = Math.imul(h, FNV_PRIME);
+
+    for (let k = 0; k < 4; k++) {
+        h ^= (n >>> (k * 8)) & 0xFF;
+        h = Math.imul(h, FNV_PRIME);
+    }
+
+    for (; i < n; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, FNV_PRIME);
+    }
+
+    return h;
+}
+
+
 function computeShapeHash(keys: string[], types: string[]): number {
     let h = FNV_OFFSET;
 
     for (let i = 0, n = keys.length; i < n; i++) {
-        let k = keys[i]!;
-
-        for (let j = 0, m = k.length; j < m; j++) {
-            h ^= k.charCodeAt(j);
-            h = Math.imul(h, FNV_PRIME);
-        }
-
-        h ^= 0xFF;
-        h = Math.imul(h, FNV_PRIME);
-
-        let t = types[i]!;
-
-        for (let j = 0, m = t.length; j < m; j++) {
-            h ^= t.charCodeAt(j);
-            h = Math.imul(h, FNV_PRIME);
-        }
-
-        h ^= 0xFE;
-        h = Math.imul(h, FNV_PRIME);
+        h = hashString(h, keys[i]!);
+        h = hashString(h, types[i]!);
     }
 
     return h >>> 0;
@@ -91,14 +99,18 @@ function parseFieldType(type: string): ParsedType {
         let hashStr = type.slice(7, -1),
             hash = Number(hashStr);
 
-        if (!hashStr || !Number.isFinite(hash) || !Number.isInteger(hash) || hash < 0) {
+        // Reject out-of-uint32 hashes instead of silently wrapping them via `>>> 0`
+        // (object(4294967296) used to alias object(0)).
+        if (!hashStr || !Number.isFinite(hash) || !Number.isInteger(hash) || hash < 0 || hash > 0xFFFFFFFF) {
             throw new Error('@esportsplus/data: codec invalid object hash: ' + hashStr);
         }
 
-        return { base: 'object', hash: hash >>> 0 };
+        return { base: 'object', hash };
     }
 
-    if (!(type in KNOWN_TYPES)) {
+    // `Object.hasOwn` rather than `in`: `'toString' in KNOWN_TYPES` walks the prototype chain
+    // and admits Object.prototype names that codegen has no arm for.
+    if (!Object.hasOwn(KNOWN_TYPES, type)) {
         throw new Error('@esportsplus/data: codec unknown field type: ' + type);
     }
 
@@ -193,6 +205,30 @@ function fieldsMatch(existing: Schema, keys: string[], types: string[], nullable
 }
 
 
+// Inference-path collision recovery. A true FNV-1a/32 collision between two distinct shapes is
+// astronomically unlikely (and no longer constructible through field names now that the hash
+// input is length-prefixed), but it must not be a fatal, unrecoverable throw. Linear-probe the
+// uint32 space for the first slot that is free or already holds this exact shape and register
+// there instead.
+function resolveCollisionHash(registry: SchemaRegistry, hash: number, keys: string[], types: string[], nullable: boolean[]): number {
+    let candidate = hash;
+
+    for (;;) {
+        let existing = registry.schemas.get(candidate);
+
+        if (!existing || fieldsMatch(existing, keys, types, nullable)) {
+            return candidate;
+        }
+
+        candidate = (candidate + 1) >>> 0;
+
+        if (candidate === hash) {
+            throw new Error('@esportsplus/data: codec schema hash space exhausted');
+        }
+    }
+}
+
+
 function hashTypesOf(types: string[], nullable: boolean[]): string[] {
     let out: string[] = new Array(types.length);
 
@@ -235,11 +271,7 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
     let hash = computeShapeHash(keys, hashTypesOf(types, nullable)),
         existing = registry.schemas.get(hash);
 
-    if (existing) {
-        if (!fieldsMatch(existing, keys, types, nullable)) {
-            throw new Error('@esportsplus/data: codec schema hash collision — two distinct schemas share hash ' + hash);
-        }
-
+    if (existing && fieldsMatch(existing, keys, types, nullable)) {
         return existing;
     }
 
@@ -307,14 +339,14 @@ function inferAndRegister(obj: Record<string, unknown>, registry: SchemaRegistry
         hash = computeShapeHash(keys, hashTypesOf(types, nullable));
         existing = registry.schemas.get(hash);
 
-        if (existing) {
-            if (!fieldsMatch(existing, keys, types, nullable)) {
-                throw new Error('@esportsplus/data: codec schema hash collision — two distinct schemas share hash ' + hash);
-            }
-
+        if (existing && fieldsMatch(existing, keys, types, nullable)) {
             return existing;
         }
     }
+
+    // A mismatched entry under `hash` is a genuine collision, not an alias. Probe to a free slot
+    // so this inference stays recoverable instead of throwing away the record.
+    hash = resolveCollisionHash(registry, hash, keys, types, nullable);
 
     for (let i = 0; i < n; i++) {
         validateFieldName(keys[i]!);

@@ -124,6 +124,13 @@ function deserializeRegistry(data: Uint8Array, defineSchemaFn: (fields: FieldSpe
 function serializeRegistry(schemas: Map<number, Schema>): Uint8Array {
     let schemaArr = [...schemas.values()];
 
+    // Enforce the same COUNT limit the reader enforces before emitting a blob the decoder
+    // would refuse. Without this the writer happily emits a u16 count > MAX_SCHEMA_COUNT
+    // that deserializeRegistry rejects.
+    if (schemaArr.length > MAX_SCHEMA_COUNT) {
+        throw new Error('@esportsplus/data: codec schema count ' + schemaArr.length + ' exceeds limit');
+    }
+
     // Calculate total size using UTF-8 byte lengths
     let size = 2; // u16 schemaCount
 

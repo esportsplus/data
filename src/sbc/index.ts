@@ -34,10 +34,15 @@ const HINTED_INT_RANGE: Record<string, [number, number]> = {
 };
 
 
+type ResolveRef = (hash: number) => Schema | null;
+
+
 // Hinted-path validation (D12): an explicit schema drives fixed-width writes, so a value
-// that does not match the declared field would silently truncate/corrupt. Validate once
-// per field on the hinted path only; the inference path narrows widths from values already.
-function validateHinted(schema: Schema, obj: Record<string, unknown>): void {
+// that does not match the declared field would silently truncate/corrupt. Validate once per
+// field on the hinted path, DESCENDING into object(hash) / array<object(hash)> references so
+// `{child:{x:300}}` against a uint8 child is rejected instead of written as 44. The plain
+// encode path mirrors this through matchesTypedField (which re-infers on mismatch).
+function validateHinted(schema: Schema, obj: Record<string, unknown>, resolveRef: ResolveRef): void {
     let fields = schema.fields;
 
     for (let i = 0, n = fields.length; i < n; i++) {
@@ -53,21 +58,64 @@ function validateHinted(schema: Schema, obj: Record<string, unknown>): void {
             continue;
         }
 
-        switch (f.type) {
-            case 'array':
-                if (f.elementType) {
-                    validateHintedArray(name, value, f.elementType);
-                }
-                break;
-
-            default:
-                validateHintedPrimitive(name, value, f.type);
-        }
+        validateHintedField(f, value, name, resolveRef);
     }
 }
 
 
-function validateHintedArray(name: string, value: unknown, elementType: FieldDef['elementType']): void {
+function validateHintedField(f: FieldDef, value: unknown, name: string, resolveRef: ResolveRef): void {
+    switch (f.type) {
+        case 'array':
+            if (f.elementType) {
+                validateHintedArray(name, value, f.elementType, resolveRef);
+            }
+            break;
+
+        case 'object':
+            if (f.refHash !== undefined) {
+                validateHintedObject(name, value, f.refHash, resolveRef);
+            }
+            break;
+
+        default:
+            validateHintedPrimitive(name, value, f.type);
+    }
+}
+
+
+function validateHintedObject(name: string, value: unknown, refHash: number, resolveRef: ResolveRef): void {
+    if (value === null || typeof value !== 'object' || Array.isArray(value) || ((value as object).constructor !== Object && (value as object).constructor !== undefined)) {
+        throw new Error("@esportsplus/data: codec field '" + name + "' expected plain object");
+    }
+
+    let child = resolveRef(refHash);
+
+    if (!child) {
+        throw new Error('@esportsplus/data: codec unknown schema hash ' + refHash);
+    }
+
+    let fields = child.fields,
+        obj = value as Record<string, unknown>;
+
+    for (let i = 0, n = fields.length; i < n; i++) {
+        let cf = fields[i]!,
+            cname = name + '.' + cf.name,
+            cvalue = obj[cf.name];
+
+        if (cvalue === null || cvalue === undefined) {
+            if (!cf.nullable) {
+                throw new Error("@esportsplus/data: codec field '" + cname + "' is required (non-nullable)");
+            }
+
+            continue;
+        }
+
+        validateHintedField(cf, cvalue, cname, resolveRef);
+    }
+}
+
+
+function validateHintedArray(name: string, value: unknown, elementType: FieldDef['elementType'], resolveRef: ResolveRef): void {
     if (!Array.isArray(value)) {
         throw new Error("@esportsplus/data: codec field '" + name + "' expected array, got " + typeof value);
     }
@@ -81,9 +129,7 @@ function validateHintedArray(name: string, value: unknown, elementType: FieldDef
             elementName = name + '[' + i + ']';
 
         if (elementType.hash !== undefined) {
-            if (element === null || typeof element !== 'object' || Array.isArray(element) || ((element as object).constructor !== Object && (element as object).constructor !== undefined)) {
-                throw new Error("@esportsplus/data: codec field '" + elementName + "' expected plain object");
-            }
+            validateHintedObject(elementName, element, elementType.hash, resolveRef);
         }
         else if (elementType.base !== 'mixed' && elementType.base !== 'typedarray') {
             validateHintedPrimitive(elementName, element, elementType.base);
@@ -183,7 +229,14 @@ function validateHintedPrimitive(name: string, value: unknown, type: string): vo
 
 const codec = (options?: CodecOptions): {
     computeSize<T>(value: T & Encodable<T>): number;
+    /**
+     * Decodes a buffer. `T` is an UNCHECKED assertion: it is erased at runtime and never
+     * validated against the bytes, so the result has the shape actually present on the wire
+     * regardless of `T`. Pass `T` only when the caller already knows the wire shape; use the
+     * default `unknown` (or validate the result) when the source is untrusted.
+     */
     decode<T = unknown>(buffer: Uint8Array, lengthOrOptions?: number | DecodeOptions): T;
+    /** Same unchecked-assertion caveat as {@link decode}: `T` is not validated at runtime. */
     decodeAt<T = unknown>(buffer: Uint8Array, offset: number): T;
     defineSchema(fields: FieldSpec[]): number;
     deserializeRegistry(data: Uint8Array): void;
@@ -378,13 +431,10 @@ const codec = (options?: CodecOptions): {
             let et = field.elementType;
 
             if (et.hash !== undefined) {
-                // array<object(hash)> — require every element be a non-null object.
-                // Deep shape verification would require recursive match against the
-                // ref schema; we guard against obvious mismatches (primitives, arrays).
+                // array<object(hash)> — descend into each element's referenced schema so a
+                // wrong-width nested value cannot bind to (and be truncated by) the typed encoder.
                 for (let i = 0, n = value.length; i < n; i++) {
-                    let v = value[i];
-
-                    if (v === null || typeof v !== 'object' || Array.isArray(v)) {
+                    if (!matchesRefObject(value[i], et.hash)) {
                         return false;
                     }
                 }
@@ -404,10 +454,47 @@ const codec = (options?: CodecOptions): {
         }
 
         if (field.refHash !== undefined) {
-            return value !== null && typeof value === 'object' && !Array.isArray(value);
+            return matchesRefObject(value, field.refHash);
         }
 
         return primitiveMatches(value, field.type);
+    }
+
+
+    // Recursively verifies a nested object against its referenced schema. Uses only the local
+    // registry (no JIT compile during matching); an unresolvable ref simply does not match, so
+    // inference re-derives a correct inline schema rather than truncating.
+    function matchesRefObject(value: unknown, refHash: number): boolean {
+        if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+            return false;
+        }
+
+        let child = registry.schemas.get(refHash);
+
+        if (!child) {
+            return false;
+        }
+
+        let fields = child.fields,
+            obj = value as Record<string, unknown>;
+
+        for (let i = 0, n = fields.length; i < n; i++) {
+            let f = fields[i]!;
+
+            if (!Object.hasOwn(obj, f.name)) {
+                if (!f.nullable) {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (!matchesTypedField(obj[f.name], f)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
 
@@ -488,18 +575,25 @@ const codec = (options?: CodecOptions): {
                 let bufHash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
 
                 if (bufHash === hintSchema.hash) {
+                    let dataLen = (buffer[5]! | (buffer[6]! << 8) | (buffer[7]! << 16) | (buffer[8]! << 24)) >>> 0,
+                        end = 9 + dataLen;
+
+                    if (end > len) {
+                        throw new Error('@esportsplus/data: codec truncated tag-' + tag + ' object');
+                    }
+
                     dctx.lastDecodeHash = bufHash;
                     dctx.lastDecodeFn = null;
                     dctx.lastDecodeSchema = hintSchema;
 
                     if (tag === 18 && hintSchema.compressedDecodeFn) {
-                        return hintSchema.compressedDecodeFn(buffer, 9, 0) as T;
+                        return hintSchema.compressedDecodeFn(buffer, 9, 0, end) as T;
                     }
 
                     if (hintSchema.decodeFn) {
                         dctx.lastDecodeFn = hintSchema.decodeFn;
 
-                        return hintSchema.decodeFn(buffer, 9, 0) as T;
+                        return hintSchema.decodeFn(buffer, 9, 0, end) as T;
                     }
                 }
             }
@@ -508,14 +602,17 @@ const codec = (options?: CodecOptions): {
 
         // Fast path: tag 8 (uncompressed object) — hottest path, minimize overhead
         if (buffer[0] === 8 && len >= 9 && len <= buffer.length) {
-            let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0;
+            let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
+                dataLen = (buffer[5]! | (buffer[6]! << 8) | (buffer[7]! << 16) | (buffer[8]! << 24)) >>> 0;
 
-            if (9 + ((buffer[5]! | (buffer[6]! << 8) | (buffer[7]! << 16) | (buffer[8]! << 24)) >>> 0) > len) {
+            if (9 + dataLen > len) {
                 throw new Error('@esportsplus/data: codec truncated tag-8 object');
             }
 
+            let end = 9 + dataLen;
+
             if (hash === dctx.lastDecodeHash && dctx.lastDecodeFn) {
-                return dctx.lastDecodeFn(buffer, 9, 0) as T;
+                return dctx.lastDecodeFn(buffer, 9, 0, end) as T;
             }
 
             let schema = registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash);
@@ -525,17 +622,20 @@ const codec = (options?: CodecOptions): {
                 dctx.lastDecodeFn = schema.decodeFn;
                 dctx.lastDecodeSchema = schema;
 
-                return schema.decodeFn(buffer, 9, 0) as T;
+                return schema.decodeFn(buffer, 9, 0, end) as T;
             }
         }
 
         // Tag 18 (compressed object) fast path
         if (buffer[0] === 18 && len >= 9 && len <= buffer.length) {
-            if (9 + ((buffer[5]! | (buffer[6]! << 8) | (buffer[7]! << 16) | (buffer[8]! << 24)) >>> 0) > len) {
+            let dataLen = (buffer[5]! | (buffer[6]! << 8) | (buffer[7]! << 16) | (buffer[8]! << 24)) >>> 0;
+
+            if (9 + dataLen > len) {
                 throw new Error('@esportsplus/data: codec truncated tag-18 object');
             }
 
-            let hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
+            let end = 9 + dataLen,
+                hash = (buffer[1]! | (buffer[2]! << 8) | (buffer[3]! << 16) | (buffer[4]! << 24)) >>> 0,
                 schema = hash === dctx.lastDecodeHash && dctx.lastDecodeSchema
                     ? dctx.lastDecodeSchema
                     : (registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash));
@@ -546,11 +646,11 @@ const codec = (options?: CodecOptions): {
                 dctx.lastDecodeSchema = schema;
 
                 if (schema.compressedDecodeFn) {
-                    return schema.compressedDecodeFn(buffer, 9, 0) as T;
+                    return schema.compressedDecodeFn(buffer, 9, 0, end) as T;
                 }
 
                 if (schema.decodeFn) {
-                    return schema.decodeFn(buffer, 9, 0) as T;
+                    return schema.decodeFn(buffer, 9, 0, end) as T;
                 }
             }
         }
@@ -583,7 +683,7 @@ const codec = (options?: CodecOptions): {
 
     function encodeObject(schema: Schema, obj: Record<string, unknown>, view: boolean, validate: boolean): Uint8Array {
         if (validate) {
-            validateHinted(schema, obj);
+            validateHinted(schema, obj, (hash) => registry.schemas.get(hash) ?? resolveSchemaFromCacheOrStore(hash));
         }
 
         let end: number,
@@ -693,6 +793,13 @@ const codec = (options?: CodecOptions): {
 
             let dataLen = (buffer[offset + 5]! | (buffer[offset + 6]! << 8) | (buffer[offset + 7]! << 16) | (buffer[offset + 8]! << 24)) >>> 0;
 
+            // The declared payload must fit in the PHYSICAL buffer, not just the frame: a
+            // truncated buffer whose header claims more bytes than exist used to reach the
+            // field decoder and read adjacent/undefined bytes as 0.
+            if (offset + 9 + dataLen > buffer.length) {
+                throw new Error('@esportsplus/data: codec truncated tag-8/18 object at offset ' + offset);
+            }
+
             return boundDecodeSbc(buffer, offset, offset + 9 + dataLen, 0) as T;
         }
 
@@ -726,9 +833,30 @@ const codec = (options?: CodecOptions): {
 
         let hash = computeShapeHash(keys, hashTypes);
 
-        // Already registered?
-        if (registry.schemas.has(hash)) {
-            return hash;
+        // Already registered? A hash hit must carry the SAME full field definition; otherwise
+        // return a silently aliased schema whose encoder does not match the requested shape.
+        // (The v2 length-prefixed hash makes this unreachable for well-formed input; it is a
+        // hard safety net against a genuine 32-bit collision.)
+        let registered = registry.schemas.get(hash);
+
+        if (registered) {
+            let ef = registered.fields,
+                same = ef.length === sorted.length;
+
+            if (same) {
+                for (let i = 0, n = sorted.length; i < n; i++) {
+                    if (ef[i]!.name !== sorted[i]!.name || ef[i]!.rawType !== sorted[i]!.type || ef[i]!.nullable !== (sorted[i]!.nullable === true)) {
+                        same = false;
+                        break;
+                    }
+                }
+            }
+
+            if (same) {
+                return hash;
+            }
+
+            throw new Error('@esportsplus/data: codec schema hash collision — two distinct definitions share hash ' + hash);
         }
 
         let fieldDefs: FieldDef[] = new Array(sorted.length),

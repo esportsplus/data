@@ -13,7 +13,7 @@ import type { PersistentStore, SchemaRegistry } from './types';
 
 type DecodeContext = {
     compress: boolean;
-    lastDecodeFn: ((buf: Uint8Array, pos: number, depth: number) => unknown) | null;
+    lastDecodeFn: ((buf: Uint8Array, pos: number, depth: number, end?: number) => unknown) | null;
     lastDecodeHash: number;
     lastDecodeSchema: Schema | null;
     resolveSchema: (hash: number) => Schema | null;
@@ -136,7 +136,7 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
             dctx.lastDecodeHash = hash;
             dctx.lastDecodeSchema = schema;
 
-            return schema.decodeFn(buf, offset + 9, depth + 1);
+            return schema.decodeFn(buf, offset + 9, depth + 1, offset + 9 + dataLen);
         }
 
         case 18: {
@@ -158,10 +158,10 @@ function decodeSbc(dctx: DecodeContext, buf: Uint8Array, offset: number, end: nu
             }
 
             if (schema.compressedDecodeFn) {
-                return schema.compressedDecodeFn(buf, offset + 9, depth + 1);
+                return schema.compressedDecodeFn(buf, offset + 9, depth + 1, offset + 9 + dataLen);
             }
 
-            return schema.decodeFn ? schema.decodeFn(buf, offset + 9, depth + 1) : null;
+            return schema.decodeFn ? schema.decodeFn(buf, offset + 9, depth + 1, offset + 9 + dataLen) : null;
         }
 
         case 9:
@@ -620,6 +620,12 @@ function encodeSbc(ectx: EncodeContext, value: unknown, buf: Uint8Array, pos: nu
 
             if (Array.isArray(value)) {
                 let len = value.length;
+
+                // Fail fast on the ENCODE side at the same cap the decoder enforces, so the
+                // encoder can never emit a count its own decoder refuses.
+                if (len > MAX_ARRAY_COUNT) {
+                    throw new Error('@esportsplus/data: codec array count ' + len + ' exceeds limit');
+                }
 
                 if (len > 0 && typeof value[0] === 'number') {
                     // Packed number[] → tag 17's payload layout: [12][u8 typeId][u32 byteLen][raw LE

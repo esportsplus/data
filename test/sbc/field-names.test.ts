@@ -210,19 +210,24 @@ describe('field names — arbitrary non-identifier keys', () => {
     describe('byte-stability regression', () => {
         // Baseline literals captured on unchanged 0.13.0 source BEFORE the field-name gate
         // relaxed; identifier-keyed structs must stay byte-identical after the change.
+        //
+        // WIRE-VERSION CHANGE (v2): the shape hash is now length-prefixed (B4) and mixed with
+        // WIRE_VERSION, so the embedded hashes retired. Field ORDER, widths and all non-hash
+        // bytes are unchanged — only the 4-byte hash bytes moved. Literals updated to the v2
+        // baseline; the assertion strength (full-buffer byte equality) is unchanged.
         it('uncompressed identifier-keyed struct is byte-identical', () => {
             let c = codec(),
                 encoded = c.encode({ active: true, age: 30, name: 'Alice' });
 
-            expect(hex(encoded)).toBe('08c5fe952308000000011e05416c696365');
-            expect((encoded[1]! | (encoded[2]! << 8) | (encoded[3]! << 16) | (encoded[4]! << 24)) >>> 0).toBe(597032645);
+            expect(hex(encoded)).toBe('08bdc01cdd08000000011e05416c696365');
+            expect((encoded[1]! | (encoded[2]! << 8) | (encoded[3]! << 16) | (encoded[4]! << 24)) >>> 0).toBe(3709649085);
         });
 
         it('compressed nested identifier-keyed struct is byte-identical', () => {
             let c = codec({ compress: true }),
                 encoded = c.encode({ flag: false, score: 99.5, user: { active: true, age: 30, name: 'Alice' } });
 
-            expect(hex(encoded)).toBe('12008e1f461b00000000010000000000e0584012c5fe952308000000011e05416c696365');
+            expect(hex(encoded)).toBe('12d0b7793c1b00000000010000000000e0584012bdc01cdd08000000011e05416c696365');
         });
     });
 });

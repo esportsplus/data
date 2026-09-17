@@ -56,6 +56,11 @@ function browserAllocBuf(n: number): Uint8Array {
     return new Uint8Array(n);
 }
 
+// Must match TextEncoder/Buffer.byteLength byte-for-byte: a high surrogate is only a 4-byte
+// pair when the NEXT code unit is a low surrogate; a lone high surrogate (end of string or
+// followed by a non-low-surrogate) is the 3-byte U+FFFD replacement. The old code consumed
+// the next code unit unconditionally, so `'\ud800é'` sized as 4 while TextEncoder wrote 5 —
+// the length prefix disagreed with the bytes actually written.
 function browserByteLen(str: string): number {
     let len = 0;
 
@@ -68,9 +73,16 @@ function browserByteLen(str: string): number {
         else if (c < 0x800) {
             len += 2;
         }
-        else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n) {
-            len += 4;
-            i++;
+        else if (c >= 0xD800 && c <= 0xDBFF) {
+            let next = i + 1 < n ? str.charCodeAt(i + 1) : 0;
+
+            if (next >= 0xDC00 && next <= 0xDFFF) {
+                len += 4;
+                i++;
+            }
+            else {
+                len += 3;
+            }
         }
         else {
             len += 3;

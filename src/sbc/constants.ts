@@ -6,6 +6,16 @@ const MAX_ARRAY_COUNT = 1048576; // 2^20 — guard against DoS from untrusted u3
 
 const MAX_SCHEMA_COUNT = 1024; // guard against DoS from untrusted u16 schema count
 
+// Wire-format version. Bumped whenever the byte layout or the schema-hash derivation
+// changes in a way that is not back-compatible:
+//   v1 — delimiter-joined shape hash (0xFF/0xFE ambiguous) + object-ref layout chosen by
+//        local registration order.
+//   v2 — length-prefixed shape hash (unambiguous) + one canonical object-ref layout
+//        (varint length-prefixed child payload, resolved by refHash at runtime when the
+//        child is not locally compiled) + explicit payload-end bounds + a compiled-path
+//        depth budget. Mixed into computeShapeHash so every prior hash is retired.
+const WIRE_VERSION = 2;
+
 
 // FNV-1a
 const FNV_OFFSET = 0x811c9dc5 | 0;
@@ -45,4 +55,4 @@ const KNOWN_TYPES: Record<string, number> = {
 };
 
 
-export { FIELD_SIZES, FNV_OFFSET, FNV_PRIME, INT64_MIN, INT64_OVERFLOW, KNOWN_TYPES, MAX_ARRAY_COUNT, MAX_SCHEMA_COUNT };
+export { FIELD_SIZES, FNV_OFFSET, FNV_PRIME, INT64_MIN, INT64_OVERFLOW, KNOWN_TYPES, MAX_ARRAY_COUNT, MAX_SCHEMA_COUNT, WIRE_VERSION };

@@ -4,7 +4,7 @@
 // mirrored from the encoders (src/sbc/tagged.ts encodeSbc, src/sbc/codegen.ts compileEncoder /
 // compileCompressedEncoder); state is threaded via SizeContext.
 
-import { FIELD_SIZES } from './constants';
+import { FIELD_SIZES, MAX_ARRAY_COUNT } from './constants';
 import { INT64_MIN, INT64_OVERFLOW } from './constants';
 import { byteLen, classifyPackedArray, TYPED_ARRAY_BPE, TYPED_ARRAY_IDS, zigzagEncode } from './platform';
 import { unrepresentable } from './tagged';
@@ -83,6 +83,10 @@ function computeSize(ctx: SizeContext, value: unknown): number {
             }
 
             if (Array.isArray(value)) {
+                if (value.length > MAX_ARRAY_COUNT) {
+                    throw new Error('@esportsplus/data: codec array count ' + value.length + ' exceeds limit');
+                }
+
                 if (value.length > 0 && typeof value[0] === 'number') {
                     let typeId = classifyPackedArray(value as number[]);
 
@@ -151,6 +155,11 @@ function sizeArrayField(ctx: SizeContext, f: FieldDef, v: unknown): number {
     let arr = v as unknown[],
         count = arr.length;
 
+    // Mirror the encoder's encode-side cap so computeSize throws exactly where encode does.
+    if (count > MAX_ARRAY_COUNT) {
+        throw new Error('@esportsplus/data: codec array count ' + count + ' exceeds limit');
+    }
+
     if (!f.elementType) {
         let typeId = classifyPackedArray(arr as number[]);
 
@@ -199,7 +208,9 @@ function sizeArrayField(ctx: SizeContext, f: FieldDef, v: unknown): number {
     }
 
     if (base === 'object' && f.elementType.hash !== undefined) {
-        let refSchema = ctx.registry.schemas.get(f.elementType.hash);
+        // Resolve the same way the encoder does (local first, then cache/store) so the sizer
+        // follows the canonical ref layout even when the child was compiled after the parent.
+        let refSchema = ctx.registry.schemas.get(f.elementType.hash) ?? ctx.helpers.lookupSchema(f.elementType.hash);
 
         if (refSchema) {
             let size = varintSize(count);
@@ -270,7 +281,7 @@ function sizeCompressed(ctx: SizeContext, schema: Schema, obj: Record<string, un
             case 'float64': {
                 let fv = v as number;
 
-                if (Number.isInteger(fv) && fv >= -2147483648 && fv <= 2147483647) {
+                if (Number.isInteger(fv) && !Object.is(fv, -0) && fv >= -2147483648 && fv <= 2147483647) {
                     size += 1 + varintSize(zigzagEncode(fv));
                 }
                 else {
@@ -294,7 +305,7 @@ function sizeCompressed(ctx: SizeContext, schema: Schema, obj: Record<string, un
 // uncompressed fn); otherwise the field routes through encodeObj (compress-aware, 9-byte header).
 function sizeObjectField(ctx: SizeContext, f: FieldDef, v: unknown): number {
     if (f.refHash !== undefined) {
-        let refSchema = ctx.registry.schemas.get(f.refHash);
+        let refSchema = ctx.registry.schemas.get(f.refHash) ?? ctx.helpers.lookupSchema(f.refHash);
 
         if (refSchema) {
             let pl = sizeUncompressed(ctx, refSchema, v as Record<string, unknown>);

@@ -41,8 +41,12 @@ type Encodable<T> =
                         ? { [K in keyof T]: Encodable<T[K]> }
                         : never;
 
+// `Exclude<ArrayBufferView, DataView>` deliberately drops DataView: the runtime
+// (tagged.ts encodeSbc) routes ArrayBufferView through the typed-array branch only
+// when it is NOT a DataView, and rejects DataView as an unrepresentable value. The
+// type must not admit what the runtime refuses.
 type EncodablePrimitive =
-    | ArrayBufferView
+    | Exclude<ArrayBufferView, DataView>
     | bigint
     | boolean
     | Date
