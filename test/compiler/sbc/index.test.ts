@@ -73,7 +73,7 @@ describe('codec2 compiler plugin transformations', () => {
         expect(result).toContain('"type":"int64"');
     });
 
-    test('nullable field — string | null has nullable true', () => {
+    test('nullable field — string | null is hint-free (nullability is value-derived)', () => {
         let code = `
             type Data = { email: string | null; name: string };
             declare let d: Data;
@@ -81,8 +81,10 @@ describe('codec2 compiler plugin transformations', () => {
         `;
         let result = transformCodec2(code);
 
-        expect(result).toContain('"nullable":true');
-        expect(result).toContain('"email"');
+        // Runtime inference records nullable:false for a present value and nullable:true for a
+        // null one, so no single static hint is parity. The whole type is left hint-free.
+        expect(result).not.toContain('"schema"');
+        expect(result).toContain('codec.encode<Data>(d)');
     });
 
     test('optional number field — whole type is hint-free', () => {
@@ -507,7 +509,7 @@ describe('codec2 compile + run parity', () => {
         expect(decoded).toEqual(obj);
     });
 
-    test('compiled nullable type round-trips correctly', () => {
+    test('nullable type is hint-free and still round-trips via runtime inference', () => {
         let code = `
             type User = { email: string | null; name: string };
             declare let u: User;
@@ -515,23 +517,19 @@ describe('codec2 compile + run parity', () => {
         `;
         let transformed = transformCodec2(code);
 
-        expect(transformed).toContain('"nullable":true');
-
-        let schema = extractSchema(transformed);
-
-        expect(schema).not.toBeNull();
+        // No injected hint: nullable is a per-value inference decision.
+        expect(transformed).not.toContain('"schema"');
+        expect(extractSchema(transformed)).toBeNull();
 
         let c = codec();
 
         let obj1 = { email: null, name: 'Test' };
-        let encoded1 = c.encode(obj1, { schema: schema! });
-        let decoded1 = c.decode(encoded1, { schema: schema! });
+        let decoded1 = c.decode(c.encode(obj1));
 
         expect(decoded1).toEqual(obj1);
 
         let obj2 = { email: 'test@example.com', name: 'Test' };
-        let encoded2 = c.encode(obj2, { schema: schema! });
-        let decoded2 = c.decode(encoded2, { schema: schema! });
+        let decoded2 = c.decode(c.encode(obj2));
 
         expect(decoded2).toEqual(obj2);
     });
