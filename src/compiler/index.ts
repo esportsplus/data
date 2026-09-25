@@ -1,6 +1,6 @@
 import type { ImportIntent, ReplacementIntent, TransformContext } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
-import { ast, imports, uid } from '@esportsplus/typescript/compiler';
+import { ast, references, uid } from '@esportsplus/typescript/compiler';
 import { PACKAGE_NAME } from '../constants';
 import { analyzeRootType, analyzeType, type AnalyzedType } from './type-analyzer';
 import { NON_STATIC, extractConfig, peelAnnotations } from './json-schema-constraints';
@@ -169,34 +169,6 @@ function unwrapPromise(type: ts.Type, checker: ts.Checker): ts.Type {
     }
 
     return type;
-}
-
-// `imports.includes` resolves LOCAL BINDINGS built from named specifiers only, so a namespace
-// import (`import * as data from '@esportsplus/data'`) contributes no name and can never match
-// through it. Resolve that binding here so ns.validator.<m><T>() is detected, while still keying
-// off the base identifier's own import binding rather than text coincidence with a named import.
-function namespaceLocalName(sourceFile: ts.SourceFile): string | undefined {
-    let statements = sourceFile.statements;
-
-    for (let i = 0, n = statements.length; i < n; i++) {
-        let statement = statements[i];
-
-        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
-            continue;
-        }
-
-        if (statement.moduleSpecifier.text !== PACKAGE_NAME) {
-            continue;
-        }
-
-        let bindings = statement.importClause?.namedBindings;
-
-        if (bindings && ts.isNamespaceImport(bindings)) {
-            return bindings.name.text;
-        }
-    }
-
-    return undefined;
 }
 
 // A config expression is hoisted to module scope, which is only sound when it neither
@@ -553,37 +525,16 @@ function transform(call: DetectedCall, ctx: TransformContext, validators: Map<st
     };
 }
 
-function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.Checker, node: ts.Node, validatorLocalName: string | undefined, namespaceName: string | undefined): void {
+function visit(calls: Map<ts.CallExpression, DetectedCall>, node: ts.Node, isValidator: (expression: ts.Expression) => boolean): void {
     if (ts.isCallExpression(node) && node.typeArguments && node.typeArguments.length > 0) {
         let expr = node.expression,
             matched = false,
             method: 'build' | 'toJsonSchema' = 'build';
 
-        // Property access: validator.<m><T>() or ns.validator.<m><T>()
-        if (ts.isPropertyAccessExpression(expr)) {
-            let methodName = expr.name.text;
-
-            if (methodName === 'build' || methodName === 'toJsonSchema') {
-                // validator.<m><T>() or aliasedValidator.<m><T>() - matched against the LOCAL binding, alias-aware
-                if (ts.isIdentifier(expr.expression)) {
-                    if (validatorLocalName !== undefined && imports.includes(checker, expr.expression, PACKAGE_NAME, validatorLocalName)) {
-                        matched = true;
-                        method = methodName;
-                    }
-                }
-                // ns.validator.<m><T>() - namespace import; verify the base identifier resolves to the package,
-                // never the property text (which coincidentally matches an unrelated named import's local name)
-                else if (ts.isPropertyAccessExpression(expr.expression)) {
-                    let inner = expr.expression;
-
-                    if (inner.name.text === 'validator' && ts.isIdentifier(inner.expression)) {
-                        if (namespaceName !== undefined && inner.expression.text === namespaceName) {
-                            matched = true;
-                            method = methodName;
-                        }
-                    }
-                }
-            }
+        // <validator>.<m><T>() through any binding: import, alias, barrel, namespace
+        if (ts.isPropertyAccessExpression(expr) && (expr.name.text === 'build' || expr.name.text === 'toJsonSchema') && isValidator(expr.expression)) {
+            matched = true;
+            method = expr.name.text;
         }
 
         if (matched) {
@@ -605,7 +556,7 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.Checker,
         }
     }
 
-    node.forEachChild(n => visit(calls, checker, n, validatorLocalName, namespaceName));
+    node.forEachChild(n => visit(calls, n, isValidator));
 }
 
 // Self-assertion scanner: a "survivor" is a consumable call site - validator.<build|set|toJsonSchema>()
@@ -614,74 +565,148 @@ function visit(calls: Map<ts.CallExpression, DetectedCall>, checker: ts.Checker,
 // The base-binding check mirrors visit()/validators.collect() exactly, so anything those intentionally
 // leave (namespace-only access, non-package look-alikes) is never flagged; only genuinely-missed sites
 // that would otherwise ship dead config and throw from the runtime stub at call time.
-function collectSurvivors(node: ts.Node, sourceFile: ts.SourceFile, checker: ts.Checker, validatorLocalName: string | undefined, namespaceName: string | undefined, consumed: Set<ts.Node>, survivors: Survivor[]): void {
+function collectSurvivors(node: ts.Node, sourceFile: ts.SourceFile, isValidator: (expression: ts.Expression) => boolean, consumed: Set<ts.Node>, survivors: Survivor[]): void {
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
         let expr = node.expression,
-            matched = false,
             method = expr.name.text;
 
-        if (method === 'build' || method === 'set' || method === 'toJsonSchema') {
-            if (ts.isIdentifier(expr.expression)) {
-                if (validatorLocalName !== undefined && imports.includes(checker, expr.expression, PACKAGE_NAME, validatorLocalName)) {
-                    matched = true;
-                }
-            }
-            else if (ts.isPropertyAccessExpression(expr.expression)) {
-                let inner = expr.expression;
+        if ((method === 'build' || method === 'set' || method === 'toJsonSchema') && isValidator(expr.expression) && !consumed.has(node)) {
+            let position = sourceFile.getLineAndCharacterOfPosition(node.getStart());
 
-                if (inner.name.text === 'validator' && ts.isIdentifier(inner.expression) && namespaceName !== undefined && inner.expression.text === namespaceName) {
-                    matched = true;
-                }
-            }
-
-            if (matched && !consumed.has(node)) {
-                let position = sourceFile.getLineAndCharacterOfPosition(node.getStart());
-
-                survivors.push({
-                    column: position.character + 1,
-                    line: position.line + 1,
-                    method,
-                    node
-                });
-            }
+            survivors.push({
+                column: position.character + 1,
+                line: position.line + 1,
+                method,
+                node
+            });
         }
     }
 
-    node.forEachChild(child => collectSurvivors(child, sourceFile, checker, validatorLocalName, namespaceName, consumed, survivors));
+    node.forEachChild(child => collectSurvivors(child, sourceFile, isValidator, consumed, survivors));
+}
+
+// A use of `validator` the compiler lowers: the receiver of a build/set/toJsonSchema call, or a
+// const alias of the whole object (`const v = validator`, `const { validator: v } = ns`), whose
+// own uses are sites in turn. Anything else would reach the runtime stub, which throws.
+function isLowered(site: ts.Node): boolean {
+    let parent = site.parent;
+
+    if (!parent) {
+        return false;
+    }
+
+    if (ts.isPropertyAccessExpression(parent)) {
+        let method = parent.name.text;
+
+        return parent.expression === site &&
+            (method === 'build' || method === 'set' || method === 'toJsonSchema') &&
+            parent.parent !== undefined &&
+            ts.isCallExpression(parent.parent) &&
+            parent.parent.expression === parent;
+    }
+
+    let declaration: ts.Node | undefined;
+
+    if (ts.isVariableDeclaration(parent) && parent.initializer === site && ts.isIdentifier(parent.name)) {
+        declaration = parent;
+    }
+    else if (ts.isBindingElement(parent) && parent.propertyName === site && parent.name !== undefined && ts.isIdentifier(parent.name)) {
+        declaration = parent;
+
+        while (declaration && !ts.isVariableDeclaration(declaration)) {
+            declaration = declaration.parent;
+        }
+    }
+
+    return declaration !== undefined &&
+        declaration.parent !== undefined &&
+        ts.isVariableDeclarationList(declaration.parent) &&
+        (declaration.parent.flags & ts.NodeFlags.Const) !== 0;
+}
+
+// `validator`, or the member access naming it (`ns.validator`, `ns['validator']`)
+function siteOf(identifier: ts.Node): ts.Node {
+    let parent = identifier.parent!;
+
+    if (
+        (ts.isPropertyAccessExpression(parent) && parent.name === identifier) ||
+        (ts.isElementAccessExpression(parent) && parent.argumentExpression === identifier)
+    ) {
+        return parent;
+    }
+
+    return identifier;
 }
 
 
-const findUntransformed = (sourceFile: ts.SourceFile, checker: ts.Checker, validatorLocalName: string | undefined, namespaceName: string | undefined, consumed: Set<ts.Node>): Survivor[] => {
+const findUntransformed = (sourceFile: ts.SourceFile, isValidator: (expression: ts.Expression) => boolean, consumed: Set<ts.Node>): Survivor[] => {
     let survivors: Survivor[] = [];
 
-    collectSurvivors(sourceFile, sourceFile, checker, validatorLocalName, namespaceName, consumed, survivors);
+    collectSurvivors(sourceFile, sourceFile, isValidator, consumed, survivors);
 
     return survivors;
 };
 
 
+// No text patterns: a module can reach `validator` under any name (a barrel's rename, a default
+// re-export, a namespace), so every module is resolved against the program
 export default {
-    patterns: ['.build', '.set', '.toJsonSchema'],
     transform: (ctx: TransformContext) => {
-        let found = imports.all(ctx.sourceFile, PACKAGE_NAME);
+        let { checker, program, sourceFile } = ctx,
+            declarations = references.exported(checker, program, PACKAGE_NAME, 'validator'),
+            targets = new Set(declarations.map(references.key));
 
-        if (found.length === 0) {
+        if (targets.size === 0) {
             return {};
         }
 
-        let aliases = new Map<string, string>();
+        let dependencies = new Set<string>(),
+            escapes: ts.Node[] = [],
+            self = sourceFile.fileName.toLowerCase(),
+            used = false;
 
-        for (let i = 0, n = found.length; i < n; i++) {
-            for (let [propertyName, localName] of found[i].specifiers) {
-                aliases.set(propertyName, localName);
+        for (let [identifier, origin] of references.origins(checker, program, sourceFile)) {
+            if (!references.holds(checker, program, origin, targets)) {
+                continue;
+            }
+
+            let site = siteOf(identifier);
+
+            used = true;
+
+            for (let file of [...origin.through, origin.declaration.path]) {
+                if (file.toLowerCase() !== self) {
+                    dependencies.add(file);
+                }
+            }
+
+            if (!isLowered(site)) {
+                escapes.push(site);
             }
         }
 
-        let detected = new Map<ts.CallExpression, DetectedCall>(),
-            namespaceName = namespaceLocalName(ctx.sourceFile),
-            registrations = validators.collect(ctx.sourceFile, ctx.checker);
+        if (!used) {
+            return {};
+        }
 
-        visit(detected, ctx.checker, ctx.sourceFile, aliases.get('validator'), namespaceName);
+        if (escapes.length > 0) {
+            let lines = escapes.map(node => {
+                    let position = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+
+                    return `  ${sourceFile.fileName}:${position.line + 1}:${position.character + 1}  ${(node.parent ?? node).getText(sourceFile).split('\n')[0]}`;
+                });
+
+            throw new Error(
+                `${PACKAGE_NAME}: validator is compiled away, so it can only be used as validator.build<T>(), ` +
+                `validator.toJsonSchema<T>() or validator.set(...) (or through a const alias); it cannot be used as a value:\n${lines.join('\n')}`
+            );
+        }
+
+        let detected = new Map<ts.CallExpression, DetectedCall>(),
+            isValidator = (expression: ts.Expression) => references.denotes(checker, program, expression, targets),
+            registrations = validators.collect(sourceFile, checker, program, declarations);
+
+        visit(detected, sourceFile, isValidator);
 
         // Self-assertion: every consumable call site reached through the package binding must have been
         // consumed above. A survivor means visit()/collect() silently missed it - fail the BUILD naming
@@ -692,7 +717,7 @@ export default {
             consumed.add(registrations.nodes[i].expression);
         }
 
-        let survivors = findUntransformed(ctx.sourceFile, ctx.checker, aliases.get('validator'), namespaceName, consumed);
+        let survivors = findUntransformed(sourceFile, isValidator, consumed);
 
         if (survivors.length > 0) {
             let survivor = survivors[0];
@@ -704,7 +729,11 @@ export default {
         }
 
         if (detected.size === 0 && registrations.nodes.length === 0) {
-            return {};
+            return { dependencies: [...dependencies] };
+        }
+
+        for (let file of registrations.dependencies) {
+            dependencies.add(file);
         }
 
         let brands = registrations.validators,
@@ -757,8 +786,18 @@ export default {
                     buildName = builds.get(buildKey);
 
                 if (buildName === undefined) {
-                    let generated = transform(call, ctx, brands),
-                        schemaName = hoisted.get(generated.schema);
+                    let generated: ReturnType<typeof transform>;
+
+                    try {
+                        generated = transform(call, ctx, brands);
+                    }
+                    catch (e) {
+                        let position = ctx.sourceFile.getLineAndCharacterOfPosition(call.node.getStart());
+
+                        throw new Error(`${(e as Error).message}\n  ${ctx.sourceFile.fileName}:${position.line + 1}:${position.character + 1}`, { cause: e });
+                    }
+
+                    let schemaName = hoisted.get(generated.schema);
 
                     if (schemaName === undefined) {
                         schemaName = uid('schema');
@@ -802,10 +841,10 @@ export default {
         });
 
         if (prepend.length > 0) {
-            return { imports: intents, prepend, replacements };
+            return { dependencies: [...dependencies], imports: intents, prepend, replacements };
         }
 
-        return { imports: intents, replacements };
+        return { dependencies: [...dependencies], imports: intents, replacements };
     }
 };
 export { findUntransformed };

@@ -1,4 +1,4 @@
-import { ast, imports } from '@esportsplus/typescript/compiler';
+import { ast, references } from '@esportsplus/typescript/compiler';
 import { ts } from '@esportsplus/typescript';
 import { PACKAGE_NAME } from '../constants';
 import { resolveBrandedType } from './type-analyzer';
@@ -12,7 +12,14 @@ interface BrandedValidator {
     brand: string;
 }
 
+type Registration = {
+    call: ts.CallExpression;
+    validator: BrandedValidator;
+};
+
 type Registrations = {
+    // Other modules whose registrations can reach this module's output
+    dependencies: Set<string>;
     nodes: ts.ExpressionStatement[];
     validators: Map<string, BrandedValidator>;
 };
@@ -28,7 +35,8 @@ const MESSAGE_PLACEHOLDER = String.fromCharCode(2) + '__DYNAMIC_MESSAGE__' + Str
 const VALUE_SENTINEL = String.fromCharCode(0);
 
 
-let cache = new WeakMap<ts.SourceFile, Map<string, BrandedValidator>>();
+// Every validator.set() registration in a program snapshot, by brand
+let registry = new WeakMap<ts.Program, Map<string, Registration[]>>();
 
 
 function collectParamRefs(node: ts.Node, paramSymbol: ts.Symbol | undefined, checker: ts.Checker, base: number, spans: [number, number][]): void {
@@ -69,67 +77,15 @@ function dynamicPush(expr: string, path: PathMode): string {
     return error.generate(MESSAGE_PLACEHOLDER, path).replace(emitString(MESSAGE_PLACEHOLDER), () => expr);
 }
 
-// Source files directly imported by `file` - the registration scope: a build site consumes
-// brands registered in its own file plus the files it imports (ts module resolution), so the
-// README's set-in-a-separate-validation.ts example works order-independently under any host.
-function importedSourceFiles(file: ts.SourceFile, checker: ts.Checker): ts.SourceFile[] {
-    let files: ts.SourceFile[] = [];
-
-    for (let i = 0, n = file.statements.length; i < n; i++) {
-        let statement = file.statements[i];
-
-        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
-            continue;
-        }
-
-        let symbol = checker.getSymbolAtLocation(statement.moduleSpecifier);
-
-        if (!symbol) {
-            continue;
-        }
-
-        let declarations = symbol.declarations;
-
-        if (!declarations) {
-            continue;
-        }
-
-        for (let j = 0, m = declarations.length; j < m; j++) {
-            let declaration = declarations[j].resolve();
-
-            if (declaration !== undefined && ts.isSourceFile(declaration)) {
-                files.push(declaration);
-            }
-        }
-    }
-
-    return files;
-}
-
-function localName(file: ts.SourceFile): string | undefined {
-    let found = imports.all(file, PACKAGE_NAME);
-
-    for (let i = 0, n = found.length; i < n; i++) {
-        let local = found[i].specifiers.get('validator');
-
-        if (local !== undefined) {
-            return local;
-        }
-    }
-
-    return undefined;
-}
-
-function parse(node: ts.CallExpression, checker: ts.Checker, name: string): BrandedValidator | null {
+function parse(node: ts.CallExpression, checker: ts.Checker, program: ts.Program, targets: Set<string>): BrandedValidator | null {
     let expr = node.expression;
 
     if (
         !ts.isPropertyAccessExpression(expr) ||
-        !ts.isIdentifier(expr.expression) ||
-        // Resolve the receiver to the package's own import binding: a shadowing local that
-        // merely shares the alias's text must not register a brand.
-        !imports.includes(checker, expr.expression, PACKAGE_NAME, name) ||
-        expr.name.text !== 'set'
+        expr.name.text !== 'set' ||
+        // The receiver must resolve to the package's own `validator` (through any alias): a
+        // shadowing local that merely shares its name must not register a brand
+        !references.denotes(checker, program, expr.expression, targets)
     ) {
         return null;
     }
@@ -235,62 +191,112 @@ function pushMarker(call: ts.CallExpression, paramSymbol: ts.Symbol | undefined,
     return ERROR_SENTINEL + 'D' + text + ERROR_SENTINEL;
 }
 
-function visit(node: ts.Node, checker: ts.Checker, name: string, registrations: Registrations): void {
-    if (ts.isCallExpression(node)) {
-        let result = parse(node, checker, name);
 
-        if (result) {
-            registrations.validators.set(result.brand, result);
 
-            if (ts.isExpressionStatement(node.parent)) {
-                registrations.nodes.push(node.parent);
+// Every registration in the program, found through the checker's references to Validator.set:
+// a brand registered anywhere applies wherever it is built, however its module is reached
+function registered(checker: ts.Checker, program: ts.Program, declarations: ts.NodeHandle[]): Map<string, Registration[]> {
+    let found = registry.get(program);
+
+    if (found) {
+        return found;
+    }
+
+    let result = new Map<string, Registration[]>(),
+        targets = new Set(declarations.map(references.key));
+
+    for (let i = 0, n = declarations.length; i < n; i++) {
+        let declaration = declarations[i].resolve() as ts.Node | undefined,
+            name = declaration && (declaration as { name?: ts.Node }).name,
+            type = name && checker.getTypeAtLocation(name),
+            member = type && checker.getPropertyOfType(type, 'set'),
+            memberDeclaration = member?.declarations?.[0]?.resolve() as ts.Node | undefined,
+            memberName = memberDeclaration && (memberDeclaration as { name?: ts.Node }).name;
+
+        if (!memberName) {
+            continue;
+        }
+
+        let groups = checker.getReferencedSymbolsForNode(memberName, memberName.getStart());
+
+        for (let j = 0, m = groups.length; j < m; j++) {
+            let handles = groups[j].references;
+
+            for (let k = 0, o = handles.length; k < o; k++) {
+                let node = handles[k].resolve() as ts.Node | undefined,
+                    access = node?.parent;
+
+                if (
+                    !access ||
+                    !ts.isPropertyAccessExpression(access) ||
+                    access.name !== node ||
+                    !access.parent ||
+                    !ts.isCallExpression(access.parent) ||
+                    access.parent.expression !== access
+                ) {
+                    continue;
+                }
+
+                let call = access.parent,
+                    validator = parse(call, checker, program, targets);
+
+                if (!validator) {
+                    continue;
+                }
+
+                let list = result.get(validator.brand);
+
+                if (!list) {
+                    list = [];
+                    result.set(validator.brand, list);
+                }
+
+                if (!list.some(entry => entry.call === call)) {
+                    list.push({ call, validator });
+                }
             }
         }
     }
 
-    node.forEachChild((child) => visit(child, checker, name, registrations));
+    registry.set(program, result);
+
+    return result;
 }
 
-// Imported files contribute brand validators only (never removable nodes - the plugin
-// only emits the current file). Cached per source file since a build site re-scans the
-// same registration file for every consuming file the host processes.
-function scanImported(file: ts.SourceFile, checker: ts.Checker): Map<string, BrandedValidator> {
-    let cached = cache.get(file);
+// A module's own registrations take precedence; any other brand resolves to the registration
+// elsewhere in the program. Two registrations of one brand elsewhere are ambiguous and fail the
+// build rather than apply whichever happened to be found last.
+const collect = (sourceFile: ts.SourceFile, checker: ts.Checker, program: ts.Program, declarations: ts.NodeHandle[]): Registrations => {
+    let registrations: Registrations = { dependencies: new Set(), nodes: [], validators: new Map() },
+        ambiguous: string[] = [];
 
-    if (cached) {
-        return cached;
-    }
+    for (let [brand, list] of registered(checker, program, declarations)) {
+        let local = list.filter(entry => entry.call.getSourceFile().fileName === sourceFile.fileName),
+            foreign = list.filter(entry => entry.call.getSourceFile().fileName !== sourceFile.fileName);
 
-    let name = localName(file),
-        validators = new Map<string, BrandedValidator>();
+        for (let i = 0, n = foreign.length; i < n; i++) {
+            registrations.dependencies.add(foreign[i].call.getSourceFile().fileName);
+        }
 
-    if (name !== undefined) {
-        visit(file, checker, name, { nodes: [], validators });
-    }
+        for (let i = 0, n = local.length; i < n; i++) {
+            if (ts.isExpressionStatement(local[i].call.parent)) {
+                registrations.nodes.push(local[i].call.parent as ts.ExpressionStatement);
+            }
+        }
 
-    cache.set(file, validators);
-
-    return validators;
-}
-
-
-const collect = (sourceFile: ts.SourceFile, checker: ts.Checker): Registrations => {
-    let name = localName(sourceFile),
-        registrations: Registrations = { nodes: [], validators: new Map() };
-
-    let imported = importedSourceFiles(sourceFile, checker);
-
-    for (let i = 0, n = imported.length; i < n; i++) {
-        let map = scanImported(imported[i], checker);
-
-        for (let [brand, validator] of map) {
-            registrations.validators.set(brand, validator);
+        if (local.length > 0) {
+            registrations.validators.set(brand, local[local.length - 1].validator);
+        }
+        else if (foreign.length === 1) {
+            registrations.validators.set(brand, foreign[0].validator);
+        }
+        else if (foreign.length > 1) {
+            ambiguous.push(`'${brand}' (${foreign.map(entry => entry.call.getSourceFile().fileName).join(', ')})`);
         }
     }
 
-    // Current file registered last so a same-brand registration here overrides an import.
-    if (name !== undefined) {
-        visit(sourceFile, checker, name, registrations);
+    if (ambiguous.length > 0) {
+        throw new Error(`${PACKAGE_NAME}: brands registered more than once with validator.set(): ${ambiguous.join('; ')}`);
     }
 
     return registrations;

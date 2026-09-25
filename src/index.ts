@@ -1,25 +1,16 @@
-import { PACKAGE_NAME } from './constants';
+import { PACKAGE_NAME, UNCOMPILED } from './constants';
 import type { Validator } from './types';
 
 
 const validator: Validator = {
     build: () => {
-        throw new Error(
-            `${PACKAGE_NAME}: validator.build<T>() must be transformed at compile-time. ` +
-            'Ensure the validation plugin is configured in your build tool.'
-        );
+        throw new Error(`${PACKAGE_NAME}: validator.build<T>() ${UNCOMPILED}`);
     },
     set: () => {
-        throw new Error(
-            `${PACKAGE_NAME}: validator.set() must be transformed at compile-time. ` +
-            'Ensure the validation plugin is configured in your build tool.'
-        );
+        throw new Error(`${PACKAGE_NAME}: validator.set() ${UNCOMPILED}`);
     },
     toJsonSchema: () => {
-        throw new Error(
-            `${PACKAGE_NAME}: validator.toJsonSchema<T>() must be transformed at compile-time. ` +
-            'Ensure the validation plugin is configured in your build tool.'
-        );
+        throw new Error(`${PACKAGE_NAME}: validator.toJsonSchema<T>() ${UNCOMPILED}`);
     }
 };
 

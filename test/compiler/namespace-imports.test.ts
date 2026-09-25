@@ -29,25 +29,9 @@ function visitValidatorBranch(node: ts.Node, state: { found: boolean }): void {
 
 describe('Namespace Imports', () => {
     describe('pattern matching', () => {
-        it('plugin has patterns for namespace-style access', () => {
-            let patterns = plugin.patterns || [];
-
-            expect(patterns).toContain('.build');
-        });
-
-        it('patterns match namespace validator call text', () => {
-            let code = 'import * as data from "@esportsplus/data";\ndata.validator.build<{name: string}>();',
-                matches = false,
-                patterns = plugin.patterns || [];
-
-            for (let i = 0, n = patterns.length; i < n; i++) {
-                if (code.indexOf(patterns[i]) !== -1) {
-                    matches = true;
-                    break;
-                }
-            }
-
-            expect(matches).toBe(true);
+        // A module can reach validator under any name, so no text prefilter may skip it
+        it('plugin has no text patterns', () => {
+            expect('patterns' in plugin).toBe(false);
         });
 
     });

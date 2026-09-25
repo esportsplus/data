@@ -21,18 +21,6 @@ function compile(code: string, fileName: string = FILE_NAME): ScratchResult {
     return languageService.scratch(fileName, code + '\nexport {};');
 }
 
-function mightNeedTransform(code: string): boolean {
-    let patterns = plugin.patterns || [];
-
-    for (let i = 0, n = patterns.length; i < n; i++) {
-        if (code.indexOf(patterns[i]) !== -1) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 function transformCode(code: string): string {
     return transformRaw(PACKAGE_IMPORT + code);
 }
@@ -137,4 +125,4 @@ function evaluateModule(code: string, injected: Record<string, unknown> = {}, ex
 }
 
 
-export { compile, createValidator, evaluateModule, mightNeedTransform, transformCode, transformProject, transformRaw, transformWith };
+export { compile, createValidator, evaluateModule, transformCode, transformProject, transformRaw, transformWith };

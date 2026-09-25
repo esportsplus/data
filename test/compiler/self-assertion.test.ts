@@ -1,13 +1,23 @@
 import { fileURLToPath } from 'node:url';
 import { ts } from '@esportsplus/typescript';
+import { references } from '@esportsplus/typescript/compiler';
 import { describe, expect, it } from 'vitest';
 
 import { findUntransformed } from '../../src/compiler/index';
 import { assertNoResidue, scanBuildOutput } from '../../src/compiler/residue';
 import { compile, transformRaw } from '../utils';
+import { PACKAGE_NAME } from '../../src/constants';
 
 
 let fixturesDir = fileURLToPath(new URL('./fixtures', import.meta.url));
+
+
+// Whether an expression resolves to the package's `validator`, through any binding
+function receiver(checker: ts.Checker, program: ts.Program): (expression: ts.Expression) => boolean {
+    let targets = new Set(references.exported(checker, program, PACKAGE_NAME, 'validator').map(references.key));
+
+    return (expression) => references.denotes(checker, program, expression, targets);
+}
 
 
 describe('Plugin self-assertion', () => {
@@ -34,12 +44,12 @@ describe('Plugin self-assertion', () => {
     });
 
     it('drives the scanner directly and reports file:line:col of the survivor', () => {
-        let { checker, sourceFile } = compile(
+        let { checker, program, sourceFile } = compile(
             "import { validator as v } from '@esportsplus/data';\n" +
             'const built = v.build();\n'
         );
 
-        let survivors = findUntransformed(sourceFile, checker, 'v', undefined, new Set());
+        let survivors = findUntransformed(sourceFile, receiver(checker, program), new Set());
 
         expect(survivors).toHaveLength(1);
         expect(survivors[0].method).toBe('build');
@@ -52,7 +62,7 @@ describe('Plugin self-assertion', () => {
                 "import { validator } from '@esportsplus/data';\n" +
                 'type User = { name: string };\n' +
                 'const validate = validator.build<User>();\n',
-            { checker, sourceFile } = compile(code),
+            { checker, program, sourceFile } = compile(code),
             consumed = new Set<ts.Node>();
 
         visitCalls(sourceFile, (node) => {
@@ -61,7 +71,7 @@ describe('Plugin self-assertion', () => {
             }
         });
 
-        expect(findUntransformed(sourceFile, checker, 'validator', undefined, consumed)).toHaveLength(0);
+        expect(findUntransformed(sourceFile, receiver(checker, program), consumed)).toHaveLength(0);
     });
 });
 

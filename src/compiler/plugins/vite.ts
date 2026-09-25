@@ -1,5 +1,5 @@
 import { plugin } from '@esportsplus/typescript/compiler';
-import { PACKAGE_NAME } from '~/constants';
+import { PACKAGE_NAME, UNCOMPILED } from '~/constants';
 
 import sbc from '../sbc';
 import data from '..';
@@ -7,5 +7,6 @@ import data from '..';
 
 export default plugin.vite({
     name: PACKAGE_NAME,
-    plugins: [data, sbc]
+    plugins: [data, sbc],
+    uncompiled: [UNCOMPILED]
 });

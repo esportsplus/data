@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createValidator, mightNeedTransform, transformCode } from '../utils';
+import { createValidator, transformCode } from '../utils';
 
 
 describe('Edge Cases', () => {
@@ -283,15 +283,14 @@ describe('Type Coercion', () => {
 
 describe('Transformer Detection', () => {
     it('detects validator.build calls', () => {
-        let code = `validator.build<User>()`;
+        let code = transformCode(`type User = { name: string };\nvalidator.build<User>();`);
 
-        expect(mightNeedTransform(code)).toBe(true);
+        expect(code).toContain('toJsonSchema:');
+        expect(code).not.toContain('validator.build');
     });
 
-    it('skips unrelated code', () => {
-        let code = `const x = 1 + 2;`;
-
-        expect(mightNeedTransform(code)).toBe(false);
+    it('leaves unrelated code untouched', () => {
+        expect(transformCode(`const x = 1 + 2;`)).toContain('const x = 1 + 2;');
     });
 });
 
