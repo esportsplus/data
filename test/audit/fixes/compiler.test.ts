@@ -295,9 +295,8 @@ describe('M9 — plugin detection resolves the real package binding', () => {
     });
 
     it('does not register a brand from a shadowing local that shares the imported alias', () => {
-        // `createValidator` evaluates only the emitted prelude (schemas + build POJO), so the
-        // typed shadow function below is never executed - it exists only to tempt the scanner.
-        let validate = createValidator(`
+        // The shadow never registers, so the brand is left without a registration at all
+        expect(() => createValidator(`
             type Brand<T, B extends string> = T & { __brand: B };
             type Slug = Brand<string, 'slug'>;
             type ErrorType = { push(message: string): void };
@@ -307,13 +306,7 @@ describe('M9 — plugin detection resolves the real package binding', () => {
                 validator.set((value: Slug, errors: ErrorType) => { errors.push('shadow brand'); });
             }
             validator.build<Post>();
-        `);
-
-        // No shadow brand was inlined, so a short slug still passes the structural check.
-        let result = validate({ slug: 'ab' });
-
-        expect(result.ok).toBe(true);
-        expect(result.data).toEqual({ slug: 'ab' });
+        `)).toThrow(/brand 'slug' .* has no validator\.set\(\) registration/);
     });
 
     it('still registers a brand from the real imported alias', () => {

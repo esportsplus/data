@@ -71,6 +71,8 @@ interface AnalyzedType {
 type TypeKey = number | ts.Type;
 
 
+const BRAND_KEY = '__brand';
+
 const MAX_ANALYSIS_DEPTH = 512;
 
 
@@ -198,15 +200,33 @@ function analyzePropertyType(
         }
 
         if (type.isIntersectionType()) {
-            let branded = resolveBrandedType(type, checker);
+            let branded = split(type, checker);
 
-            if (branded.brand) {
-                return {
-                    brand: branded.brand,
-                    name,
-                    optional,
-                    type: branded.base === 'number' ? 'number' : branded.base as PropertyType
-                };
+            // The brand member has no runtime value: the value validates as the type it brands,
+            // then against the brand's registration
+            if (branded.brand !== undefined && branded.rest.length > 0) {
+                let result: AnalyzedProperty;
+
+                if (branded.rest.length === 1) {
+                    result = analyzePropertyType(branded.rest[0], name, optional, checker, ctx);
+                }
+                else if (isAllObject(branded.rest)) {
+                    result = analyzeObjectShape(type, name, optional, checker, ctx);
+                    result.properties = result.properties?.filter(property => property.name !== BRAND_KEY);
+                }
+                else {
+                    let intersectionTypes: AnalyzedProperty[] = [];
+
+                    for (let i = 0, n = branded.rest.length; i < n; i++) {
+                        intersectionTypes.push(analyzePropertyType(branded.rest[i], name, false, checker, ctx));
+                    }
+
+                    result = { intersectionTypes, name, optional, type: 'intersection' };
+                }
+
+                result.brand = branded.brand;
+
+                return result;
             }
 
             let constituents = type.getTypes();
@@ -270,7 +290,7 @@ function analyzePropertyType(
         // runtime check must enforce; a placeholder we cannot render exactly is a hard error
         // rather than a silent widen to `string`.
         if (type.isTemplateLiteralType()) {
-            return { brand: 'template', name, optional, pattern: '^(?:' + templatePlaceholderList(type, checker) + ')$', type: 'string' };
+            return { name, optional, pattern: '^(?:' + templatePlaceholderList(type, checker) + ')$', type: 'string' };
         }
 
         // A bigint LITERAL keeps its exact value; an unbranded `bigint` is validated by typeof.
@@ -337,12 +357,20 @@ function analyzePropertyType(
 
             // Only treat as record if it has no explicit properties (pure index signature)
             if (info && checker.getPropertiesOfType(type).length === 0) {
-                return {
-                    indexType: analyzePropertyType(info.valueType, 'value', false, checker, ctx),
-                    name,
-                    optional,
-                    type: 'record'
-                };
+                let key = analyzePropertyType(info.keyType, 'key', false, checker, ctx),
+                    result: AnalyzedProperty = {
+                        indexType: analyzePropertyType(info.valueType, 'value', false, checker, ctx),
+                        name,
+                        optional,
+                        type: 'record'
+                    };
+
+                // Keys are strings already; only a brand or pattern leaves something to check
+                if (key.brand !== undefined || key.pattern !== undefined) {
+                    result.keyType = key;
+                }
+
+                return result;
             }
 
             return analyzeObjectShape(type, name, optional, checker, ctx);
@@ -416,16 +444,30 @@ function analyzeUnionType(
     checker: ts.Checker,
     ctx: AnalyzeContext
 ): AnalyzedProperty {
-    let literals: LiteralValue[] = [],
+    let branded = new Map<string, LiteralValue[]>(),
+        literals: LiteralValue[] = [],
         nullable = false,
         types: AnalyzedProperty[] = [],
         unionTypes = type.getTypes();
 
     for (let i = 0, n = unionTypes.length; i < n; i++) {
         let t = unionTypes[i],
-            flags = t.flags;
+            flags = t.flags,
+            literal = t.isIntersectionType() ? brandedLiteral(t, checker) : null;
 
-        if (flags & ts.TypeFlags.Null) {
+        // `Brand<boolean | 'a', B>` distributes into one branded member per literal; regroup them
+        // so the brand applies once to the whole literal set
+        if (literal) {
+            let group = branded.get(literal.brand);
+
+            if (!group) {
+                group = [];
+                branded.set(literal.brand, group);
+            }
+
+            group.push(literal.value);
+        }
+        else if (flags & ts.TypeFlags.Null) {
             nullable = true;
         }
         else if (flags & ts.TypeFlags.Undefined) {
@@ -444,6 +486,14 @@ function analyzeUnionType(
         else {
             types.push( analyzePropertyType(t, name, false, checker, ctx) );
         }
+    }
+
+    for (let [brand, values] of branded) {
+        types.push(
+            values.length === 2 && values[0].type === 'boolean' && values[1].type === 'boolean'
+                ? { brand, name, optional: false, type: 'boolean' }
+                : { brand, literals: values, name, optional: false, type: 'literal' }
+        );
     }
 
     // Pure literal union
@@ -546,6 +596,47 @@ function templatePlaceholderPattern(type: ts.Type, checker: ts.Checker): string 
     }
 
     throw new Error(`TypeAnalyzer: unsupported template literal placeholder '${checker.typeToString(type)}'`);
+}
+
+// The `{ __brand: B }` member of `Brand<T, B>`: a lone string-literal `__brand` property
+function brandOf(type: ts.Type, checker: ts.Checker): string | undefined {
+    if ((type.flags & ts.TypeFlags.Object) === 0) {
+        return undefined;
+    }
+
+    let property = checker.getPropertyOfType(type, BRAND_KEY);
+
+    if (!property || checker.getPropertiesOfType(type).length !== 1) {
+        return undefined;
+    }
+
+    let value = checker.getTypeOfSymbol(property);
+
+    return value !== undefined && value.isStringLiteralType() ? value.value : undefined;
+}
+
+function brandedLiteral(type: ts.IntersectionType, checker: ts.Checker): { brand: string; value: LiteralValue } | null {
+    let branded = split(type, checker);
+
+    if (branded.brand === undefined || branded.rest.length !== 1) {
+        return null;
+    }
+
+    let rest = branded.rest[0];
+
+    if (rest.isBooleanLiteralType()) {
+        return { brand: branded.brand, value: { type: 'boolean', value: rest.value } };
+    }
+
+    if (rest.isNumberLiteralType()) {
+        return { brand: branded.brand, value: { type: 'number', value: rest.value } };
+    }
+
+    if (rest.isStringLiteralType()) {
+        return { brand: branded.brand, value: { type: 'string', value: rest.value } };
+    }
+
+    return null;
 }
 
 function defName(type: ts.Type): string {
@@ -659,6 +750,28 @@ function isReadonly(node: ts.Node): boolean {
     return false;
 }
 
+function split(type: ts.IntersectionType, checker: ts.Checker): { brand: string | undefined; rest: ts.Type[] } {
+    let brand: string | undefined,
+        constituents = type.getTypes(),
+        rest: ts.Type[] = [];
+
+    for (let i = 0, n = constituents.length; i < n; i++) {
+        let found = brandOf(constituents[i], checker);
+
+        if (found === undefined) {
+            rest.push(constituents[i]);
+        }
+        else if (brand !== undefined && brand !== found) {
+            throw new Error(`TypeAnalyzer: '${checker.typeToString(type)}' carries more than one brand ('${brand}', '${found}')`);
+        }
+        else {
+            brand = found;
+        }
+    }
+
+    return { brand, rest };
+}
+
 function stringIndexInfo(type: ts.Type, checker: ts.Checker): ts.IndexInfo | undefined {
     let infos = checker.getIndexInfosOfType(type);
 
@@ -666,7 +779,9 @@ function stringIndexInfo(type: ts.Type, checker: ts.Checker): ts.IndexInfo | und
     // intersection whose flags are Intersection, not String, so match on the resolved
     // base type instead of the raw flag or the whole record's entries are dropped.
     for (let i = 0, n = infos.length; i < n; i++) {
-        if (resolveBrandedType(infos[i].keyType, checker).base === 'string') {
+        let key = infos[i].keyType;
+
+        if (resolveBrandedType(key, checker).base === 'string' || key.flags & ts.TypeFlags.TemplateLiteral) {
             return infos[i];
         }
     }
@@ -720,51 +835,49 @@ const analyzeType = (typeNode: ts.TypeNode, checker: ts.Checker): AnalyzedType =
 };
 
 const resolveBrandedType = (type: ts.Type, checker: ts.Checker): BrandedTypeInfo => {
-    let base: BaseType = 'unknown',
-        brand: string | undefined;
+    if (type.isUnionType()) {
+        // `Brand<boolean, B>` is `(false & ...) | (true & ...)`: branded only when every member
+        // carries the same brand
+        let base: BaseType | undefined,
+            brand: string | undefined,
+            members = type.getTypes();
+
+        for (let i = 0, n = members.length; i < n; i++) {
+            let member = resolveBrandedType(members[i], checker);
+
+            if (member.brand === undefined || (brand !== undefined && member.brand !== brand)) {
+                return { base: 'unknown' };
+            }
+
+            base = base === undefined || base === member.base ? member.base : 'unknown';
+            brand = member.brand;
+        }
+
+        return { base: base ?? 'unknown', brand };
+    }
 
     if (!type.isIntersectionType()) {
-        if (type.flags & ts.TypeFlags.Boolean || type.flags & ts.TypeFlags.BooleanLiteral) {
-            base = 'boolean';
-        }
-        else if (type.flags & ts.TypeFlags.Number || type.flags & ts.TypeFlags.NumberLiteral) {
-            base = 'number';
-        }
-        else if (type.flags & ts.TypeFlags.String || type.flags & ts.TypeFlags.StringLiteral) {
-            base = 'string';
+        if (type.flags & (ts.TypeFlags.Boolean | ts.TypeFlags.BooleanLiteral)) {
+            return { base: 'boolean' };
         }
 
-        return { base };
+        if (type.flags & (ts.TypeFlags.Number | ts.TypeFlags.NumberLiteral)) {
+            return { base: 'number' };
+        }
+
+        if (type.flags & (ts.TypeFlags.String | ts.TypeFlags.StringLiteral)) {
+            return { base: 'string' };
+        }
+
+        return { base: 'unknown' };
     }
 
-    let constituents = type.getTypes();
+    let branded = split(type, checker);
 
-    for (let i = 0, n = constituents.length; i < n; i++) {
-        let constituent = constituents[i];
-
-        if (constituent.flags & ts.TypeFlags.Boolean) {
-            base = 'boolean';
-        }
-        else if (constituent.flags & ts.TypeFlags.Number) {
-            base = 'number';
-        }
-        else if (constituent.flags & ts.TypeFlags.String) {
-            base = 'string';
-        }
-        else if (constituent.flags & ts.TypeFlags.Object) {
-            let brandProp = checker.getPropertyOfType(constituent, '__brand');
-
-            if (brandProp) {
-                let brandType = checker.getTypeOfSymbol(brandProp);
-
-                if (brandType !== undefined && brandType.isStringLiteralType()) {
-                    brand = brandType.value;
-                }
-            }
-        }
-    }
-
-    return { base, brand };
+    return {
+        base: branded.rest.length === 1 ? resolveBrandedType(branded.rest[0], checker).base : 'unknown',
+        brand: branded.brand
+    };
 };
 
 

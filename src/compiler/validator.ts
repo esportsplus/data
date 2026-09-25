@@ -1,5 +1,5 @@
 import { code, uid } from '@esportsplus/typescript/compiler';
-import { IDENTIFIER } from '../constants';
+import { IDENTIFIER, PACKAGE_NAME } from '../constants';
 import type { AnalyzedProperty, AnalyzedType } from './type-analyzer';
 import { GeneratorContext, PathMode } from './types';
 import error, { ERRORS_VARIABLE, emitString, resolvePath } from './error';
@@ -38,6 +38,10 @@ const CONFIG_VARIABLE = '_config';
 const INHERITED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype));
 
 const INPUT_VARIABLE = '_input';
+
+// Brands the generated code checks itself (integer: whole number; float: any finite number);
+// every other brand is only as true as its validator.set() registration
+const INTRINSIC_BRANDS = new Set(['float', 'integer']);
 
 // A cyclic INPUT value (an object that points back at itself) makes the type graph finite but
 // the value graph infinite, so the recursive functions carry a depth counter and push a named
@@ -453,13 +457,7 @@ function generateNumberValidation(
     pathMode: PathMode,
     context: GeneratorContext
 ): string {
-    let n = uid('n'),
-        parts = '',
-        validator = prop.brand ? context.brandValidators.get(prop.brand) : undefined;
-
-    if (validator) {
-        parts = inlineBrand(validator, pathMode, target, context);
-    }
+    let n = uid('n');
 
     // Unary + throws a TypeError on bigint and symbol, so coerce only once the value is
     // known numeric (number or decimal/scientific string); otherwise n is NaN and the
@@ -476,7 +474,6 @@ function generateNumberValidation(
             }
             else {
                 ${target} = ${n};
-                ${parts}
             }
             ${prop.nullable ? `}` : ''}
         }
@@ -587,6 +584,10 @@ function generateRecordValidation(
 
             for (let ${key} of Object.keys(${source})) {
                 ${out} = ${source}[${key}];
+
+                ${prop.keyType
+                    ? generateTypeValidation(prop.keyType, key, key, { segments: [...pathMode.segments, { expr: key, kind: 'record' }] }, context, recursion)
+                    : ''}
 
                 ${body}
 
@@ -724,13 +725,6 @@ function generateStringValidation(
         `;
     }
 
-    // Template-literal brand carries no runtime brand check - validate as plain string
-    if (prop.brand && prop.brand !== 'template' && context.brandValidators.has(prop.brand)) {
-        let validator = context.brandValidators.get(prop.brand)!;
-
-        parts += inlineBrand(validator, pathMode, target, context);
-    }
-
     return code`
         {
             ${prop.nullable ? `if (${source} === null) { ${target} = null; } else {` : ''}
@@ -832,7 +826,41 @@ function generateTupleValidation(
 }
 
 function generateTypeValidation(prop: AnalyzedProperty, source: string, target: string, pathMode: PathMode, context: GeneratorContext, recursion: RecursionState | null): string {
-    return TYPE_VALIDATORS[prop.type]?.(prop, source, target, pathMode, context, recursion) ?? '';
+    if (prop.type === 'intersection') {
+        throw new Error(
+            `${PACKAGE_NAME}: validator.build<T>() cannot validate '${prop.name}': an intersection of a primitive ` +
+            `with an object type has no runtime value to check; use Brand<T, B> and register it with validator.set()`
+        );
+    }
+
+    let generated = TYPE_VALIDATORS[prop.type]?.(prop, source, target, pathMode, context, recursion) ?? '';
+
+    if (prop.brand === undefined || INTRINSIC_BRANDS.has(prop.brand)) {
+        return generated;
+    }
+
+    let validator = context.brandValidators.get(prop.brand);
+
+    if (validator === undefined) {
+        throw new Error(
+            `${PACKAGE_NAME}: brand '${prop.brand}' (at '${prop.name}') has no validator.set() registration, ` +
+            `so nothing would prove a value is '${prop.brand}'; register one with validator.set((value: <branded type>, errors) => { ... })`
+        );
+    }
+
+    let count = uid('b');
+
+    return code`
+        {
+            let ${count} = ${ERRORS_VARIABLE}?.length ?? 0;
+
+            ${generated || `${target} = ${source};`}
+
+            if ((${ERRORS_VARIABLE}?.length ?? 0) === ${count}${prop.nullable ? ` && ${target} !== null` : ''}) {
+                ${inlineBrand(validator, pathMode, target, context)}
+            }
+        }
+    `;
 }
 
 function generateUnionValidation(prop: AnalyzedProperty, source: string, target: string, pathMode: PathMode, context: GeneratorContext, recursion: RecursionState | null): string {
@@ -844,16 +872,7 @@ function generateUnionValidation(prop: AnalyzedProperty, source: string, target:
     }
 
     let branchParts: string[] = [],
-        literalHits: string[] = [],
         ok = uid('ok');
-
-    for (let i = 0, n = literals.length; i < n; i++) {
-        let lit = literals[i];
-
-        literalHits.push(
-            `${source} === ${lit.type === 'string' ? emitString(String(lit.value)) : String(lit.value)}`
-        );
-    }
 
     for (let i = 0, n = unionTypes.length; i < n; i++) {
         let branch = unionTypes[i],
@@ -891,6 +910,10 @@ function generateUnionValidation(prop: AnalyzedProperty, source: string, target:
                 guard = `typeof ${source} === 'function'`;
                 break;
 
+            case 'literal':
+                guard = `(${literalMatch(source, branch.literals || [])})`;
+                break;
+
             case 'map':
                 guard = `${source} instanceof Map`;
                 body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
@@ -898,10 +921,6 @@ function generateUnionValidation(prop: AnalyzedProperty, source: string, target:
 
             case 'number':
                 guard = `typeof ${source} === 'number'`;
-
-                if (branch.brand) {
-                    body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
-                }
                 break;
 
             case 'object':
@@ -918,13 +937,17 @@ function generateUnionValidation(prop: AnalyzedProperty, source: string, target:
             case 'string':
                 guard = `typeof ${source} === 'string'`;
 
-                if (branch.brand || branch.pattern !== undefined) {
+                if (branch.pattern !== undefined) {
                     body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
                 }
                 break;
 
             default:
                 continue;
+        }
+
+        if (body === '' && branch.brand !== undefined) {
+            body = generateTypeValidation({ ...branch, nullable: false }, source, tmp, pathMode, context, recursion);
         }
 
         if (body) {
@@ -955,9 +978,9 @@ function generateUnionValidation(prop: AnalyzedProperty, source: string, target:
         }
     }
 
-    if (literalHits.length > 0) {
+    if (literals.length > 0) {
         branchParts.unshift(code`
-            if (!${ok} && (${literalHits.join(' || ')})) {
+            if (!${ok} && (${literalMatch(source, literals)})) {
                 ${ok} = true;
                 ${target} = ${source};
             }
@@ -1073,21 +1096,26 @@ function generateRootParts(
     return parts.join('\n');
 }
 
-// A single node's brand resolves to an async validator: matches generateNumberValidation
-// (any brand) and generateStringValidation (brand set, not 'template') exactly, so the pre-walk
-// flags precisely the nodes those generators would inline an `await`-bearing body for.
+function literalMatch(source: string, literals: LiteralValue[]): string {
+    let hits: string[] = [];
+
+    for (let i = 0, n = literals.length; i < n; i++) {
+        let lit = literals[i];
+
+        hits.push(`${source} === ${lit.type === 'string' ? emitString(String(lit.value)) : String(lit.value)}`);
+    }
+
+    return hits.join(' || ');
+}
+
+// Mirrors generateTypeValidation: every non-intrinsic brand inlines its registration, so the
+// pre-walk flags precisely the nodes that would inline an `await`-bearing body
 function nodeBrandAsync(prop: AnalyzedProperty, context: GeneratorContext): boolean {
-    if (prop.brand === undefined) {
+    if (prop.brand === undefined || INTRINSIC_BRANDS.has(prop.brand)) {
         return false;
     }
 
-    if (prop.type === 'number' || (prop.type === 'string' && prop.brand !== 'template')) {
-        let validator = context.brandValidators.get(prop.brand);
-
-        return validator !== undefined && validator.async;
-    }
-
-    return false;
+    return context.brandValidators.get(prop.brand)?.async === true;
 }
 
 // True when `prop` or any structural descendant carries an async brand. A ref back-edge stops

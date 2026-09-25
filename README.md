@@ -838,6 +838,14 @@ validator.set((value: Email, errors: ErrorType) => {
 const v = validator.build<User>();
 ```
 
+A brand exists only in the type, so input can never carry one: the registration is what proves it. Every
+branded value is first validated as the type it brands (a branded object's fields, a branded boolean, a
+branded literal union, a branded record key), then passed to its registration. `validator.build<T>()`
+fails the build when `T` reaches a brand with no registration, since the result would claim a brand nothing
+checked. `integer` and `float` are the exceptions: the compiler checks those itself. For the same reason, a
+primitive intersected with a plain object type (`string & { tag: number }`) is a build error; use
+`Brand<T, B>` and register it. `validator.toJsonSchema<T>()` only describes shape and accepts any brand.
+
 ### Custom Error Messages
 
 Override default error messages:

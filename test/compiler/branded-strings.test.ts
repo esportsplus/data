@@ -102,26 +102,13 @@ describe('Branded Strings (Template Literal Types)', () => {
     });
 
     describe('branded string without custom validator', () => {
-        let validate = createValidator(`
-            type Brand<T, B extends string> = T & { __brand: B };
-            type Slug = Brand<string, 'slug'>;
-            type Post = { slug: Slug; title: string };
-            validator.build<Post>();
-        `);
-
-        it('accepts valid string', () => {
-            let result = validate({ slug: 'my-post', title: 'Hello' });
-
-            expect(result.ok).toBe(true);
-            expect(result.data).toEqual({ slug: 'my-post', title: 'Hello' });
-        });
-
-        it('rejects non-string', () => {
-            let result = validate({ slug: 123, title: 'Hello' });
-
-            expect(result.ok).toBe(false);
-            expect(result.errors![0].path).toBe('slug');
-            expect(result.errors![0].message).toBe('must be a string');
+        it('fails the build: nothing would prove the brand', () => {
+            expect(() => transformCode(`
+                type Brand<T, B extends string> = T & { __brand: B };
+                type Slug = Brand<string, 'slug'>;
+                type Post = { slug: Slug; title: string };
+                validator.build<Post>();
+            `)).toThrow(/brand 'slug' \(at 'slug'\) has no validator\.set\(\) registration/);
         });
     });
 
@@ -285,6 +272,102 @@ describe('Brand registration and consumption', () => {
 
             expect(bad.ok).toBe(false);
             expect(bad.errors![0].message).toBe('invalid email');
+        });
+    });
+
+    describe('brands on every base type', () => {
+        let prelude = `
+            type Brand<T, B extends string> = T & { __brand: B };
+            type ErrorType = { push(message: string): void };
+        `;
+
+        it('validates a branded object structurally, then against its registration', () => {
+            let validate = build(`${prelude}
+                type Money = Brand<{ amount: number; currency: string }, 'money'>;
+                type Order = { price: Money };
+                validator.set((value: Money, errors: ErrorType) => { if (value.amount < 0) { errors.push('negative'); } });
+                validator.build<Order>();
+            `) as (input: unknown) => ValidationResult;
+
+            expect(validate({ price: { amount: 1, currency: 'usd' } })).toEqual({ data: { price: { amount: 1, currency: 'usd' } }, errors: undefined, ok: true });
+            expect(validate({ price: 'garbage' }).errors).toEqual([{ message: 'must be an object', path: 'price' }]);
+            expect(validate({ price: { amount: 1 } }).ok).toBe(false);
+            expect(validate({ price: { amount: -1, currency: 'usd' } }).errors).toEqual([{ message: 'negative', path: 'price' }]);
+        });
+
+        it('accepts both values of a branded boolean and applies its registration', () => {
+            let validate = build(`${prelude}
+                type Flag = Brand<boolean, 'flag'>;
+                type Settings = { on: Flag };
+                validator.set((value: Flag, errors: ErrorType) => { if (value !== true) { errors.push('must be set'); } });
+                validator.build<Settings>();
+            `) as (input: unknown) => ValidationResult;
+
+            expect(validate({ on: true }).ok).toBe(true);
+            expect(validate({ on: false }).errors).toEqual([{ message: 'must be set', path: 'on' }]);
+            expect(validate({ on: 'x' }).errors).toEqual([{ message: 'must be true or false', path: 'on' }]);
+        });
+
+        it('checks a branded literal union against its literals, then its registration', () => {
+            let validate = build(`${prelude}
+                type Level = Brand<'high' | 'low', 'level'>;
+                type Alarm = { level: Level };
+                validator.set((value: Level, errors: ErrorType) => { if (value === 'high') { errors.push('too loud'); } });
+                validator.build<Alarm>();
+            `) as (input: unknown) => ValidationResult;
+
+            expect(validate({ level: 'low' }).ok).toBe(true);
+            expect(validate({ level: 'high' }).errors).toEqual([{ message: 'too loud', path: 'level' }]);
+            expect(validate({ level: 'medium' }).errors).toEqual([{ message: 'invalid literal type', path: 'level' }]);
+        });
+
+        it('skips the registration for null on a nullable brand', () => {
+            let validate = build(`${prelude}
+                type Slug = Brand<string, 'slug'>;
+                type Post = { slug: Slug | null };
+                validator.set((value: Slug, errors: ErrorType) => { if (value.length < 3) { errors.push('slug too short'); } });
+                validator.build<Post>();
+            `) as (input: unknown) => ValidationResult;
+
+            expect(validate({ slug: null }).ok).toBe(true);
+            expect(validate({ slug: 'ab' }).errors).toEqual([{ message: 'slug too short', path: 'slug' }]);
+        });
+
+        it('applies a brand on a union member', () => {
+            let validate = build(`${prelude}
+                type Flag = Brand<boolean, 'flag'>;
+                type Settings = { on: Flag | number };
+                validator.set((value: Flag, errors: ErrorType) => { if (value !== true) { errors.push('must be set'); } });
+                validator.build<Settings>();
+            `) as (input: unknown) => ValidationResult;
+
+            expect(validate({ on: true }).ok).toBe(true);
+            expect(validate({ on: 3 }).ok).toBe(true);
+            expect(validate({ on: false }).ok).toBe(false);
+        });
+
+        it('fails the build for an unregistered brand nested anywhere', () => {
+            expect(() => transformCode(`${prelude}
+                type Money = Brand<{ amount: number }, 'money'>;
+                type Cart = { items: { price: Money }[] };
+                validator.build<Cart>();
+            `)).toThrow(/brand 'money' .* has no validator\.set\(\) registration[\s\S]*:\d+:\d+/);
+        });
+
+        it('fails the build for a primitive intersected with an object, which no value can prove', () => {
+            expect(() => transformCode(`
+                type Tagged = string & { tag: number };
+                type Data = { t: Tagged };
+                validator.build<Data>();
+            `)).toThrow(/cannot validate 't'/);
+        });
+
+        it('still emits a JSON Schema for an unregistered brand', () => {
+            expect(() => transformCode(`${prelude}
+                type Slug = Brand<string, 'slug'>;
+                type Post = { slug: Slug };
+                validator.toJsonSchema<Post>();
+            `)).not.toThrow();
         });
     });
 

@@ -323,11 +323,13 @@ describe('Record key type is resolved through brands', () => {
         expect(result.data.r).toEqual({ a: 1, b: 2 });
     });
 
-    it('copies entries when the key is a branded string', () => {
+    it('copies entries when the key is a branded string, checking each key against the brand', () => {
         let validate = createValidator(`
             type Brand<T, B extends string> = T & { __brand: B };
             type Key = Brand<string, 'Key'>;
+            type ErrorType = { push(message: string): void };
             type Data = { r: Record<Key, number> };
+            validator.set((value: Key, errors: ErrorType) => { if (value.length !== 1) { errors.push('bad key'); } });
             validator.build<Data>();
         `);
 
@@ -335,6 +337,21 @@ describe('Record key type is resolved through brands', () => {
 
         expect(result.ok).toBe(true);
         expect(result.data.r).toEqual({ a: 1, b: 2 });
+
+        let bad = validate({ r: { a: 1, long: 2 } });
+
+        expect(bad.ok).toBe(false);
+        expect(bad.errors).toEqual([{ message: 'bad key', path: 'r.long' }]);
+    });
+
+    it('checks a template literal record key against its pattern', () => {
+        let validate = createValidator(`
+            type Data = { r: Record<\`id_\${number}\`, string> };
+            validator.build<Data>();
+        `);
+
+        expect(validate({ r: { id_1: 'a', id_22: 'b' } }).ok).toBe(true);
+        expect(validate({ r: { id_1: 'a', other: 'b' } }).ok).toBe(false);
     });
 });
 
