@@ -5,7 +5,7 @@
     },
     "description": "Compile-time data validation utility",
     "devDependencies": {
-        "@esportsplus/typescript": "^0.36.1",
+        "@esportsplus/typescript": "^0.37.0",
         "@types/node": "^26.4.1",
         "msgpackr": "^2.1.0",
         "protobufjs": "^8.8.0",
